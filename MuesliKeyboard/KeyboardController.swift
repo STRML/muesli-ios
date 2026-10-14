@@ -17,7 +17,13 @@ final class KeyboardController {
     var currentFullAccess: (() -> Bool)?
     private var latestResultID: UUID?
     private var preparedRequest: DictationRequest?
-    private var activeRequestID: UUID?
+    private var activeRequestID: UUID? {
+        didSet { if activeRequestID == nil { activeRewrite = nil } }
+    }
+    /// The text a voice edit is working on, while its spoken instruction is being recorded and rewritten.
+    private(set) var activeRewrite: RewriteContext?
+    /// What the last rewrite replaced, so the user can take it back. Retired by typing or a new dictation.
+    private(set) var lastRewrite: RewriteUndo?
     private var recoveryRequestID: UUID?
     private var latestHandoffState: KeyboardHandoffState?
     private var latestRuntimeStatus: KeyboardRuntimeStatus?
@@ -160,6 +166,8 @@ final class KeyboardController {
     var canInsertLatest: Bool {
         hasLatestDictation && activeRequestID == nil
     }
+
+    var canUndoRewrite: Bool { lastRewrite != nil }
 
     /// The app has a Custom LLM, so the Fix key can work.
     var canRewrite: Bool {
@@ -346,7 +354,9 @@ final class KeyboardController {
         preparedRequest = nil
         recoveryRequestID = nil
         launchURL = makeLaunchURL(for: request)
+        lastRewrite = nil
         activeRequestID = request.id
+        activeRewrite = request.rewrite
         liveTranscript = ""
         insertedRequestIDs.remove(request.id)
         cancelledRequestIDs.remove(request.id)
@@ -411,14 +421,17 @@ final class KeyboardController {
     }
 
     func insertSpace() {
+        lastRewrite = nil
         insertText(" ")
     }
 
     func insertTextKey(_ text: String) {
+        lastRewrite = nil
         insertText(text)
     }
 
     func insertReturn() {
+        lastRewrite = nil
         insertText("\n")
     }
 
@@ -438,6 +451,7 @@ final class KeyboardController {
     }
 
     func deleteBackward() {
+        lastRewrite = nil
         textDeleter?(1)
         lastInsertedCharacterCount = 0
         statusText = "Deleted"
@@ -1271,12 +1285,29 @@ final class KeyboardController {
         return components.url
     }
 
+    /// Puts back the text the last rewrite replaced, if the field still ends with the rewrite.
+    func undoLastRewrite() {
+        guard let undo = lastRewrite else { return }
+        lastRewrite = nil
+        let current = textContextProvider?() ?? KeyboardTextContext()
+        let rewritten = RewriteContext(target: .textBeforeCursor, original: undo.rewritten)
+        guard case .replaceBeforeCursor(let deleteCount, let text) =
+                RewritePlanner.plan(context: rewritten, current: current, rewritten: undo.original) else {
+            statusText = "Text changed. Can't undo"
+            return
+        }
+        textDeleter?(deleteCount)
+        insertText(text)
+        statusText = "Undone"
+    }
+
     static let staleRewriteMessage = "Text changed. Nothing replaced"
 
     /// Types the result into the field. A rewrite replaces the text it was made from, and only if the
     /// field still holds that text. Returns false when a rewrite was refused.
     private func deliver(_ result: DictationResult) -> Bool {
         guard let rewrite = result.rewrite else {
+            lastRewrite = nil
             insertText(result.text)
             return true
         }
@@ -1284,10 +1315,12 @@ final class KeyboardController {
         switch RewritePlanner.plan(context: rewrite, current: current, rewritten: result.text) {
         case .replaceSelection(let text):
             insertText(text)
+            lastRewrite = RewriteUndo(original: rewrite.original, rewritten: text)
             return true
         case .replaceBeforeCursor(let deleteCount, let text):
             textDeleter?(deleteCount)
             insertText(text)
+            lastRewrite = RewriteUndo(original: rewrite.original, rewritten: text)
             return true
         case .stale:
             KeyboardDiagnosticsLog.record("rewrite.skipped", ["reason": "fieldChanged"])
@@ -1310,4 +1343,10 @@ enum KeyboardPrimaryButtonRole {
     case transcribing
     case inserted
     case record
+}
+
+/// What a voice rewrite replaced: enough to put the original back.
+struct RewriteUndo: Equatable {
+    let original: String
+    let rewritten: String
 }

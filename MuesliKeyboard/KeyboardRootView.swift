@@ -1,17 +1,13 @@
 import SwiftUI
 
 struct KeyboardRootView: View {
-    static let preferredHeight: CGFloat = 245
+    /// Room for the control row, a status line and two rows of keys.
+    static let preferredHeight: CGFloat = 272
 
-    private static let recorderBodyHeight: CGFloat = 84
-    private static let fixButtonWidth: CGFloat = 104
-    private static let cancelChipSize: CGFloat = 60
-    private static let activeMicHeight: CGFloat = 84
-    /// The ready body plus the header row and its spacing, which the listening state gives back.
-    private static let activeRecorderHeight: CGFloat = 123
-    private static let activeStatusWidth: CGFloat = 100
-    private static let activeControlButtonWidth: CGFloat = 120
-    private static let activeWaveformBarCount = 34
+    /// Three slots that never move: a side button, the primary pill, a side button. Only their content changes.
+    private static let controlHeight: CGFloat = 64
+    private static let sideButtonWidth: CGFloat = 64
+    private static let statusBodyHeight: CGFloat = 56
 
     @Bindable var controller: KeyboardController
 
@@ -46,82 +42,146 @@ struct KeyboardRootView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
     }
 
+    private var isActive: Bool { controller.showsActiveWaveform }
+
     private var keyboardDeck: some View {
-        VStack(spacing: 7) {
-            Capsule()
-                .fill(MuesliTheme.textSecondary.opacity(0.7))
-                .frame(width: 40, height: 4)
+        VStack(spacing: 8) {
+            grabberRow
 
-            // While listening nothing in the header is usable (the model cannot change mid-recording),
-            // so its space goes to the controls.
-            if !controller.showsActiveWaveform {
-                header
-            }
-
-            if controller.showsActiveWaveform {
-                activeRecorder
-                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
+            if controller.hasPendingSetupVerification, !isActive {
+                verifyRow
             } else {
-                readyRecorder
-                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                controlRow
+                statusBody
             }
         }
         .padding(.horizontal, 10)
         .padding(.top, 6)
         .padding(.bottom, 8)
         .muesliKeyboardDeckSurface()
-        .animation(.snappy(duration: 0.22), value: controller.showsActiveWaveform)
+        .animation(.snappy(duration: 0.22), value: isActive)
         .animation(.snappy(duration: 0.22), value: controller.primaryButtonRole)
     }
 
-    private var header: some View {
-        ViewThatFits(in: .horizontal) {
-            headerContent(showsWordmark: true)
-            headerContent(showsWordmark: false)
+    private var grabberRow: some View {
+        ZStack {
+            Capsule()
+                .fill(MuesliTheme.textSecondary.opacity(0.7))
+                .frame(width: 40, height: 4)
+            HStack {
+                Spacer()
+                Button {
+                    controller.dismissKeyboard()
+                } label: {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(MuesliTheme.textSecondary)
+                        .frame(width: 44, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Dismiss keyboard")
+            }
+        }
+        .frame(height: 22)
+    }
+
+    // MARK: Control row
+
+    private var controlRow: some View {
+        HStack(spacing: 10) {
+            Group {
+                if isActive { cancelButton } else { modelButton }
+            }
+            .frame(width: Self.sideButtonWidth, height: Self.controlHeight)
+
+            primaryPill
+
+            Group {
+                if isActive { fixIndicator } else { fixButton }
+            }
+            .frame(width: Self.sideButtonWidth, height: Self.controlHeight)
+        }
+        .frame(height: Self.controlHeight)
+    }
+
+    private func sideLabel(_ icon: String, _ title: String, tint: Color) -> some View {
+        VStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 22, weight: .semibold))
+            Text(title)
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+        }
+        .foregroundStyle(tint)
+        .frame(width: Self.sideButtonWidth, height: Self.controlHeight)
+        .keyboardGlassSurface()
+    }
+
+    private var modelButton: some View {
+        transcriptionModelMenu {
+            sideLabel("slider.horizontal.3", "Model", tint: MuesliTheme.textPrimary)
         }
     }
 
-    private func headerContent(showsWordmark: Bool) -> some View {
-        HStack(spacing: showsWordmark ? MuesliTheme.spacing8 : MuesliTheme.spacing4) {
-            Image("MuesliAppIcon")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 28, height: 28)
-                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-                .accessibilityHidden(true)
-
-            if showsWordmark {
-                Text("muesli")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(MuesliTheme.textPrimary)
-                    .fixedSize()
-            }
-
-            Spacer()
-
-            transcriptionModelMenu
-
-            KeyboardIconKey(systemImage: "chevron.down", accessibilityLabel: "Dismiss keyboard") {
-                controller.dismissKeyboard()
-            }
+    /// Voice editing: say what to change and the selection, or the text just written, is rewritten.
+    private var fixButton: some View {
+        Button {
+            controller.startRewrite()
+        } label: {
+            sideLabel(
+                "wand.and.stars",
+                "Fix",
+                tint: controller.canRewrite ? MuesliTheme.accent : MuesliTheme.textTertiary
+            )
         }
+        .buttonStyle(KeyboardPressStyle())
+        .accessibilityLabel("Fix text")
+        .accessibilityHint("Say what to change in the selected text, or the text before the cursor")
+        .accessibilityIdentifier("keyboard.fix")
     }
 
-    private var transcriptionModelMenu: some View {
+    /// Fix keeps its slot while listening so the row stays balanced and nothing moves. It only reports the mode:
+    /// lit while the recording is an edit instruction, dim while it is plain dictation.
+    private var fixIndicator: some View {
+        let editing = controller.activeRewrite != nil
+        return sideLabel("wand.and.stars", "Fix", tint: editing ? Color.white : MuesliTheme.textTertiary)
+            .background(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(editing ? MuesliTheme.accent : Color.clear)
+            )
+            .opacity(editing ? 1 : 0.55)
+            .allowsHitTesting(false)
+            .accessibilityLabel(editing ? "Editing by voice" : "Fix unavailable while dictating")
+    }
+
+    /// In the slot Fix occupies, so a thumb that learned one layout finds the right control in the other.
+    private var cancelButton: some View {
+        Button(action: controller.cancelActiveDictation) {
+            sideLabel("xmark", "Cancel", tint: MuesliTheme.textPrimary)
+        }
+        .buttonStyle(KeyboardPressStyle())
+        .opacity(controller.canCancelActiveDictation ? 1 : 0.4)
+        .disabled(!controller.canCancelActiveDictation)
+        .accessibilityLabel("Cancel recording")
+        .accessibilityIdentifier("keyboard.cancel")
+    }
+
+    private func modelMenuItem(_ model: KeyboardTranscriptionModelOption) -> some View {
+        let isSelected = model.rawValue == controller.modelCatalog?.selectedRawValue
+        let title = "\(model.displayName) · \(model.capabilityLabel)"
+        return Button {
+            controller.selectTranscriptionModel(model)
+        } label: {
+            Label(title, systemImage: isSelected ? "checkmark" : "circle")
+        }
+        .disabled(!controller.canSelectTranscriptionModel)
+    }
+
+    private func transcriptionModelMenu<MenuLabel: View>(@ViewBuilder label: () -> MenuLabel) -> some View {
         Menu {
             Section("Transcription model") {
                 ForEach(controller.readyTranscriptionModels) { model in
-                    Button {
-                        controller.selectTranscriptionModel(model)
-                    } label: {
-                        Label(
-                            "\(model.displayName) · \(model.capabilityLabel)",
-                            systemImage: model.rawValue == controller.modelCatalog?.selectedRawValue
-                                ? "checkmark"
-                                : "circle"
-                        )
-                    }
-                    .disabled(!controller.canSelectTranscriptionModel)
+                    modelMenuItem(model)
                 }
             }
 
@@ -132,182 +192,198 @@ struct KeyboardRootView: View {
                 }
             }
         } label: {
-            HStack(spacing: 5) {
-                if controller.isModelSelectionPending {
-                    ProgressView()
-                        .controlSize(.mini)
-                        .tint(MuesliTheme.syncGreen)
-                } else {
-                    Circle()
-                        .fill(MuesliTheme.syncGreen)
-                        .frame(width: 7, height: 7)
-                        .shadow(color: MuesliTheme.syncGreen.opacity(0.45), radius: 3)
-                }
-
-                Text(controller.modelChipTitle)
-                    .font(.system(size: 12, weight: .semibold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.76)
-
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .bold))
-            }
-            .foregroundStyle(MuesliTheme.textPrimary)
-            .padding(.horizontal, 9)
-            .frame(height: 32)
-            .background(MuesliTheme.accent.opacity(0.10), in: Capsule())
-            .overlay(Capsule().strokeBorder(MuesliTheme.accent.opacity(0.30), lineWidth: 1))
-            .contentShape(Capsule())
+            label()
         }
         .menuOrder(.fixed)
         .accessibilityLabel("Transcription model")
         .accessibilityValue(controller.modelChipTitle)
     }
 
-    private var readyRecorder: some View {
-        Group {
-            if controller.hasPendingSetupVerification {
-                VStack(spacing: 5) {
-                    Button(action: controller.verifyKeyboardSetup) {
-                        Label("Verify Muesli Keyboard", systemImage: "checkmark.shield.fill")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 48)
-                            .background(MuesliTheme.accent, in: Capsule())
-                            .contentShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("keyboard.verifySetup")
+    // MARK: Primary pill
 
-                    Text(controller.setupVerificationDetail)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(MuesliTheme.textSecondary)
-                        .lineLimit(1)
-                }
-            } else {
-                HStack(spacing: MuesliTheme.spacing8) {
-                    primaryActionButton(isProminent: true, fillsHeight: true)
-                    fixButton
-                }
+    @ViewBuilder
+    private var primaryPill: some View {
+        if controller.opensMuesliFromPrimaryButton, let launchURL = controller.launchURL {
+            Link(destination: launchURL) { pillLabel }
+                .simultaneousGesture(TapGesture().onEnded {
+                    controller.primaryLaunchAction()
+                })
+                .buttonStyle(KeyboardPressStyle())
+                .allowsHitTesting(!controller.isPrimaryButtonDisabled)
+        } else {
+            Button {
+                controller.primaryAction()
+            } label: {
+                pillLabel
             }
+            .buttonStyle(KeyboardPressStyle())
+            // A disabled button is auto-dimmed, which made a working pill look empty. Block taps instead.
+            .allowsHitTesting(!controller.isPrimaryButtonDisabled)
         }
-        .frame(height: Self.recorderBodyHeight)
     }
 
-    /// Voice correction: say what to change and the selection, or the text just written, is rewritten.
-    private var fixButton: some View {
-        Button {
-            controller.startRewrite()
-        } label: {
-            VStack(spacing: 4) {
-                Image(systemName: "wand.and.stars")
-                    .font(.system(size: 26, weight: .bold))
-                Text("Fix")
-                    .font(.system(size: 15, weight: .bold))
-            }
-            .foregroundStyle(controller.canRewrite ? Color.white : MuesliTheme.textTertiary)
-            .frame(width: Self.fixButtonWidth, height: Self.recorderBodyHeight)
-            .background(
-                controller.canRewrite
-                    ? AnyShapeStyle(LinearGradient(
-                        colors: [MuesliTheme.accent, MuesliTheme.accent.opacity(0.72)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ))
-                    : AnyShapeStyle(MuesliTheme.surfacePrimary),
-                in: RoundedRectangle(cornerRadius: 15, style: .continuous)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 15, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.16), lineWidth: 1)
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Fix text")
-        .accessibilityHint("Say what to change in the selected text, or the text before the cursor")
-        .accessibilityIdentifier("keyboard.fix")
+    private var pillLabel: some View {
+        pillContent
+            .foregroundStyle(controller.isPrimaryButtonDisabled && !isActive ? MuesliTheme.textTertiary : Color.white)
+            .frame(maxWidth: .infinity)
+            .frame(height: Self.controlHeight)
+            .keyboardPrimarySurface(muted: controller.isPrimaryButtonDisabled && !isActive)
     }
 
-    private var activeRecorder: some View {
-        VStack(spacing: MuesliTheme.spacing8) {
-            activeWaveformStrip
-            HStack(spacing: MuesliTheme.spacing8) {
-                if controller.canCancelActiveDictation {
-                    cancelChip
-                }
-                // Tapping the microphone again finishes listening and writes the text, like Dictation.
-                primaryActionButton(isProminent: false, iconOnly: true)
-            }
-        }
-        .frame(height: Self.activeRecorderHeight)
-    }
-
-    /// Small on purpose: cancelling throws the recording away, so it must be hard to hit by accident.
-    private var cancelChip: some View {
-        Button(action: controller.cancelActiveDictation) {
-            Image(systemName: "xmark")
-                .font(.system(size: 20, weight: .bold))
-                .foregroundStyle(MuesliTheme.destructive)
-                .frame(width: Self.cancelChipSize, height: Self.cancelChipSize)
-                .background(MuesliTheme.destructive.opacity(0.12), in: Circle())
-                .overlay(Circle().strokeBorder(MuesliTheme.destructive.opacity(0.22), lineWidth: 1))
-                .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Cancel recording")
-        .accessibilityIdentifier("keyboard.cancel")
-    }
-
-    private var activeWaveformStrip: some View {
-        HStack(spacing: MuesliTheme.spacing8) {
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(activeStatusColor)
-                    .frame(width: 7, height: 7)
-                    .shadow(color: activeStatusColor.opacity(0.75), radius: 5)
-
-                Text(activeStatusText)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(activeStatusColor)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.82)
-            }
-            .frame(width: Self.activeStatusWidth, alignment: .leading)
-
-            ZStack {
+    @ViewBuilder
+    private var pillContent: some View {
+        if isActive {
+            switch controller.dictationPhase {
+            case .recording:
+                // Listening is shown by the pill itself: the live level, not a label. Tap it to insert.
                 MuesliInlineWaveformView(
                     mode: controller.waveformMode,
-                    color: activeStatusColor,
+                    color: .white,
                     level: controller.waveformLevel,
                     style: .monochrome,
-                    barCount: Self.activeWaveformBarCount,
-                    spacing: 2.2,
+                    barCount: 24,
+                    spacing: 3,
                     framesPerSecond: 30,
                     refreshDriver: .inputLevel
                 )
-                .frame(height: 24)
-                .shadow(color: activeStatusColor.opacity(0.28), radius: 8)
-
-                if controller.dictationPhase == .transcribing {
-                    ProgressView()
-                        .tint(activeStatusColor)
-                        .controlSize(.small)
+                .frame(height: 30)
+                .padding(.horizontal, 18)
+                .accessibilityLabel("Listening. Tap to insert")
+            default:
+                HStack(spacing: 10) {
+                    ProgressView().tint(.white)
+                    Text(busyTitle)
+                        .font(.system(size: 20, weight: .semibold, design: .rounded))
                 }
             }
-            .frame(maxWidth: .infinity)
+        } else {
+            HStack(spacing: 10) {
+                Image(systemName: controller.primaryButtonIcon)
+                    .font(.system(size: 24, weight: .semibold))
+                Text(primaryActionTitle)
+                    .font(.system(size: 22, weight: .semibold, design: .rounded))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+            }
         }
-        .frame(height: 36)
-        .padding(.horizontal, 6)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(MuesliTheme.surfacePrimary.opacity(0.30))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(activeStatusColor.opacity(0.12), lineWidth: 1)
-        )
+    }
+
+    private var busyTitle: String {
+        switch controller.dictationPhase {
+        case .transcribing:
+            controller.activeRewrite != nil ? "Rewriting…" : "Writing…"
+        default:
+            "Starting…"
+        }
+    }
+
+    // MARK: Status body
+
+    @ViewBuilder
+    private var statusBody: some View {
+        Group {
+            if isActive {
+                if let edit = controller.activeRewrite, controller.dictationPhase != .transcribing {
+                    editTarget(edit.original)
+                } else {
+                    caption(activeCaption)
+                }
+            } else if controller.canUndoRewrite {
+                undoButton
+            } else {
+                readyCaption
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: Self.statusBodyHeight)
+    }
+
+    /// The text a voice edit will change, highlighted the way a selection is, with what to do next.
+    private func editTarget(_ original: String) -> some View {
+        VStack(spacing: 6) {
+            Text(original)
+                .font(.system(size: 13, weight: .regular))
+                .foregroundStyle(MuesliTheme.textPrimary)
+                .lineLimit(2)
+                .truncationMode(.head)
+                .multilineTextAlignment(.leading)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(MuesliTheme.accent.opacity(0.18), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            Text("Speak to edit · tap the pill when you're done")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(MuesliTheme.textSecondary)
+        }
+    }
+
+    private func caption(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(MuesliTheme.textSecondary)
+            .multilineTextAlignment(.center)
+    }
+
+    private var activeCaption: String {
+        switch controller.dictationPhase {
+        case .recording:
+            "Listening · tap the pill to insert"
+        case .transcribing:
+            controller.activeRewrite != nil ? "Applying your edit" : "Writing your text"
+        default:
+            "Starting"
+        }
+    }
+
+    private var readyCaption: some View {
+        VStack(spacing: 3) {
+            Text(controller.modelChipTitle)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(MuesliTheme.textSecondary)
+            Text(controller.canRewrite
+                 ? "Select text, then tap Fix to edit it by voice"
+                 : "Set up a Custom LLM in Muesli to edit by voice")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(MuesliTheme.textTertiary)
+        }
+    }
+
+    private var undoButton: some View {
+        Button(action: controller.undoLastRewrite) {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.uturn.backward")
+                    .font(.system(size: 13, weight: .semibold))
+                Text("Undo edit")
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+            }
+            .foregroundStyle(MuesliTheme.textPrimary)
+            .padding(.horizontal, 16)
+            .frame(height: 38)
+            .keyboardGlassSurface(cornerRadius: 19)
+        }
+        .buttonStyle(KeyboardPressStyle())
+        .accessibilityIdentifier("keyboard.undo")
+    }
+
+    private var verifyRow: some View {
+        VStack(spacing: 5) {
+            Button(action: controller.verifyKeyboardSetup) {
+                Label("Verify Muesli Keyboard", systemImage: "checkmark.shield.fill")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 48)
+                    .background(MuesliTheme.accent, in: Capsule())
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("keyboard.verifySetup")
+
+            Text(controller.setupVerificationDetail)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(MuesliTheme.textSecondary)
+                .lineLimit(1)
+        }
+        .frame(height: Self.controlHeight + 8 + Self.statusBodyHeight)
     }
 
     private var helperKeys: some View {
@@ -348,94 +424,6 @@ struct KeyboardRootView: View {
         }
     }
 
-    @ViewBuilder
-    private func primaryActionButton(isProminent: Bool, fillsHeight: Bool = false, iconOnly: Bool = false) -> some View {
-        if controller.opensMuesliFromPrimaryButton, let launchURL = controller.launchURL {
-            Link(destination: launchURL) {
-                primaryActionLabel(isProminent: isProminent, fillsHeight: fillsHeight, iconOnly: iconOnly)
-            }
-            .simultaneousGesture(TapGesture().onEnded {
-                controller.primaryLaunchAction()
-            })
-            .buttonStyle(.plain)
-            .disabled(controller.isPrimaryButtonDisabled)
-        } else {
-            Button {
-                controller.primaryAction()
-            } label: {
-                primaryActionLabel(isProminent: isProminent, fillsHeight: fillsHeight, iconOnly: iconOnly)
-            }
-            .buttonStyle(.plain)
-            // A disabled button is auto-dimmed, which made "Writing…" look empty. Block taps instead.
-            .disabled(controller.isPrimaryButtonDisabled && !iconOnly)
-            .allowsHitTesting(!(controller.isPrimaryButtonDisabled && iconOnly))
-        }
-    }
-
-    private func primaryActionLabel(isProminent: Bool, fillsHeight: Bool, iconOnly: Bool = false) -> some View {
-        HStack(spacing: MuesliTheme.spacing8) {
-            if iconOnly {
-                // Names what the button does: stop listening and write the text. Cancel is the red cross beside it.
-                if controller.dictationPhase == .transcribing {
-                    ProgressView().tint(.white)
-                    Text("Writing…")
-                        .font(.system(size: 22, weight: .bold))
-                } else {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 28, weight: .bold))
-                    Text("Insert")
-                        .font(.system(size: 24, weight: .bold))
-                }
-            } else {
-                Image(systemName: controller.primaryButtonIcon)
-                    .font(.system(size: fillsHeight ? 30 : (isProminent ? 21 : 15), weight: .bold))
-                Text(primaryActionTitle)
-                    .font(.system(size: fillsHeight ? 26 : (isProminent ? 19 : 16), weight: .bold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
-            }
-        }
-        .foregroundStyle(iconOnly ? Color.white : primaryForeground)
-        .frame(maxWidth: .infinity)
-        .frame(height: iconOnly ? Self.activeMicHeight : (fillsHeight ? Self.recorderBodyHeight : (isProminent ? 44 : 36)))
-        .background(
-            iconOnly
-                ? AnyShapeStyle(LinearGradient(
-                    colors: [MuesliTheme.success, MuesliTheme.success.opacity(0.7)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ))
-                : AnyShapeStyle(primaryBackground),
-            in: RoundedRectangle(cornerRadius: isProminent ? 15 : 12, style: .continuous)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: isProminent ? 15 : 12, style: .continuous)
-                .strokeBorder(iconOnly ? Color.white.opacity(0.25) : primaryBorder, lineWidth: 1)
-        )
-        .shadow(
-            color: iconOnly ? MuesliTheme.success.opacity(0.25) : primaryShadow,
-            radius: isProminent ? 12 : 8, x: 0, y: 5
-        )
-        // Transcribing disables the button, but it must still read as "working", not as empty.
-        .opacity(controller.isPrimaryButtonDisabled && !iconOnly ? 0.55 : 1)
-        .contentShape(RoundedRectangle(cornerRadius: isProminent ? 15 : 12, style: .continuous))
-    }
-
-    private var activeStatusText: String {
-        switch controller.dictationPhase {
-        case .transcribing:
-            "Transcribing"
-        case .requested:
-            "Starting"
-        default:
-            controller.statusText == "Stopping" ? "Stopping" : "Listening"
-        }
-    }
-
-    private var activeStatusColor: Color {
-        controller.dictationPhase == .transcribing ? MuesliTheme.transcribing : Color(hex: 0x39D7FF)
-    }
-
     private var primaryActionTitle: String {
         switch controller.primaryButtonRole {
         case .record:
@@ -448,68 +436,81 @@ struct KeyboardRootView: View {
             controller.primaryButtonTitle
         }
     }
+}
 
-    private var primaryForeground: Color {
-        if controller.isPrimaryButtonDisabled {
-            return MuesliTheme.textTertiary
-        }
-
-        return .white
-    }
-
-    private var primaryBackground: LinearGradient {
-        let colors: [Color]
-        if controller.isPrimaryButtonDisabled {
-            colors = [MuesliTheme.surfacePrimary, MuesliTheme.surfacePrimary.opacity(0.78)]
-        } else if controller.stylesPrimaryButtonAsStop {
-            colors = [MuesliTheme.destructive.opacity(0.82), MuesliTheme.destructive.opacity(0.62)]
-        } else {
-            colors = [Color(hex: 0x4F88FF), MuesliTheme.recording]
-        }
-
-        return LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
-    }
-
-    private var primaryBorder: Color {
-        if controller.stylesPrimaryButtonAsStop {
-            return MuesliTheme.destructive.opacity(0.55)
-        }
-
-        return Color.white.opacity(0.18)
-    }
-
-    private var primaryShadow: Color {
-        if controller.stylesPrimaryButtonAsStop {
-            return MuesliTheme.destructive.opacity(0.22)
-        }
-
-        return MuesliTheme.recording.opacity(0.22)
+/// Presses in slightly, like a physical key, instead of dimming.
+private struct KeyboardPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .brightness(configuration.isPressed ? -0.04 : 0)
+            .animation(.snappy(duration: 0.12), value: configuration.isPressed)
     }
 }
 
-private struct KeyboardControlButton: View {
-    let title: String
-    let tint: Color
-    let action: () -> Void
+/// The primary action: a lit, slightly domed surface with a bright top edge and a coloured shadow.
+private struct KeyboardPrimarySurface: ViewModifier {
+    let muted: Bool
 
-    var body: some View {
-        Button(action: action) {
-            Text(title)
-                .font(.system(size: 16, weight: .bold))
-                .foregroundStyle(tint)
-                .frame(maxWidth: .infinity)
-                .frame(height: 36)
-                .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(tint.opacity(0.10))
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
+        let fill = muted
+            ? [MuesliTheme.surfacePrimary, MuesliTheme.surfacePrimary.opacity(0.8)]
+            : [Color(hex: 0x7DB1FF), Color(hex: 0x4F83F5), Color(hex: 0x3D66DB)]
+        content
+            .background(shape.fill(LinearGradient(colors: fill, startPoint: .top, endPoint: .bottom)))
+            .overlay(
+                shape.fill(LinearGradient(
+                    colors: [Color.white.opacity(muted ? 0.10 : 0.30), Color.white.opacity(0)],
+                    startPoint: .top,
+                    endPoint: .center
+                ))
+                .allowsHitTesting(false)
+            )
+            .overlay(
+                shape.strokeBorder(
+                    LinearGradient(
+                        colors: [Color.white.opacity(muted ? 0.20 : 0.55), Color.white.opacity(0.04)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ),
+                    lineWidth: 1
                 )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(tint.opacity(0.16), lineWidth: 1)
+            )
+            .shadow(color: muted ? .clear : Color(hex: 0x3D66DB).opacity(0.38), radius: 14, x: 0, y: 8)
+    }
+}
+
+/// Secondary controls: frosted glass with a hairline highlight, so the primary action is the only colour.
+private struct KeyboardGlassSurface: ViewModifier {
+    let cornerRadius: CGFloat
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        content
+            .background(shape.fill(.thinMaterial))
+            .background(shape.fill(Color.white.opacity(0.10)))
+            .overlay(
+                shape.strokeBorder(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.50), Color.white.opacity(0.08)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ),
+                    lineWidth: 1
                 )
-                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        }
-        .buttonStyle(.plain)
+            )
+            .shadow(color: Color.black.opacity(0.10), radius: 8, x: 0, y: 4)
+    }
+}
+
+private extension View {
+    func keyboardPrimarySurface(muted: Bool = false) -> some View {
+        modifier(KeyboardPrimarySurface(muted: muted))
+    }
+
+    func keyboardGlassSurface(cornerRadius: CGFloat = 20) -> some View {
+        modifier(KeyboardGlassSurface(cornerRadius: cornerRadius))
     }
 }
 

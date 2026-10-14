@@ -137,4 +137,81 @@ final class KeyboardRewriteTests: XCTestCase {
         XCTAssertEqual(insertedText, ["hello"])
         XCTAssertTrue(deletedCounts.isEmpty)
     }
+
+    // MARK: Undo and the text being edited
+
+    func testUndoPutsTheOriginalBackAfterARewriteOfTheTextBeforeTheCursor() throws {
+        let context = RewriteContext(target: .textBeforeCursor, original: "Is this right?")
+        field = KeyboardTextContext(selectedText: nil, textBeforeCursor: "Hello. Is this right?")
+        try deliverRewrite(context, text: "Is this right.")
+        XCTAssertTrue(controller.canUndoRewrite)
+
+        // The field now holds the rewrite, with the cursor after it.
+        field = KeyboardTextContext(selectedText: nil, textBeforeCursor: "Hello. Is this right.")
+        deletedCounts = []
+        insertedText = []
+        controller.undoLastRewrite()
+        XCTAssertEqual(deletedCounts, [14])
+        XCTAssertEqual(insertedText, ["Is this right?"])
+        XCTAssertFalse(controller.canUndoRewrite)
+    }
+
+    func testUndoAlsoWorksAfterARewriteOfASelection() throws {
+        let context = RewriteContext(target: .selection, original: "teh cat")
+        field = KeyboardTextContext(selectedText: "teh cat", textBeforeCursor: "Look at teh cat")
+        try deliverRewrite(context, text: "the cat")
+        field = KeyboardTextContext(selectedText: nil, textBeforeCursor: "Look at the cat")
+        deletedCounts = []
+        insertedText = []
+        controller.undoLastRewrite()
+        XCTAssertEqual(deletedCounts, ["the cat".count])
+        XCTAssertEqual(insertedText, ["teh cat"])
+    }
+
+    func testUndoRefusesWhenTheFieldChangedSinceTheRewrite() throws {
+        let context = RewriteContext(target: .textBeforeCursor, original: "Is this right?")
+        field = KeyboardTextContext(selectedText: nil, textBeforeCursor: "Is this right?")
+        try deliverRewrite(context, text: "Is this right.")
+        field = KeyboardTextContext(selectedText: nil, textBeforeCursor: "Is this right. And more")
+        deletedCounts = []
+        insertedText = []
+        controller.undoLastRewrite()
+        XCTAssertTrue(deletedCounts.isEmpty)
+        XCTAssertTrue(insertedText.isEmpty)
+        XCTAssertEqual(controller.statusText, "Text changed. Can't undo")
+        XCTAssertFalse(controller.canUndoRewrite, "a refused undo must not linger")
+    }
+
+    func testTypingOrANewDictationRetiresTheUndo() throws {
+        let context = RewriteContext(target: .textBeforeCursor, original: "Hi")
+        field = KeyboardTextContext(selectedText: nil, textBeforeCursor: "Hi")
+        try deliverRewrite(context, text: "Hello")
+        XCTAssertTrue(controller.canUndoRewrite)
+        controller.insertTextKey(".")
+        XCTAssertFalse(controller.canUndoRewrite)
+    }
+
+    func testAPlainDictationOffersNoUndo() throws {
+        let request = DictationRequest()
+        try store.claimRequest(request)
+        try store.saveKeyboardHandoffState(.init(requestID: request.id, phase: .recordingStarted))
+        controller.prepareInitialPresentationState()
+        try store.saveResult(.init(requestID: request.id, text: "hello", engineIdentifier: "test"))
+        try store.saveKeyboardHandoffState(.init(requestID: request.id, phase: .resultReady))
+        controller.prepareInitialPresentationState()
+        XCTAssertFalse(controller.canUndoRewrite)
+    }
+
+    func testTheKeyboardKnowsWhichTextIsBeingEditedWhileTheInstructionIsRecorded() throws {
+        try publishRewriteAvailable(true)
+        field = KeyboardTextContext(selectedText: "Is this right?", textBeforeCursor: "Hello. Is this right?")
+        XCTAssertNil(controller.activeRewrite)
+        controller.startRewrite()
+        XCTAssertEqual(controller.activeRewrite, RewriteContext(target: .selection, original: "Is this right?"))
+    }
+
+    func testAPlainDictationIsNotAnEdit() throws {
+        controller.startDictation()
+        XCTAssertNil(controller.activeRewrite)
+    }
 }
