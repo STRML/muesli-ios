@@ -111,4 +111,30 @@ final class VoiceRewriteServiceTests: XCTestCase {
         }
         XCTAssertEqual(recorder.calls.count, 1, "a transport failure is not retried")
     }
+
+    func testAPlainDictationIsDeliveredUntouchedWithoutCallingTheModel() async throws {
+        let (service, recorder) = service([.success("never used")])
+        let text = try await service.finalText(rewriteOriginal: nil, transcript: "hello world")
+        XCTAssertEqual(text, "hello world")
+        XCTAssertTrue(recorder.calls.isEmpty)
+    }
+
+    func testARewriteRequestDeliversTheRewrittenText() async throws {
+        let (service, _) = service([.success("Is this right.")])
+        let text = try await service.finalText(rewriteOriginal: "Is this right?", transcript: "make that a period")
+        XCTAssertEqual(text, "Is this right.")
+    }
+
+    func testARewriteThatFailsNeverFallsBackToInsertingTheSpokenInstruction() async {
+        struct Offline: Error {}
+        let (service, _) = service([.failure(Offline())])
+        do {
+            _ = try await service.finalText(rewriteOriginal: "Is this right?", transcript: "make that a period")
+            XCTFail("the instruction must not be delivered as text")
+        } catch {
+            guard case .unreachable = error as? VoiceRewriteError else {
+                return XCTFail("wrong error: \(error)")
+            }
+        }
+    }
 }

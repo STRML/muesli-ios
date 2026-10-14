@@ -156,6 +156,11 @@ enum MuesliPreferences {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Voice rewrite runs on the Custom LLM, so it is offered only when one is set up.
+    static var isVoiceRewriteConfigured: Bool {
+        CustomLLMEndpoint.chatCompletionsURL(from: customLLMBaseURL) != nil && !customLLMModel.isEmpty
+    }
+
     static var chatGPTModel: String {
         let value = UserDefaults.standard.string(forKey: chatGPTModelKey) ?? ""
         let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)

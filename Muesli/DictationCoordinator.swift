@@ -77,6 +77,9 @@ final class DictationCoordinator {
     private var keyboardSessionRetryAttempt = 0
     private var keyboardWaveformLevelThrottle = MuesliWaveformLevelThrottle()
     private var keyboardRuntimeStatusPublishPolicy = KeyboardRuntimeStatusPublishPolicy()
+    @ObservationIgnored private let voiceRewriteService = VoiceRewriteService { system, user in
+        try await MeetingSummaryClient.completeWithCustomLLM(system: system, user: user)
+    }
     private let keyboardRuntimeStatusQueue = DispatchQueue(
         label: "com.samuelreed.muesli.keyboard-runtime-status",
         qos: .utility
@@ -5024,6 +5027,7 @@ final class DictationCoordinator {
                     runnerID: lifecycleRunnerID
                 ) else { return }
                 let text = postProcessTranscript(rawText)
+                let delivery = try await finalDeliveryText(for: request, transcript: text)
                 let savedTranscript = Transcript(
                     sessionID: session.id,
                     text: text,
@@ -5054,14 +5058,15 @@ final class DictationCoordinator {
                     id: existingResult?.id ?? UUID(),
                     requestID: request.id,
                     sessionID: savedTranscript.sessionID,
-                    text: text,
+                    text: delivery.text,
                     createdAt: completedSession.createdAt,
                     engineIdentifier: engine.identifier,
-                    source: completedSession.source
+                    source: completedSession.source,
+                    rewrite: delivery.rewrite
                 )
                 try store.saveResult(result)
                 scheduleICloudSyncAfterLocalChange(reason: "dictation_completed")
-                deliverKeyboardTranscript(text, requestID: request.id)
+                deliverKeyboardTranscript(delivery.text, requestID: request.id)
                 try store.clearPendingRequest(matching: request.id)
                 activeRequest = nil
                 activeSession = nil
@@ -5414,6 +5419,7 @@ final class DictationCoordinator {
                 if isKeyboardSessionArmed {
                     transitionKeyboardSession(.transcribing(request.id))
                 }
+                let delivery = try await finalDeliveryText(for: request, transcript: text)
                 let completedSession = activeSession ?? session
                 let transcript: Transcript?
                 let resultCreatedAt: Date
@@ -5449,15 +5455,16 @@ final class DictationCoordinator {
                 let result = DictationResult(
                     requestID: request.id,
                     sessionID: transcript?.sessionID,
-                    text: text,
+                    text: delivery.text,
                     createdAt: resultCreatedAt,
                     engineIdentifier: engine.identifier,
-                    source: completedSession?.source
+                    source: completedSession?.source,
+                    rewrite: delivery.rewrite
                 )
                 try store.saveResult(result)
                 scheduleICloudSyncAfterLocalChange(reason: "dictation_completed")
                 if startedFromKeyboard {
-                    deliverKeyboardTranscript(text, requestID: request.id)
+                    deliverKeyboardTranscript(delivery.text, requestID: request.id)
                 }
                 try store.clearPendingRequest(matching: request.id)
                 refreshHistory()
@@ -7263,7 +7270,8 @@ final class DictationCoordinator {
             message: message,
             supportsBackgroundStart: supportsBackgroundStart,
             canAcceptStartCommand: canAcceptStartCommand,
-            inputLevel: runtimeInputLevel
+            inputLevel: runtimeInputLevel,
+            rewriteAvailable: MuesliPreferences.isVoiceRewriteConfigured
         )
     }
 
@@ -7353,6 +7361,29 @@ final class DictationCoordinator {
         let previousCount = pasteboard.changeCount
         pasteboard.string = text
         return pasteboard.changeCount != previousCount
+    }
+
+    /// The text to deliver for a finished keyboard transcription. For a voice rewrite request the
+    /// transcript is the spoken instruction: it is applied to the request's text, and a failure
+    /// throws so the instruction is never inserted into the field.
+    private func finalDeliveryText(
+        for request: DictationRequest,
+        transcript: String
+    ) async throws -> (text: String, rewrite: RewriteContext?) {
+        guard request.rewrite != nil else { return (transcript, nil) }
+        saveKeyboardHandoff(requestID: request.id, phase: .transcribingStarted, message: "Rewriting")
+        AppTelemetry.signal("voice_rewrite_started")
+        do {
+            let text = try await voiceRewriteService.finalText(
+                rewriteOriginal: request.rewrite?.original,
+                transcript: transcript
+            )
+            AppTelemetry.signal("voice_rewrite_finished")
+            return (text, request.rewrite)
+        } catch {
+            AppTelemetry.signal("voice_rewrite_failed")
+            throw error
+        }
     }
 
     func deliverKeyboardTranscript(_ text: String, requestID: UUID) {

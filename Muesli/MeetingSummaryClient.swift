@@ -66,6 +66,27 @@ enum MeetingSummaryClient {
         }
     }
 
+    /// One chat completion against the Custom LLM, for voice rewrite. A short timeout: the user is
+    /// waiting at the keyboard.
+    static func completeWithCustomLLM(system: String, user: String) async throws -> String {
+        guard let url = CustomLLMEndpoint.chatCompletionsURL(from: MuesliPreferences.customLLMBaseURL),
+              !MuesliPreferences.customLLMModel.isEmpty
+        else {
+            throw VoiceRewriteError.notConfigured
+        }
+        return try await callChatCompletions(
+            url: url,
+            backend: "Custom",
+            apiKey: storedCustomLLMAPIKey(),
+            model: MuesliPreferences.customLLMModel,
+            systemPrompt: system,
+            userPrompt: user,
+            maxTokens: 8_000,
+            extraHeaders: [:],
+            timeout: 30
+        )
+    }
+
     static func summarize(
         transcript: String,
         meetingTitle: String,
@@ -282,7 +303,8 @@ enum MeetingSummaryClient {
         systemPrompt: String,
         userPrompt: String,
         maxTokens: Int,
-        extraHeaders: [String: String]
+        extraHeaders: [String: String],
+        timeout: TimeInterval = 60
     ) async throws -> String {
         let body: [String: Any] = [
             "model": model,
@@ -295,6 +317,7 @@ enum MeetingSummaryClient {
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.timeoutInterval = timeout
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if !apiKey.isEmpty {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")

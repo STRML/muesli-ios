@@ -115,6 +115,14 @@ struct VoiceRewriteService: Sendable {
         }
     }
 
+    /// What to deliver for a finished transcription: the transcript itself, or, when the request is a
+    /// rewrite (`rewriteOriginal` is the text to rewrite), the rewritten text. A failed rewrite throws:
+    /// the spoken instruction is never delivered as text.
+    func finalText(rewriteOriginal: String?, transcript: String) async throws -> String {
+        guard let rewriteOriginal else { return transcript }
+        return try await rewrite(original: rewriteOriginal, instruction: transcript)
+    }
+
     private func ask(_ user: String) async throws -> String {
         do {
             return try await complete(VoiceRewritePrompt.system, user)
