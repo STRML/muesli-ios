@@ -9,7 +9,7 @@ struct KeyboardRootView: View {
     private static let activeMicHeight: CGFloat = 84
     /// The ready body plus the header row and its spacing, which the listening state gives back.
     private static let activeRecorderHeight: CGFloat = 123
-    private static let activeStatusWidth: CGFloat = 70
+    private static let activeStatusWidth: CGFloat = 100
     private static let activeControlButtonWidth: CGFloat = 120
     private static let activeWaveformBarCount = 34
 
@@ -366,19 +366,25 @@ struct KeyboardRootView: View {
                 primaryActionLabel(isProminent: isProminent, fillsHeight: fillsHeight, iconOnly: iconOnly)
             }
             .buttonStyle(.plain)
-            .disabled(controller.isPrimaryButtonDisabled)
+            // A disabled button is auto-dimmed, which made "Writing…" look empty. Block taps instead.
+            .disabled(controller.isPrimaryButtonDisabled && !iconOnly)
+            .allowsHitTesting(!(controller.isPrimaryButtonDisabled && iconOnly))
         }
     }
 
     private func primaryActionLabel(isProminent: Bool, fillsHeight: Bool, iconOnly: Bool = false) -> some View {
         HStack(spacing: MuesliTheme.spacing8) {
             if iconOnly {
+                // Names what the button does: stop listening and write the text. Cancel is the red cross beside it.
                 if controller.dictationPhase == .transcribing {
-                    ProgressView().tint(primaryForeground)
+                    ProgressView().tint(.white)
+                    Text("Writing…")
+                        .font(.system(size: 22, weight: .bold))
                 } else {
-                    Image(systemName: "mic.fill")
-                        .font(.system(size: 34, weight: .bold))
-                        .accessibilityLabel("Finish and insert")
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 28, weight: .bold))
+                    Text("Insert")
+                        .font(.system(size: 24, weight: .bold))
                 }
             } else {
                 Image(systemName: controller.primaryButtonIcon)
@@ -389,16 +395,29 @@ struct KeyboardRootView: View {
                     .minimumScaleFactor(0.72)
             }
         }
-        .foregroundStyle(primaryForeground)
+        .foregroundStyle(iconOnly ? Color.white : primaryForeground)
         .frame(maxWidth: .infinity)
         .frame(height: iconOnly ? Self.activeMicHeight : (fillsHeight ? Self.recorderBodyHeight : (isProminent ? 44 : 36)))
-        .background(primaryBackground, in: RoundedRectangle(cornerRadius: isProminent ? 15 : 12, style: .continuous))
+        .background(
+            iconOnly
+                ? AnyShapeStyle(LinearGradient(
+                    colors: [MuesliTheme.success, MuesliTheme.success.opacity(0.7)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ))
+                : AnyShapeStyle(primaryBackground),
+            in: RoundedRectangle(cornerRadius: isProminent ? 15 : 12, style: .continuous)
+        )
         .overlay(
             RoundedRectangle(cornerRadius: isProminent ? 15 : 12, style: .continuous)
-                .strokeBorder(primaryBorder, lineWidth: 1)
+                .strokeBorder(iconOnly ? Color.white.opacity(0.25) : primaryBorder, lineWidth: 1)
         )
-        .shadow(color: primaryShadow, radius: isProminent ? 12 : 8, x: 0, y: 5)
-        .opacity(controller.isPrimaryButtonDisabled ? 0.55 : 1)
+        .shadow(
+            color: iconOnly ? MuesliTheme.success.opacity(0.25) : primaryShadow,
+            radius: isProminent ? 12 : 8, x: 0, y: 5
+        )
+        // Transcribing disables the button, but it must still read as "working", not as empty.
+        .opacity(controller.isPrimaryButtonDisabled && !iconOnly ? 0.55 : 1)
         .contentShape(RoundedRectangle(cornerRadius: isProminent ? 15 : 12, style: .continuous))
     }
 
