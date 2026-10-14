@@ -11,6 +11,7 @@ final class SettingsModelCatalogTests: XCTestCase {
                 "Dictionary",
                 "Models",
                 "AI Summaries",
+                "Quill",
                 "Sync & Privacy",
                 "Appearance",
                 "About",

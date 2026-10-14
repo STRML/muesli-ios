@@ -314,12 +314,13 @@ final class MuesliSmokeUITests: XCTestCase {
                       || app.staticTexts["About"].waitForExistence(timeout: 5))
 
         // The iOS back gesture starts at the left edge.
-        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5))
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.04, dy: 0.5))
         let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5))
-        start.press(forDuration: 0.05, thenDragTo: end)
+        let settingsListHeader = app.staticTexts["Voice notes, meetings, local models, and privacy."]
+        XCTAssertFalse(settingsListHeader.exists, "the About screen did not open")
+        start.press(forDuration: 0.1, thenDragTo: end)
 
-        XCTAssertTrue(app.staticTexts["Voice Notes"].waitForExistence(timeout: 5), "did not return to the Settings list")
-        XCTAssertTrue(app.buttons["tab.settings"].isSelected || app.staticTexts["Voice Notes"].exists)
+        XCTAssertTrue(settingsListHeader.waitForExistence(timeout: 5), "the swipe did not go back to the Settings list")
         XCTAssertFalse(app.staticTexts["Start a new meeting"].exists, "the swipe moved to the Meetings tab")
     }
 

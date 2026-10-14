@@ -142,6 +142,12 @@ struct SettingsView: View {
                 }
                 .padding(MuesliTheme.spacing20)
             }
+            .overlay(alignment: .leading) {
+                Color.clear
+                    .frame(width: 28)
+                    .contentShape(Rectangle())
+                    .gesture(edgeBackSwipe)
+            }
         } else {
             ScrollView {
                 VStack(alignment: .leading, spacing: MuesliTheme.spacing16) {
@@ -177,6 +183,19 @@ struct SettingsView: View {
                 .padding(MuesliTheme.spacing20)
             }
         }
+    }
+
+    /// Settings subareas are not a navigation stack, so the system back swipe does not exist for them.
+    /// A swipe that starts on the strip along the left edge and travels right goes back to the Settings list.
+    private var edgeBackSwipe: some Gesture {
+        DragGesture(minimumDistance: 24)
+            .onEnded { value in
+                guard value.translation.width > 60,
+                      abs(value.translation.height) < value.translation.width / 2 else { return }
+                withAnimation(.snappy(duration: 0.22)) {
+                    selectedSettingsSection = nil
+                }
+            }
     }
 
     private var settingsHeader: some View {
@@ -234,6 +253,8 @@ struct SettingsView: View {
             syncPrivacySettings
         case .aiSummaries:
             aiSummarySettings
+        case .quill:
+            quillSettings
         }
     }
 
@@ -646,36 +667,13 @@ struct SettingsView: View {
                     )
                     .disabled(!meetingSummariesEnabled)
                 } else if selectedSummaryBackend == .customLLM {
-                    Text("Any OpenAI-compatible server, for example your own over Tailscale. Notes and titles are sent only to this address.")
+                    Text("Any OpenAI-compatible server, for example your own over Tailscale. Notes and titles are sent only to this address. Quill uses the same server.")
                         .font(MuesliTheme.caption())
                         .foregroundStyle(MuesliTheme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    SettingsTextFieldRow(
-                        icon: "link",
-                        title: "Server URL",
-                        placeholder: "https://host.example.ts.net/v1",
-                        text: $customLLMBaseURL
-                    )
-                    .keyboardType(.URL)
-                    .disabled(!meetingSummariesEnabled)
-
-                    SettingsTextFieldRow(
-                        icon: "cpu",
-                        title: "Model",
-                        placeholder: "model name on the server",
-                        text: $customLLMModel
-                    )
-                    .disabled(!meetingSummariesEnabled)
-
-                    SettingsTextFieldRow(
-                        icon: "key",
-                        title: "API Key (optional)",
-                        placeholder: "Bearer token",
-                        text: $customLLMAPIKey,
-                        isSecure: true
-                    )
-                    .disabled(!meetingSummariesEnabled)
+                    customLLMFields
+                        .disabled(!meetingSummariesEnabled)
                 } else {
                     SettingsRow(
                         icon: "person.crop.circle.badge.checkmark",
@@ -714,6 +712,79 @@ struct SettingsView: View {
 
                 if let summaryStatusText {
                     Text(summaryStatusText)
+                        .font(MuesliTheme.caption())
+                        .foregroundStyle(MuesliTheme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(MuesliTheme.spacing16)
+        }
+    }
+
+    private var isCustomLLMReady: Bool {
+        CustomLLMEndpoint.chatCompletionsURL(from: customLLMBaseURL) != nil
+            && !customLLMModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    @ViewBuilder
+    private var customLLMFields: some View {
+        SettingsTextFieldRow(
+            icon: "link",
+            title: "Server URL",
+            placeholder: "https://host.example.ts.net/v1",
+            text: $customLLMBaseURL
+        )
+        .keyboardType(.URL)
+
+        SettingsTextFieldRow(
+            icon: "cpu",
+            title: "Model",
+            placeholder: "model name on the server",
+            text: $customLLMModel
+        )
+
+        SettingsTextFieldRow(
+            icon: "key",
+            title: "API Key (optional)",
+            placeholder: "Bearer token",
+            text: $customLLMAPIKey,
+            isSecure: true
+        )
+    }
+
+    private var quillSettings: some View {
+        MuesliSurface {
+            VStack(alignment: .leading, spacing: MuesliTheme.spacing12) {
+                Text("Select text, or put the cursor after it, tap Fix on the Muesli keyboard and say what to change. Quill rewrites the selection, or the last paragraph before the cursor. Undo restores it.")
+                    .font(MuesliTheme.caption())
+                    .foregroundStyle(MuesliTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Divider().overlay(MuesliTheme.surfaceBorder)
+
+                SettingsRow(
+                    icon: "server.rack",
+                    title: "Writing model source",
+                    value: "Custom LLM",
+                    iconColor: isCustomLLMReady ? MuesliTheme.success : MuesliTheme.accent
+                )
+
+                Text("The same server Meeting Summaries use when set to Custom. Text is sent only to this address. Editing it here changes it there.")
+                    .font(MuesliTheme.caption())
+                    .foregroundStyle(MuesliTheme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                customLLMFields
+
+                if let summaryStatusText {
+                    Text(summaryStatusText)
+                        .font(MuesliTheme.caption())
+                        .foregroundStyle(MuesliTheme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if !isCustomLLMReady {
+                    Text("Fix stays off until a server URL and model are set.")
                         .font(MuesliTheme.caption())
                         .foregroundStyle(MuesliTheme.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -855,6 +926,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     case dictionary
     case models
     case aiSummaries
+    case quill
     case syncPrivacy
     case appearance
     case about
@@ -873,6 +945,8 @@ enum SettingsSection: String, CaseIterable, Identifiable {
             "Models"
         case .aiSummaries:
             "AI Summaries"
+        case .quill:
+            "Quill"
         case .syncPrivacy:
             "Sync & Privacy"
         case .appearance:
@@ -894,6 +968,8 @@ enum SettingsSection: String, CaseIterable, Identifiable {
             "Choose and automatically download local Parakeet or Whisper models."
         case .aiSummaries:
             "Meeting summary providers, auth, and model selection."
+        case .quill:
+            "Tap Fix on the keyboard and say what to change. Uses your Custom LLM server."
         case .syncPrivacy:
             "Private iCloud sync between this iPhone and your Mac."
         case .appearance:
@@ -915,6 +991,8 @@ enum SettingsSection: String, CaseIterable, Identifiable {
             "cpu"
         case .aiSummaries:
             "sparkles"
+        case .quill:
+            "pencil.and.outline"
         case .syncPrivacy:
             "icloud"
         case .appearance:
