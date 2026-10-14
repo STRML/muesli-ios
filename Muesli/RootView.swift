@@ -3,7 +3,6 @@ import SwiftUI
 struct RootView: View {
     @Bindable var coordinator: DictationCoordinator
     @State private var selectedSection: AppSection = .dictations
-    @State private var isDrawerOpen = false
     @AppStorage(MuesliPreferences.appearanceModeKey) private var appearanceMode = MuesliAppearanceMode.system.rawValue
     @AppStorage(MuesliPreferences.accentThemeKey) private var accentTheme = MuesliAccentTheme.blue.rawValue
     @AppStorage(MuesliPreferences.pinnedSectionsKey) private var pinnedSectionsStorage = AppSection.defaultPinnedStorage
@@ -91,7 +90,7 @@ struct RootView: View {
                 .background(MuesliTheme.backgroundBase)
             } else {
                 VStack(spacing: 0) {
-                    pagedSectionContent
+                    sectionContent
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                     MuesliTabSwitcher(
@@ -103,30 +102,6 @@ struct RootView: View {
                         .padding(.top, MuesliTheme.spacing4)
                         .background(MuesliTheme.backgroundBase)
                 }
-                .overlay(alignment: .topTrailing) {
-                    Button(action: openDrawer) {
-                        Image(systemName: "sidebar.leading")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(MuesliTheme.textPrimary)
-                            .frame(width: 44, height: 44)
-                            .muesliGlassButton(cornerRadius: 22, tint: currentAccent)
-                            .contentShape(Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.trailing, MuesliTheme.spacing20)
-                    .padding(.top, MuesliTheme.spacing24)
-                    .opacity(isDrawerOpen ? 0 : 1)
-                    .accessibilityLabel("Open sidebar")
-                }
-                .overlay {
-                    CompactSidebarOverlay(
-                        isOpen: $isDrawerOpen,
-                        selectedSection: $selectedSection,
-                        pinnedSections: pinnedSections,
-                        onTogglePin: togglePinnedSection
-                    )
-                }
-                .contentShape(Rectangle())
             }
         }
     }
@@ -162,43 +137,11 @@ struct RootView: View {
         }
     }
 
-    private var pagedSectionContent: some View {
-        TabView(selection: $selectedSection) {
-            ForEach(pageSections, id: \.self) { section in
-                sectionView(for: section, isActive: selectedSection == section)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .tag(section)
-            }
-        }
-        .tabViewStyle(.page(indexDisplayMode: .never))
-    }
-
-    private var pageSections: [AppSection] {
-        var sections = pinnedSections
-        if !sections.contains(selectedSection) {
-            sections.append(selectedSection)
-        }
-        return sections
-    }
-
-    private func openDrawer() {
-        withAnimation(.snappy(duration: 0.24)) {
-            isDrawerOpen = true
-        }
-    }
-
-    private func closeDrawer() {
-        withAnimation(.snappy(duration: 0.24)) {
-            isDrawerOpen = false
-        }
-    }
-
     private func navigateToSettingsIfNeeded(_ requestID: UUID?) {
         guard requestID != nil else { return }
         if coordinator.hasCompletedOnboarding {
             selectedSection = .settings
         }
-        isDrawerOpen = false
     }
 
     private func togglePinnedSection(_ section: AppSection) {
@@ -444,42 +387,6 @@ private struct MuesliTabSwitcher: View {
             .muesliNavigationGlassSurface(
                 cornerRadius: MuesliTheme.Navigation.containerCornerRadius
             )
-        }
-    }
-}
-
-private struct CompactSidebarOverlay: View {
-    @Binding var isOpen: Bool
-    @Binding var selectedSection: AppSection
-    let pinnedSections: [AppSection]
-    let onTogglePin: (AppSection) -> Void
-
-    var body: some View {
-        ZStack(alignment: .leading) {
-            if isOpen {
-                MuesliTheme.backgroundBase.opacity(0.58)
-                    .ignoresSafeArea()
-                    .onTapGesture(perform: close)
-                    .transition(.opacity)
-            }
-
-            MuesliDrawer(
-                selectedSection: $selectedSection,
-                pinnedSections: pinnedSections,
-                onTogglePin: onTogglePin,
-                onClose: close
-            )
-            .frame(width: 312)
-            .offset(x: isOpen ? 0 : -328)
-            .opacity(isOpen ? 1 : 0)
-        }
-        .allowsHitTesting(isOpen)
-        .animation(.snappy(duration: 0.24), value: isOpen)
-    }
-
-    private func close() {
-        withAnimation(.snappy(duration: 0.24)) {
-            isOpen = false
         }
     }
 }

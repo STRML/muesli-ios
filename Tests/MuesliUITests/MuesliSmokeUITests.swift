@@ -283,6 +283,46 @@ final class MuesliSmokeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Start a new meeting"].waitForExistence(timeout: 5))
     }
 
+    func testThePhoneShellHasNoSidebar() {
+        let app = launchApp()
+
+        XCTAssertTrue(app.buttons["tab.settings"].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.buttons["Open sidebar"].exists)
+        XCTAssertFalse(app.staticTexts["Pin up to 3 sections"].exists)
+    }
+
+    func testSwipingSidewaysDoesNotChangeTabs() {
+        let app = launchApp()
+
+        XCTAssertTrue(app.staticTexts["Start Quick Note"].waitForExistence(timeout: 8))
+        app.swipeLeft()
+        XCTAssertTrue(app.staticTexts["Start Quick Note"].exists, "a sideways swipe moved off Voice Notes")
+        XCTAssertFalse(app.staticTexts["Start a new meeting"].exists)
+    }
+
+    func testBackSwipeInADeepSettingsScreenGoesBackInsteadOfLeavingSettings() {
+        let app = launchApp()
+
+        XCTAssertTrue(app.buttons["tab.settings"].waitForExistence(timeout: 8))
+        app.buttons["tab.settings"].tap()
+        let about = app.staticTexts["About"]
+        for _ in 0..<5 where !about.exists {
+            app.swipeUp()
+        }
+        about.tap()
+        XCTAssertTrue(app.staticTexts["OPEN SOURCE LIBRARIES"].waitForExistence(timeout: 5)
+                      || app.staticTexts["About"].waitForExistence(timeout: 5))
+
+        // The iOS back gesture starts at the left edge.
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5))
+        start.press(forDuration: 0.05, thenDragTo: end)
+
+        XCTAssertTrue(app.staticTexts["Voice Notes"].waitForExistence(timeout: 5), "did not return to the Settings list")
+        XCTAssertTrue(app.buttons["tab.settings"].isSelected || app.staticTexts["Voice Notes"].exists)
+        XCTAssertFalse(app.staticTexts["Start a new meeting"].exists, "the swipe moved to the Meetings tab")
+    }
+
     func testSettingsPrioritizeCoreWorkflowsAndAboutListsOpenSourceLibraries() {
         let app = launchApp()
 
