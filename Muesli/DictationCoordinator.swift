@@ -76,6 +76,7 @@ final class DictationCoordinator {
     private var keyboardSessionRetryTask: Task<Void, Never>?
     private var keyboardSessionRetryAttempt = 0
     private var keyboardWaveformLevelThrottle = MuesliWaveformLevelThrottle()
+    private var keyboardRuntimeStatusPublishPolicy = KeyboardRuntimeStatusPublishPolicy()
     private let keyboardRuntimeStatusQueue = DispatchQueue(
         label: "com.samuelreed.muesli.keyboard-runtime-status",
         qos: .utility
@@ -7126,7 +7127,8 @@ final class DictationCoordinator {
             activeRequestID: nil,
             phase: .idle,
             message: "Keyboard session ready",
-            supportsBackgroundStart: true
+            supportsBackgroundStart: true,
+            coalescingUnchanged: true
         )
     }
 
@@ -7209,7 +7211,8 @@ final class DictationCoordinator {
         phase: DictationPhase,
         message: String?,
         supportsBackgroundStart: Bool = false,
-        inputLevel: Double? = nil
+        inputLevel: Double? = nil,
+        coalescingUnchanged: Bool = false
     ) {
         if let sessionID = keyboardMicSession.id {
             keyboardMicActivity.update(
@@ -7226,6 +7229,12 @@ final class DictationCoordinator {
             supportsBackgroundStart: supportsBackgroundStart,
             inputLevel: inputLevel
         )
+
+        let now = Date()
+        if coalescingUnchanged, !keyboardRuntimeStatusPublishPolicy.shouldPublish(status, now: now) {
+            return
+        }
+        keyboardRuntimeStatusPublishPolicy.notePublished(status, now: now)
 
         // Lifecycle writes stay ordered behind any queued waveform samples so a
         // stale recording level cannot overwrite a later terminal phase.
@@ -7270,6 +7279,7 @@ final class DictationCoordinator {
             inputLevel: publishedLevel
         )
         let store = store
+        keyboardRuntimeStatusPublishPolicy.invalidate()
         keyboardRuntimeStatusQueue.async {
             try? store.saveKeyboardRuntimeStatus(status)
         }
