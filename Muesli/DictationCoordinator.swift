@@ -527,8 +527,13 @@ final class DictationCoordinator {
     }
 
     private func transitionKeyboardSession(_ event: KeyboardSessionEvent) {
+        // The session id is gone after `.micStopped`, so name the activity before reducing.
+        let sessionID = keyboardMicSession.id
         keyboardSessionState = KeyboardSessionReducer.reduce(keyboardSessionState, event: event)
         publishKeyboardModelCatalog()
+        if let sessionID, KeyboardMicActivityPolicy.endsActivity(after: event) {
+            Task { await keyboardMicActivity.end(sessionID: sessionID) }
+        }
     }
 
     @discardableResult
@@ -3644,6 +3649,15 @@ final class DictationCoordinator {
                 self?.clipboardStatusText = nil
             }
         }
+    }
+
+    /// Foreground check: no keyboard mic session means no keyboard mic Island, whatever ended it
+    /// (iOS can drop the session while the app is suspended, and an activity outlives its app).
+    func reconcileKeyboardMicActivity() {
+        // A capture that took the mic from the session also resumes it afterwards: leave that Island alone.
+        guard !isKeyboardMicOn, !isKeyboardSessionArmed,
+              !isRecording, !hasMeetingRecordingInProgress, activeRequest == nil else { return }
+        Task { await keyboardMicActivity.endAll() }
     }
 
     func applyLiveActivityPreferences() {
