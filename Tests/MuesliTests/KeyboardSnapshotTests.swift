@@ -107,6 +107,7 @@ final class KeyboardSnapshotTests: XCTestCase {
                 let size = CGSize(width: 393, height: KeyboardRootView.preferredHeight)
                 let host = UIHostingController(rootView: KeyboardRootView(controller: controller))
                 host.view.frame = CGRect(origin: .zero, size: size)
+                host.safeAreaRegions = []
                 host.overrideUserInterfaceStyle = style
                 host.view.backgroundColor = style == .dark ? UIColor(white: 0.08, alpha: 1) : UIColor(white: 0.93, alpha: 1)
                 let window = UIWindow(frame: CGRect(origin: .zero, size: size))

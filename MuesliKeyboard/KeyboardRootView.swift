@@ -2,13 +2,13 @@ import SwiftUI
 
 struct KeyboardRootView: View {
     /// Room for the control row, a one-line status and two rows of keys.
-    static let preferredHeight: CGFloat = 252
+    static let preferredHeight: CGFloat = 234
 
     /// Three slots that never move: a side button, the primary pill, a side button. Only their content changes.
     private static let controlHeight: CGFloat = 64
     private static let sideButtonWidth: CGFloat = 64
     private static let statusBodyHeight: CGFloat = 40
-    private static let dismissRowHeight: CGFloat = 20
+    private static let dismissRowHeight: CGFloat = 14
 
     @Bindable var controller: KeyboardController
 
@@ -47,8 +47,6 @@ struct KeyboardRootView: View {
 
     private var keyboardDeck: some View {
         VStack(spacing: 6) {
-            dismissRow
-
             if controller.hasPendingSetupVerification, !isActive {
                 verifyRow
             } else {
@@ -57,14 +55,16 @@ struct KeyboardRootView: View {
             }
         }
         .padding(.horizontal, 10)
-        .padding(.top, 6)
+        .padding(.top, 6 + Self.dismissRowHeight)
         .padding(.bottom, 8)
+        .overlay(alignment: .topTrailing) { dismissRow }
         .muesliKeyboardDeckSurface()
         .animation(.snappy(duration: 0.22), value: isActive)
         .animation(.snappy(duration: 0.22), value: controller.primaryButtonRole)
     }
 
-    /// Just the dismiss chevron. A drag handle here suggested the panel could be swiped down; it cannot.
+    /// Just the dismiss chevron, in the deck's top padding so it takes no row of its own.
+    /// A drag handle here suggested the panel could be swiped down; it cannot.
     private var dismissRow: some View {
         HStack {
             Spacer()
