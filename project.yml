@@ -1,6 +1,6 @@
 name: MuesliiOS
 options:
-  bundleIdPrefix: com.phequals7
+  bundleIdPrefix: com.samuelreed
   deploymentTarget:
     iOS: "17.0"
   developmentLanguage: en
@@ -19,14 +19,14 @@ settings:
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     TARGETED_DEVICE_FAMILY: "1,2"
     CODE_SIGN_STYLE: Automatic
-    DEVELOPMENT_TEAM: 58W55QJ567
+    DEVELOPMENT_TEAM: HYBSCYDCMB
     MARKETING_VERSION: "0.1.7"
     CURRENT_PROJECT_VERSION: "1"
     ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: true
-    MUESLI_APP_GROUP_IDENTIFIER: group.com.phequals7.muesli
-    MUESLI_CROSS_PROCESS_PREFIX: com.phequals7.muesli
+    MUESLI_APP_GROUP_IDENTIFIER: group.com.samuelreed.muesli
+    MUESLI_CROSS_PROCESS_PREFIX: com.samuelreed.muesli
     MUESLI_DISPLAY_NAME: Muesli
-    MUESLI_TELEMETRY_ENABLED: YES
+    MUESLI_TELEMETRY_ENABLED: NO
     MUESLI_URL_SCHEME: muesli
 
 packages:
@@ -50,12 +50,12 @@ targets:
       - path: LiveActivityShared
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.phequals7.muesli.ios
+        PRODUCT_BUNDLE_IDENTIFIER: com.samuelreed.muesli.ios
         PRODUCT_NAME: Muesli
         INFOPLIST_FILE: Muesli/Info.plist
         CODE_SIGN_ENTITLEMENTS: Muesli/Muesli.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        MUESLI_TELEMETRYDECK_APP_ID: A851C6BD-4F55-41ED-A6BC-DA43C850B069
+        MUESLI_TELEMETRYDECK_APP_ID: disabled
     dependencies:
       - target: MuesliKeyboard
       - target: MuesliLiveActivityExtension
@@ -77,15 +77,15 @@ targets:
       - path: LiveActivityShared
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.phequals7.muesli.ios.dev
+        PRODUCT_BUNDLE_IDENTIFIER: com.samuelreed.muesli.ios.dev
         PRODUCT_NAME: MuesliDev
         INFOPLIST_FILE: Muesli/Info.plist
         CODE_SIGN_ENTITLEMENTS: Muesli/MuesliDev.entitlements
         CODE_SIGN_IDENTITY: Apple Development
         CODE_SIGN_STYLE: Manual
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        MUESLI_APP_GROUP_IDENTIFIER: group.com.phequals7.muesli.dev
-        MUESLI_CROSS_PROCESS_PREFIX: com.phequals7.muesli.dev
+        MUESLI_APP_GROUP_IDENTIFIER: group.com.samuelreed.muesli.dev
+        MUESLI_CROSS_PROCESS_PREFIX: com.samuelreed.muesli.dev
         MUESLI_DISPLAY_NAME: MuesliDev
         MUESLI_TELEMETRYDECK_APP_ID: disabled
         MUESLI_TELEMETRY_ENABLED: NO
@@ -107,7 +107,7 @@ targets:
       - path: LiveActivityShared
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.phequals7.muesli.ios.liveactivity
+        PRODUCT_BUNDLE_IDENTIFIER: com.samuelreed.muesli.ios.liveactivity
         PRODUCT_NAME: MuesliLiveActivityExtension
         INFOPLIST_FILE: MuesliLiveActivityExtension/Info.plist
         SKIP_INSTALL: true
@@ -121,7 +121,7 @@ targets:
       - path: LiveActivityShared
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.phequals7.muesli.ios.dev.liveactivity
+        PRODUCT_BUNDLE_IDENTIFIER: com.samuelreed.muesli.ios.dev.liveactivity
         PRODUCT_NAME: MuesliDevLiveActivityExtension
         INFOPLIST_FILE: MuesliLiveActivityExtension/Info.plist
         MUESLI_DISPLAY_NAME: MuesliDev
@@ -136,7 +136,7 @@ targets:
       - path: Shared
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.phequals7.muesli.ios.keyboard
+        PRODUCT_BUNDLE_IDENTIFIER: com.samuelreed.muesli.ios.keyboard
         PRODUCT_NAME: MuesliKeyboard
         INFOPLIST_FILE: MuesliKeyboard/Info.plist
         CODE_SIGN_ENTITLEMENTS: MuesliKeyboard/MuesliKeyboard.entitlements
@@ -152,7 +152,7 @@ targets:
       - path: Shared
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.phequals7.muesli.ios.dev.keyboard
+        PRODUCT_BUNDLE_IDENTIFIER: com.samuelreed.muesli.ios.dev.keyboard
         PRODUCT_NAME: MuesliDevKeyboard
         INFOPLIST_FILE: MuesliKeyboard/Info.plist
         CODE_SIGN_ENTITLEMENTS: MuesliKeyboard/MuesliDevKeyboard.entitlements
@@ -160,8 +160,8 @@ targets:
         CODE_SIGN_STYLE: Manual
         PROVISIONING_PROFILE_SPECIFIER: muesli-ios-mueslidev-keyboard
         SKIP_INSTALL: true
-        MUESLI_APP_GROUP_IDENTIFIER: group.com.phequals7.muesli.dev
-        MUESLI_CROSS_PROCESS_PREFIX: com.phequals7.muesli.dev
+        MUESLI_APP_GROUP_IDENTIFIER: group.com.samuelreed.muesli.dev
+        MUESLI_CROSS_PROCESS_PREFIX: com.samuelreed.muesli.dev
         MUESLI_DISPLAY_NAME: MuesliDev
         MUESLI_URL_SCHEME: mueslidev
     dependencies:
@@ -185,7 +185,7 @@ targets:
           - "MuesliKeyboard.entitlements"
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.phequals7.muesli.ios.tests
+        PRODUCT_BUNDLE_IDENTIFIER: com.samuelreed.muesli.ios.tests
         GENERATE_INFOPLIST_FILE: true
     dependencies:
       - target: Muesli
@@ -198,7 +198,7 @@ targets:
       - path: Tests/MuesliUITests
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.phequals7.muesli.ios.uitests
+        PRODUCT_BUNDLE_IDENTIFIER: com.samuelreed.muesli.ios.uitests
         GENERATE_INFOPLIST_FILE: true
     dependencies:
       - target: Muesli

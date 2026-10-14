@@ -11,11 +11,11 @@ protocol ModelBackgroundDownloadServiceDelegate: AnyObject {
 final class ModelBackgroundDownloadService: NSObject, @unchecked Sendable {
     static let shared = ModelBackgroundDownloadService()
 
-    private static let sessionIdentifier = "\(Bundle.main.bundleIdentifier ?? "com.phequals7.muesli.ios").model-downloads"
+    private static let sessionIdentifier = "\(Bundle.main.bundleIdentifier ?? "com.samuelreed.muesli.ios").model-downloads"
 
     @MainActor weak var delegate: ModelBackgroundDownloadServiceDelegate?
 
-    private let stateQueue = DispatchQueue(label: "com.phequals7.muesli.model-background-download")
+    private let stateQueue = DispatchQueue(label: "com.samuelreed.muesli.model-background-download")
     private var requestedAttempt: ModelDownloadAttempt?
     private var activePlan: DownloadPlan?
     private var taskBytes: [Int: Int64] = [:]

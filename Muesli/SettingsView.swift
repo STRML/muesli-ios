@@ -20,6 +20,9 @@ struct SettingsView: View {
     @AppStorage(MuesliPreferences.meetingSummaryBackendKey) private var meetingSummaryBackend = MeetingSummaryBackend.openRouter.rawValue
     @AppStorage(MuesliPreferences.openRouterModelKey) private var openRouterModel = MeetingSummaryBackend.defaultOpenRouterModel
     @AppStorage(MuesliPreferences.chatGPTModelKey) private var chatGPTModel = MeetingSummaryBackend.defaultChatGPTModel
+    @AppStorage(MuesliPreferences.customLLMBaseURLKey) private var customLLMBaseURL = ""
+    @AppStorage(MuesliPreferences.customLLMModelKey) private var customLLMModel = ""
+    @State private var customLLMAPIKey = ""
     @AppStorage(MuesliPreferences.meetingTemplateKey) private var meetingTemplate = MeetingTemplatePreset.general.rawValue
     @AppStorage(MuesliPreferences.iCloudSyncEnabledKey) private var iCloudSyncEnabled = false
     @State private var keyboardStatusText = "Unknown"
@@ -84,6 +87,9 @@ struct SettingsView: View {
                 }
                 .onChange(of: openRouterAPIKey) { _, newValue in
                     saveOpenRouterAPIKey(newValue)
+                }
+                .onChange(of: customLLMAPIKey) { _, newValue in
+                    saveCustomLLMAPIKey(newValue)
                 }
                 .onChange(of: iCloudSyncEnabled) { _, enabled in
                     if enabled && isApplyingQRCodeSyncEnable {
@@ -639,6 +645,37 @@ struct SettingsView: View {
                         presets: SummaryModelPreset.openRouterModels
                     )
                     .disabled(!meetingSummariesEnabled)
+                } else if selectedSummaryBackend == .customLLM {
+                    Text("Any OpenAI-compatible server, for example your own over Tailscale. Notes and titles are sent only to this address.")
+                        .font(MuesliTheme.caption())
+                        .foregroundStyle(MuesliTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    SettingsTextFieldRow(
+                        icon: "link",
+                        title: "Server URL",
+                        placeholder: "https://host.example.ts.net/v1",
+                        text: $customLLMBaseURL
+                    )
+                    .keyboardType(.URL)
+                    .disabled(!meetingSummariesEnabled)
+
+                    SettingsTextFieldRow(
+                        icon: "cpu",
+                        title: "Model",
+                        placeholder: "model name on the server",
+                        text: $customLLMModel
+                    )
+                    .disabled(!meetingSummariesEnabled)
+
+                    SettingsTextFieldRow(
+                        icon: "key",
+                        title: "API Key (optional)",
+                        placeholder: "Bearer token",
+                        text: $customLLMAPIKey,
+                        isSecure: true
+                    )
+                    .disabled(!meetingSummariesEnabled)
                 } else {
                     SettingsRow(
                         icon: "person.crop.circle.badge.checkmark",
@@ -709,6 +746,7 @@ struct SettingsView: View {
 
     private func refreshSummarySettings() {
         openRouterAPIKey = MeetingSummaryClient.storedOpenRouterAPIKey()
+        customLLMAPIKey = MeetingSummaryClient.storedCustomLLMAPIKey()
         chatGPTSignedIn = ChatGPTAuthManager.shared.isAuthenticated
     }
 
@@ -725,6 +763,17 @@ struct SettingsView: View {
             summaryStatusText = apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 ? "OpenRouter key cleared."
                 : "OpenRouter key saved in Keychain."
+        } catch {
+            summaryStatusText = error.localizedDescription
+        }
+    }
+
+    private func saveCustomLLMAPIKey(_ apiKey: String) {
+        do {
+            try MeetingSummaryClient.saveCustomLLMAPIKey(apiKey)
+            summaryStatusText = apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? "Custom server key cleared."
+                : "Custom server key saved in Keychain."
         } catch {
             summaryStatusText = error.localizedDescription
         }

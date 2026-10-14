@@ -77,7 +77,7 @@ final class DictationCoordinator {
     private var keyboardSessionRetryAttempt = 0
     private var keyboardWaveformLevelThrottle = MuesliWaveformLevelThrottle()
     private let keyboardRuntimeStatusQueue = DispatchQueue(
-        label: "com.phequals7.muesli.keyboard-runtime-status",
+        label: "com.samuelreed.muesli.keyboard-runtime-status",
         qos: .utility
     )
     private var persistentKeyboardSessionRequestIDs = Set<UUID>()
@@ -105,7 +105,7 @@ final class DictationCoordinator {
     private var meetingLifecycleRunner: MeetingLifecycleRunner?
     private var voiceNoteLifecycleState = VoiceNoteLifecycleState()
     private var voiceNoteLifecycleRunner: VoiceNoteLifecycleRunner?
-    private let meetingVadQueue = DispatchQueue(label: "com.phequals7.muesli.meeting-vad")
+    private let meetingVadQueue = DispatchQueue(label: "com.samuelreed.muesli.meeting-vad")
     private var transcriptionBackgroundTask: UIBackgroundTaskIdentifier = .invalid
     nonisolated(unsafe) private var audioRouteObserver: NSObjectProtocol?
     nonisolated(unsafe) private var audioInterruptionObserver: NSObjectProtocol?
@@ -6593,9 +6593,11 @@ final class DictationCoordinator {
                 summaryState = .failed
                 let backend = MuesliPreferences.meetingSummaryBackend
                 summaryBackend = backend.rawValue
-                summaryModel = backend == .chatGPT
-                    ? MuesliPreferences.chatGPTModel
-                    : MuesliPreferences.openRouterModel
+                summaryModel = switch backend {
+                case .chatGPT: MuesliPreferences.chatGPTModel
+                case .customLLM: MuesliPreferences.customLLMModel
+                case .openRouter: MuesliPreferences.openRouterModel
+                }
                 summaryErrorMessage = error.localizedDescription
                 AppTelemetry.failure(
                     "meeting_summary_failed",

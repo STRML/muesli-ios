@@ -1,14 +1,14 @@
 import Foundation
 
 enum MuesliAppConstants {
-    static let bundleIdentifier = Bundle.main.bundleIdentifier ?? "com.phequals7.muesli.ios"
+    static let bundleIdentifier = Bundle.main.bundleIdentifier ?? "com.samuelreed.muesli.ios"
     static let appGroupIdentifier = configuredValue(
         forInfoDictionaryKey: "MuesliAppGroupIdentifier",
-        fallback: "group.com.phequals7.muesli"
+        fallback: "group.com.samuelreed.muesli"
     )
     static let crossProcessPrefix = configuredValue(
         forInfoDictionaryKey: "MuesliCrossProcessPrefix",
-        fallback: "com.phequals7.muesli"
+        fallback: "com.samuelreed.muesli"
     )
     static let urlScheme = configuredValue(
         forInfoDictionaryKey: "MuesliURLScheme",
