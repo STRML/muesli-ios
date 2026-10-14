@@ -29,6 +29,9 @@ struct OnboardingView: View {
     ) == nil ? true : UserDefaults.standard.bool(forKey: MuesliPreferences.meetingSummariesEnabledKey)
     @State private var summaryBackend = MuesliPreferences.meetingSummaryBackend
     @State private var openRouterAPIKey = MeetingSummaryClient.storedOpenRouterAPIKey()
+    @State private var customLLMAPIKey = MeetingSummaryClient.storedCustomLLMAPIKey()
+    @AppStorage(MuesliPreferences.customLLMBaseURLKey) private var customLLMBaseURL = ""
+    @AppStorage(MuesliPreferences.customLLMModelKey) private var customLLMModel = ""
     @State private var chatGPTSignedIn = ChatGPTAuthManager.shared.isAuthenticated
     @State private var isSigningInChatGPT = false
     @State private var summaryStatusText: String?
@@ -813,7 +816,7 @@ struct OnboardingView: View {
                 Text("Meeting Summaries")
                     .font(MuesliTheme.title1())
                     .foregroundStyle(MuesliTheme.textPrimary)
-                Text("Connect ChatGPT or OpenRouter now so meeting recordings can become structured notes after local transcription and diarization.")
+                Text("Connect ChatGPT, OpenRouter or your own server now so meeting recordings can become structured notes after local transcription and diarization.")
                     .font(MuesliTheme.body())
                     .foregroundStyle(MuesliTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -843,9 +846,12 @@ struct OnboardingView: View {
                     .pickerStyle(.segmented)
                     .disabled(!meetingSummariesEnabled)
 
-                    if summaryBackend == .chatGPT {
+                    switch summaryBackend {
+                    case .chatGPT:
                         chatGPTSummarySetup
-                    } else {
+                    case .customLLM:
+                        customLLMSummarySetup
+                    case .openRouter:
                         openRouterSummarySetup
                     }
 
@@ -945,6 +951,44 @@ struct OnboardingView: View {
         }
         .onChange(of: openRouterAPIKey) { _, apiKey in
             saveOpenRouterAPIKey(apiKey)
+        }
+    }
+
+    private var customLLMSummarySetup: some View {
+        VStack(alignment: .leading, spacing: MuesliTheme.spacing12) {
+            Text("Any OpenAI-compatible server, for example your own over Tailscale. Notes and titles are sent only to this address.")
+                .font(MuesliTheme.caption())
+                .foregroundStyle(MuesliTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            SettingsTextFieldRow(
+                icon: "link",
+                title: "Server URL",
+                placeholder: "https://host.example.ts.net/v1",
+                text: $customLLMBaseURL
+            )
+            .keyboardType(.URL)
+            .disabled(!meetingSummariesEnabled)
+
+            SettingsTextFieldRow(
+                icon: "cpu",
+                title: "Model",
+                placeholder: "model name on the server",
+                text: $customLLMModel
+            )
+            .disabled(!meetingSummariesEnabled)
+
+            SettingsTextFieldRow(
+                icon: "key",
+                title: "API Key (optional)",
+                placeholder: "Bearer token",
+                text: $customLLMAPIKey,
+                isSecure: true
+            )
+            .disabled(!meetingSummariesEnabled)
+        }
+        .onChange(of: customLLMAPIKey) { _, apiKey in
+            saveCustomLLMAPIKey(apiKey)
         }
     }
 
@@ -1189,6 +1233,7 @@ struct OnboardingView: View {
 
     private func refreshSummaryStatus() {
         openRouterAPIKey = MeetingSummaryClient.storedOpenRouterAPIKey()
+        customLLMAPIKey = MeetingSummaryClient.storedCustomLLMAPIKey()
         chatGPTSignedIn = ChatGPTAuthManager.shared.isAuthenticated
     }
 
@@ -1254,12 +1299,26 @@ struct OnboardingView: View {
         if summaryBackend == .openRouter {
             saveOpenRouterAPIKey(openRouterAPIKey)
         }
+        if summaryBackend == .customLLM {
+            saveCustomLLMAPIKey(customLLMAPIKey)
+        }
         AppTelemetry.signal("onboarding_summary_configured", parameters: [
             "enabled": meetingSummariesEnabled ? "true" : "false",
             "backend": summaryBackend.rawValue,
             "chatgpt_signed_in": chatGPTSignedIn ? "true" : "false",
             "openrouter_key_present": MeetingSummaryClient.storedOpenRouterAPIKey().isEmpty ? "false" : "true"
         ])
+    }
+
+    private func saveCustomLLMAPIKey(_ apiKey: String) {
+        do {
+            try MeetingSummaryClient.saveCustomLLMAPIKey(apiKey)
+            summaryStatusText = apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? "Custom server key cleared."
+                : "Custom server key saved in Keychain."
+        } catch {
+            summaryStatusText = error.localizedDescription
+        }
     }
 
     private func saveOpenRouterAPIKey(_ apiKey: String) {
