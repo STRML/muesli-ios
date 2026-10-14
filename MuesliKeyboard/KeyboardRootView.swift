@@ -5,9 +5,11 @@ struct KeyboardRootView: View {
 
     private static let recorderBodyHeight: CGFloat = 84
     private static let fixButtonWidth: CGFloat = 104
-    private static let cancelChipSize: CGFloat = 40
-    private static let activeMicHeight: CGFloat = 52
-    private static let activeStatusWidth: CGFloat = 84
+    private static let cancelChipSize: CGFloat = 60
+    private static let activeMicHeight: CGFloat = 84
+    /// The ready body plus the header row and its spacing, which the listening state gives back.
+    private static let activeRecorderHeight: CGFloat = 123
+    private static let activeStatusWidth: CGFloat = 70
     private static let activeControlButtonWidth: CGFloat = 120
     private static let activeWaveformBarCount = 34
 
@@ -50,7 +52,11 @@ struct KeyboardRootView: View {
                 .fill(MuesliTheme.textSecondary.opacity(0.7))
                 .frame(width: 40, height: 4)
 
-            header
+            // While listening nothing in the header is usable (the model cannot change mid-recording),
+            // so its space goes to the controls.
+            if !controller.showsActiveWaveform {
+                header
+            }
 
             if controller.showsActiveWaveform {
                 activeRecorder
@@ -235,14 +241,14 @@ struct KeyboardRootView: View {
                 primaryActionButton(isProminent: false, iconOnly: true)
             }
         }
-        .frame(height: Self.recorderBodyHeight)
+        .frame(height: Self.activeRecorderHeight)
     }
 
     /// Small on purpose: cancelling throws the recording away, so it must be hard to hit by accident.
     private var cancelChip: some View {
         Button(action: controller.cancelActiveDictation) {
             Image(systemName: "xmark")
-                .font(.system(size: 14, weight: .bold))
+                .font(.system(size: 20, weight: .bold))
                 .foregroundStyle(MuesliTheme.destructive)
                 .frame(width: Self.cancelChipSize, height: Self.cancelChipSize)
                 .background(MuesliTheme.destructive.opacity(0.12), in: Circle())
@@ -263,7 +269,7 @@ struct KeyboardRootView: View {
                     .shadow(color: activeStatusColor.opacity(0.75), radius: 5)
 
                 Text(activeStatusText)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(activeStatusColor)
                     .lineLimit(1)
                     .minimumScaleFactor(0.82)
@@ -371,7 +377,7 @@ struct KeyboardRootView: View {
                     ProgressView().tint(primaryForeground)
                 } else {
                     Image(systemName: "mic.fill")
-                        .font(.system(size: 26, weight: .bold))
+                        .font(.system(size: 34, weight: .bold))
                         .accessibilityLabel("Finish and insert")
                 }
             } else {
