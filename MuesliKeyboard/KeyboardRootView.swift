@@ -5,6 +5,8 @@ struct KeyboardRootView: View {
 
     private static let recorderBodyHeight: CGFloat = 84
     private static let fixButtonWidth: CGFloat = 104
+    private static let cancelChipSize: CGFloat = 40
+    private static let activeMicHeight: CGFloat = 52
     private static let activeStatusWidth: CGFloat = 84
     private static let activeControlButtonWidth: CGFloat = 120
     private static let activeWaveformBarCount = 34
@@ -226,25 +228,30 @@ struct KeyboardRootView: View {
         VStack(spacing: MuesliTheme.spacing8) {
             activeWaveformStrip
             HStack(spacing: MuesliTheme.spacing8) {
-                Group {
-                    if controller.canCancelActiveDictation {
-                        KeyboardControlButton(
-                            title: "Cancel",
-                            tint: MuesliTheme.destructive,
-                            action: controller.cancelActiveDictation
-                        )
-                    } else {
-                        Color.clear
-                            .frame(height: 40)
-                    }
+                if controller.canCancelActiveDictation {
+                    cancelChip
                 }
-                .frame(width: Self.activeControlButtonWidth)
-
-                primaryActionButton(isProminent: false)
-                    .frame(width: Self.activeControlButtonWidth)
+                // Tapping the microphone again finishes listening and writes the text, like Dictation.
+                primaryActionButton(isProminent: false, iconOnly: true)
             }
         }
         .frame(height: Self.recorderBodyHeight)
+    }
+
+    /// Small on purpose: cancelling throws the recording away, so it must be hard to hit by accident.
+    private var cancelChip: some View {
+        Button(action: controller.cancelActiveDictation) {
+            Image(systemName: "xmark")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(MuesliTheme.destructive)
+                .frame(width: Self.cancelChipSize, height: Self.cancelChipSize)
+                .background(MuesliTheme.destructive.opacity(0.12), in: Circle())
+                .overlay(Circle().strokeBorder(MuesliTheme.destructive.opacity(0.22), lineWidth: 1))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Cancel recording")
+        .accessibilityIdentifier("keyboard.cancel")
     }
 
     private var activeWaveformStrip: some View {
@@ -336,10 +343,10 @@ struct KeyboardRootView: View {
     }
 
     @ViewBuilder
-    private func primaryActionButton(isProminent: Bool, fillsHeight: Bool = false) -> some View {
+    private func primaryActionButton(isProminent: Bool, fillsHeight: Bool = false, iconOnly: Bool = false) -> some View {
         if controller.opensMuesliFromPrimaryButton, let launchURL = controller.launchURL {
             Link(destination: launchURL) {
-                primaryActionLabel(isProminent: isProminent, fillsHeight: fillsHeight)
+                primaryActionLabel(isProminent: isProminent, fillsHeight: fillsHeight, iconOnly: iconOnly)
             }
             .simultaneousGesture(TapGesture().onEnded {
                 controller.primaryLaunchAction()
@@ -350,25 +357,35 @@ struct KeyboardRootView: View {
             Button {
                 controller.primaryAction()
             } label: {
-                primaryActionLabel(isProminent: isProminent, fillsHeight: fillsHeight)
+                primaryActionLabel(isProminent: isProminent, fillsHeight: fillsHeight, iconOnly: iconOnly)
             }
             .buttonStyle(.plain)
             .disabled(controller.isPrimaryButtonDisabled)
         }
     }
 
-    private func primaryActionLabel(isProminent: Bool, fillsHeight: Bool) -> some View {
+    private func primaryActionLabel(isProminent: Bool, fillsHeight: Bool, iconOnly: Bool = false) -> some View {
         HStack(spacing: MuesliTheme.spacing8) {
-            Image(systemName: controller.primaryButtonIcon)
-                .font(.system(size: fillsHeight ? 30 : (isProminent ? 21 : 15), weight: .bold))
-            Text(primaryActionTitle)
-                .font(.system(size: fillsHeight ? 26 : (isProminent ? 19 : 16), weight: .bold))
-                .lineLimit(1)
-                .minimumScaleFactor(0.72)
+            if iconOnly {
+                if controller.dictationPhase == .transcribing {
+                    ProgressView().tint(primaryForeground)
+                } else {
+                    Image(systemName: "mic.fill")
+                        .font(.system(size: 26, weight: .bold))
+                        .accessibilityLabel("Finish and insert")
+                }
+            } else {
+                Image(systemName: controller.primaryButtonIcon)
+                    .font(.system(size: fillsHeight ? 30 : (isProminent ? 21 : 15), weight: .bold))
+                Text(primaryActionTitle)
+                    .font(.system(size: fillsHeight ? 26 : (isProminent ? 19 : 16), weight: .bold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+            }
         }
         .foregroundStyle(primaryForeground)
         .frame(maxWidth: .infinity)
-        .frame(height: fillsHeight ? Self.recorderBodyHeight : (isProminent ? 44 : 36))
+        .frame(height: iconOnly ? Self.activeMicHeight : (fillsHeight ? Self.recorderBodyHeight : (isProminent ? 44 : 36)))
         .background(primaryBackground, in: RoundedRectangle(cornerRadius: isProminent ? 15 : 12, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: isProminent ? 15 : 12, style: .continuous)
