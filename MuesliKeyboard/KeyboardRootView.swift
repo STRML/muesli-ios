@@ -1,13 +1,14 @@
 import SwiftUI
 
 struct KeyboardRootView: View {
-    /// Room for the control row, a status line and two rows of keys.
-    static let preferredHeight: CGFloat = 272
+    /// Room for the control row, a one-line status and two rows of keys.
+    static let preferredHeight: CGFloat = 252
 
     /// Three slots that never move: a side button, the primary pill, a side button. Only their content changes.
     private static let controlHeight: CGFloat = 64
     private static let sideButtonWidth: CGFloat = 64
-    private static let statusBodyHeight: CGFloat = 56
+    private static let statusBodyHeight: CGFloat = 40
+    private static let dismissRowHeight: CGFloat = 20
 
     @Bindable var controller: KeyboardController
 
@@ -45,8 +46,8 @@ struct KeyboardRootView: View {
     private var isActive: Bool { controller.showsActiveWaveform }
 
     private var keyboardDeck: some View {
-        VStack(spacing: 8) {
-            grabberRow
+        VStack(spacing: 6) {
+            dismissRow
 
             if controller.hasPendingSetupVerification, !isActive {
                 verifyRow
@@ -63,27 +64,23 @@ struct KeyboardRootView: View {
         .animation(.snappy(duration: 0.22), value: controller.primaryButtonRole)
     }
 
-    private var grabberRow: some View {
-        ZStack {
-            Capsule()
-                .fill(MuesliTheme.textSecondary.opacity(0.7))
-                .frame(width: 40, height: 4)
-            HStack {
-                Spacer()
-                Button {
-                    controller.dismissKeyboard()
-                } label: {
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(MuesliTheme.textSecondary)
-                        .frame(width: 44, height: 22)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Dismiss keyboard")
+    /// Just the dismiss chevron. A drag handle here suggested the panel could be swiped down; it cannot.
+    private var dismissRow: some View {
+        HStack {
+            Spacer()
+            Button {
+                controller.dismissKeyboard()
+            } label: {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(MuesliTheme.textSecondary)
+                    .frame(width: 44, height: Self.dismissRowHeight)
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Dismiss keyboard")
         }
-        .frame(height: 22)
+        .frame(height: Self.dismissRowHeight)
     }
 
     // MARK: Control row
@@ -300,11 +297,11 @@ struct KeyboardRootView: View {
 
     /// The text a voice edit will change, highlighted the way a selection is, with what to do next.
     private func editTarget(_ original: String) -> some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 4) {
             Text(original)
                 .font(.system(size: 13, weight: .regular))
                 .foregroundStyle(MuesliTheme.textPrimary)
-                .lineLimit(2)
+                .lineLimit(1)
                 .truncationMode(.head)
                 .multilineTextAlignment(.leading)
                 .padding(.horizontal, 8)
