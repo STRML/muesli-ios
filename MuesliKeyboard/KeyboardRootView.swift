@@ -4,6 +4,7 @@ struct KeyboardRootView: View {
     static let preferredHeight: CGFloat = 245
 
     private static let recorderBodyHeight: CGFloat = 84
+    private static let fixButtonWidth: CGFloat = 104
     private static let activeStatusWidth: CGFloat = 84
     private static let activeControlButtonWidth: CGFloat = 120
     private static let activeWaveformBarCount = 34
@@ -177,30 +178,48 @@ struct KeyboardRootView: View {
                         .lineLimit(1)
                 }
             } else {
-                VStack(spacing: MuesliTheme.spacing8) {
-                    primaryActionButton(isProminent: true)
-
-                    if controller.canInsertLatest {
-                        Button {
-                            controller.insertLatestDictation()
-                        } label: {
-                            Label("Insert latest", systemImage: "text.insert")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(MuesliTheme.recording)
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 32)
-                                .background(MuesliTheme.recording.opacity(0.14), in: Capsule())
-                                .contentShape(Capsule())
-                        }
-                        .buttonStyle(.plain)
-                    } else {
-                        Color.clear
-                            .frame(height: 32)
-                    }
+                HStack(spacing: MuesliTheme.spacing8) {
+                    primaryActionButton(isProminent: true, fillsHeight: true)
+                    fixButton
                 }
             }
         }
         .frame(height: Self.recorderBodyHeight)
+    }
+
+    /// Voice correction: say what to change and the selection, or the text just written, is rewritten.
+    private var fixButton: some View {
+        Button {
+            controller.startRewrite()
+        } label: {
+            VStack(spacing: 4) {
+                Image(systemName: "wand.and.stars")
+                    .font(.system(size: 26, weight: .bold))
+                Text("Fix")
+                    .font(.system(size: 15, weight: .bold))
+            }
+            .foregroundStyle(controller.canRewrite ? Color.white : MuesliTheme.textTertiary)
+            .frame(width: Self.fixButtonWidth, height: Self.recorderBodyHeight)
+            .background(
+                controller.canRewrite
+                    ? AnyShapeStyle(LinearGradient(
+                        colors: [MuesliTheme.accent, MuesliTheme.accent.opacity(0.72)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ))
+                    : AnyShapeStyle(MuesliTheme.surfacePrimary),
+                in: RoundedRectangle(cornerRadius: 15, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 15, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.16), lineWidth: 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Fix text")
+        .accessibilityHint("Say what to change in the selected text, or the text before the cursor")
+        .accessibilityIdentifier("keyboard.fix")
     }
 
     private var activeRecorder: some View {
@@ -317,10 +336,10 @@ struct KeyboardRootView: View {
     }
 
     @ViewBuilder
-    private func primaryActionButton(isProminent: Bool) -> some View {
+    private func primaryActionButton(isProminent: Bool, fillsHeight: Bool = false) -> some View {
         if controller.opensMuesliFromPrimaryButton, let launchURL = controller.launchURL {
             Link(destination: launchURL) {
-                primaryActionLabel(isProminent: isProminent)
+                primaryActionLabel(isProminent: isProminent, fillsHeight: fillsHeight)
             }
             .simultaneousGesture(TapGesture().onEnded {
                 controller.primaryLaunchAction()
@@ -331,25 +350,25 @@ struct KeyboardRootView: View {
             Button {
                 controller.primaryAction()
             } label: {
-                primaryActionLabel(isProminent: isProminent)
+                primaryActionLabel(isProminent: isProminent, fillsHeight: fillsHeight)
             }
             .buttonStyle(.plain)
             .disabled(controller.isPrimaryButtonDisabled)
         }
     }
 
-    private func primaryActionLabel(isProminent: Bool) -> some View {
+    private func primaryActionLabel(isProminent: Bool, fillsHeight: Bool) -> some View {
         HStack(spacing: MuesliTheme.spacing8) {
             Image(systemName: controller.primaryButtonIcon)
-                .font(.system(size: isProminent ? 21 : 15, weight: .bold))
+                .font(.system(size: fillsHeight ? 30 : (isProminent ? 21 : 15), weight: .bold))
             Text(primaryActionTitle)
-                .font(.system(size: isProminent ? 19 : 16, weight: .bold))
+                .font(.system(size: fillsHeight ? 26 : (isProminent ? 19 : 16), weight: .bold))
                 .lineLimit(1)
                 .minimumScaleFactor(0.72)
         }
         .foregroundStyle(primaryForeground)
         .frame(maxWidth: .infinity)
-        .frame(height: isProminent ? 44 : 36)
+        .frame(height: fillsHeight ? Self.recorderBodyHeight : (isProminent ? 44 : 36))
         .background(primaryBackground, in: RoundedRectangle(cornerRadius: isProminent ? 15 : 12, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: isProminent ? 15 : 12, style: .continuous)
