@@ -37,5 +37,6 @@ struct KeyboardRuntimeStatusPublishPolicy: Equatable {
             && lhs.supportsBackgroundStart == rhs.supportsBackgroundStart
             && lhs.canAcceptStartCommand == rhs.canAcceptStartCommand
             && lhs.inputLevel == rhs.inputLevel
+            && lhs.rewriteAvailable == rhs.rewriteAvailable
     }
 }

@@ -107,3 +107,57 @@ final class VoiceRewritePlannerTests: XCTestCase {
         )
     }
 }
+
+/// Requests, results and the runtime status travel between two processes and sit in SQLite, so the new
+/// fields must leave every payload an older build wrote decodable.
+final class VoiceRewriteModelsTests: XCTestCase {
+    private let decoder: JSONDecoder = {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .secondsSince1970
+        return decoder
+    }()
+    private let encoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .secondsSince1970
+        return encoder
+    }()
+
+    func testARequestCarriesItsRewriteTargetAcrossTheStore() throws {
+        let context = RewriteContext(target: .textBeforeCursor, original: "Is this right?")
+        let request = DictationRequest(rewrite: context)
+        let decoded = try decoder.decode(DictationRequest.self, from: encoder.encode(request))
+        XCTAssertEqual(decoded.rewrite, context)
+    }
+
+    func testARequestFromAnOlderBuildStillDecodesWithoutARewrite() throws {
+        let json = #"{"id":"6F1D7C1E-0F4E-4E0B-9B0D-2A0A5B7C9D10","createdAt":1800000000}"#
+        let request = try decoder.decode(DictationRequest.self, from: Data(json.utf8))
+        XCTAssertNil(request.rewrite)
+    }
+
+    func testAResultCarriesTheRewriteItReplaces() throws {
+        let context = RewriteContext(target: .selection, original: "teh cat")
+        let result = DictationResult(requestID: UUID(), text: "the cat", engineIdentifier: "test", rewrite: context)
+        let decoded = try decoder.decode(DictationResult.self, from: encoder.encode(result))
+        XCTAssertEqual(decoded.rewrite, context)
+        XCTAssertEqual(decoded.text, "the cat")
+    }
+
+    func testAResultFromAnOlderBuildStillDecodesWithoutARewrite() throws {
+        let json = """
+        {"id":"6F1D7C1E-0F4E-4E0B-9B0D-2A0A5B7C9D10","requestID":"1B2C3D4E-0F4E-4E0B-9B0D-2A0A5B7C9D10",
+        "text":"hello","createdAt":1800000000,"engineIdentifier":"parakeet"}
+        """
+        let result = try decoder.decode(DictationResult.self, from: Data(json.utf8))
+        XCTAssertNil(result.rewrite)
+    }
+
+    func testTheRuntimeStatusSaysWhetherRewriteIsAvailableAndDefaultsToNo() throws {
+        let status = KeyboardRuntimeStatus(isActive: true, rewriteAvailable: true, updatedAt: Date(timeIntervalSince1970: 1_800_000_000))
+        let decoded = try decoder.decode(KeyboardRuntimeStatus.self, from: encoder.encode(status))
+        XCTAssertTrue(decoded.rewriteAvailable)
+
+        let old = #"{"isActive":true,"phase":"idle","updatedAt":1800000000}"#
+        XCTAssertFalse(try decoder.decode(KeyboardRuntimeStatus.self, from: Data(old.utf8)).rewriteAvailable)
+    }
+}
