@@ -6593,9 +6593,11 @@ final class DictationCoordinator {
                 summaryState = .failed
                 let backend = MuesliPreferences.meetingSummaryBackend
                 summaryBackend = backend.rawValue
-                summaryModel = backend == .chatGPT
-                    ? MuesliPreferences.chatGPTModel
-                    : MuesliPreferences.openRouterModel
+                summaryModel = switch backend {
+                case .chatGPT: MuesliPreferences.chatGPTModel
+                case .customLLM: MuesliPreferences.customLLMModel
+                case .openRouter: MuesliPreferences.openRouterModel
+                }
                 summaryErrorMessage = error.localizedDescription
                 AppTelemetry.failure(
                     "meeting_summary_failed",
