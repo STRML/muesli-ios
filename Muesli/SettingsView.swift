@@ -11,6 +11,7 @@ struct SettingsView: View {
     @AppStorage(MuesliPreferences.liveActivitiesForDictationsKey) private var liveActivitiesForDictations = true
     @AppStorage(MuesliPreferences.liveActivitiesForMeetingsKey) private var liveActivitiesForMeetings = true
     @AppStorage(MuesliPreferences.keyboardSessionModeKey) private var keyboardSessionMode = true
+    @AppStorage(MuesliPreferences.keyboardMicAutoOffMinutesKey) private var keyboardMicAutoOffMinutes = KeyboardMicAutoOff.defaultMinutes
     @AppStorage(MuesliPreferences.recordingMicrophonePreferenceKey) private var microphonePreference = RecordingMicrophonePreference.automatic.rawValue
     @AppStorage(MuesliPreferences.keepDictationAudioRecordingsKey) private var keepDictationAudioRecordings = false
     @AppStorage(MuesliPreferences.longVoiceNoteModeEnabledKey) private var longVoiceNoteModeEnabled = true
@@ -20,6 +21,9 @@ struct SettingsView: View {
     @AppStorage(MuesliPreferences.meetingSummaryBackendKey) private var meetingSummaryBackend = MeetingSummaryBackend.openRouter.rawValue
     @AppStorage(MuesliPreferences.openRouterModelKey) private var openRouterModel = MeetingSummaryBackend.defaultOpenRouterModel
     @AppStorage(MuesliPreferences.chatGPTModelKey) private var chatGPTModel = MeetingSummaryBackend.defaultChatGPTModel
+    @AppStorage(MuesliPreferences.customLLMBaseURLKey) private var customLLMBaseURL = ""
+    @AppStorage(MuesliPreferences.customLLMModelKey) private var customLLMModel = ""
+    @State private var customLLMAPIKey = ""
     @AppStorage(MuesliPreferences.meetingTemplateKey) private var meetingTemplate = MeetingTemplatePreset.general.rawValue
     @AppStorage(MuesliPreferences.iCloudSyncEnabledKey) private var iCloudSyncEnabled = false
     @State private var keyboardStatusText = "Unknown"
@@ -85,6 +89,9 @@ struct SettingsView: View {
                 .onChange(of: openRouterAPIKey) { _, newValue in
                     saveOpenRouterAPIKey(newValue)
                 }
+                .onChange(of: customLLMAPIKey) { _, newValue in
+                    saveCustomLLMAPIKey(newValue)
+                }
                 .onChange(of: iCloudSyncEnabled) { _, enabled in
                     if enabled && isApplyingQRCodeSyncEnable {
                         isApplyingQRCodeSyncEnable = false
@@ -136,6 +143,12 @@ struct SettingsView: View {
                 }
                 .padding(MuesliTheme.spacing20)
             }
+            .overlay(alignment: .leading) {
+                Color.clear
+                    .frame(width: 28)
+                    .contentShape(Rectangle())
+                    .gesture(edgeBackSwipe)
+            }
         } else {
             ScrollView {
                 VStack(alignment: .leading, spacing: MuesliTheme.spacing16) {
@@ -171,6 +184,19 @@ struct SettingsView: View {
                 .padding(MuesliTheme.spacing20)
             }
         }
+    }
+
+    /// Settings subareas are not a navigation stack, so the system back swipe does not exist for them.
+    /// A swipe that starts on the strip along the left edge and travels right goes back to the Settings list.
+    private var edgeBackSwipe: some Gesture {
+        DragGesture(minimumDistance: 24)
+            .onEnded { value in
+                guard value.translation.width > 60,
+                      abs(value.translation.height) < value.translation.width / 2 else { return }
+                withAnimation(.snappy(duration: 0.22)) {
+                    selectedSettingsSection = nil
+                }
+            }
     }
 
     private var settingsHeader: some View {
@@ -228,6 +254,8 @@ struct SettingsView: View {
             syncPrivacySettings
         case .aiSummaries:
             aiSummarySettings
+        case .quill:
+            quillSettings
         }
     }
 
@@ -281,6 +309,11 @@ struct SettingsView: View {
                         .frame(minHeight: 44)
                     }
                     Divider().overlay(MuesliTheme.surfaceBorder)
+                    SettingsKeyboardMicAutoOffRow(
+                        minutes: keyboardMicAutoOffBinding,
+                        isAvailable: keyboardSessionMode
+                    )
+                    Divider().overlay(MuesliTheme.surfaceBorder)
                     SettingsMicrophonePicker(selection: $microphonePreference)
                     Divider().overlay(MuesliTheme.surfaceBorder)
                     SettingsToggleRow(
@@ -313,8 +346,18 @@ struct SettingsView: View {
         })
     }
 
+    private var keyboardMicAutoOffBinding: Binding<Int> {
+        Binding(
+            get: { keyboardMicAutoOffMinutes },
+            set: { minutes in
+                keyboardMicAutoOffMinutes = minutes
+                coordinator.setKeyboardMicAutoOffMinutes(minutes)
+            }
+        )
+    }
+
     private var keyboardSessionModeDetail: String {
-        "When enabled, each keyboard dictation opens Muesli. Otherwise the mic stays ready until you tap Turn mic off in Muesli, on the Lock Screen, or in the expanded Dynamic Island."
+        "On: the mic turns off as soon as a dictation ends, and the next keyboard dictation has to open Muesli to start it. Off: the mic stays ready between dictations, so the keyboard starts instantly, until you turn it off in Muesli, on the Lock Screen or in the Dynamic Island, or it turns off by itself (see below)."
     }
 
     private var meetingSettings: some View {
@@ -639,6 +682,14 @@ struct SettingsView: View {
                         presets: SummaryModelPreset.openRouterModels
                     )
                     .disabled(!meetingSummariesEnabled)
+                } else if selectedSummaryBackend == .customLLM {
+                    Text("Any OpenAI-compatible server, for example your own over Tailscale. Notes and titles are sent only to this address. Quill uses the same server.")
+                        .font(MuesliTheme.caption())
+                        .foregroundStyle(MuesliTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    customLLMFields
+                        .disabled(!meetingSummariesEnabled)
                 } else {
                     SettingsRow(
                         icon: "person.crop.circle.badge.checkmark",
@@ -686,6 +737,74 @@ struct SettingsView: View {
         }
     }
 
+    private var isCustomLLMReady: Bool {
+        CustomLLMEndpoint.chatCompletionsURL(from: customLLMBaseURL) != nil
+            && !customLLMModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    @ViewBuilder
+    private var customLLMFields: some View {
+        SettingsTextFieldRow(
+            icon: "link",
+            title: "Server URL",
+            placeholder: "https://host.example.ts.net/v1",
+            text: $customLLMBaseURL
+        )
+        .keyboardType(.URL)
+
+        SettingsTextFieldRow(
+            icon: "key",
+            title: "API Key (optional)",
+            placeholder: "Bearer token",
+            text: $customLLMAPIKey,
+            isSecure: true
+        )
+
+        CustomLLMModelRow(model: $customLLMModel, baseURL: customLLMBaseURL, apiKey: customLLMAPIKey)
+    }
+
+    private var quillSettings: some View {
+        MuesliSurface {
+            VStack(alignment: .leading, spacing: MuesliTheme.spacing12) {
+                Text("Select text, or put the cursor after it, tap Quill on the Muesli keyboard and say what to change. Quill rewrites the selection, or the last paragraph before the cursor. Undo restores it.")
+                    .font(MuesliTheme.caption())
+                    .foregroundStyle(MuesliTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Divider().overlay(MuesliTheme.surfaceBorder)
+
+                SettingsRow(
+                    icon: "server.rack",
+                    title: "Writing model source",
+                    value: "Custom LLM",
+                    iconColor: isCustomLLMReady ? MuesliTheme.success : MuesliTheme.accent
+                )
+
+                Text("The same server Meeting Summaries use when set to Custom. Text is sent only to this address. Editing it here changes it there.")
+                    .font(MuesliTheme.caption())
+                    .foregroundStyle(MuesliTheme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                customLLMFields
+
+                if let summaryStatusText {
+                    Text(summaryStatusText)
+                        .font(MuesliTheme.caption())
+                        .foregroundStyle(MuesliTheme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if !isCustomLLMReady {
+                    Text("Quill stays off until a server URL and model are set.")
+                        .font(MuesliTheme.caption())
+                        .foregroundStyle(MuesliTheme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(MuesliTheme.spacing16)
+        }
+    }
+
     private func refreshKeyboardStatus() {
         let store = SharedStore()
         let extensionStatus = try? store.keyboardExtensionStatus()
@@ -709,6 +828,7 @@ struct SettingsView: View {
 
     private func refreshSummarySettings() {
         openRouterAPIKey = MeetingSummaryClient.storedOpenRouterAPIKey()
+        customLLMAPIKey = MeetingSummaryClient.storedCustomLLMAPIKey()
         chatGPTSignedIn = ChatGPTAuthManager.shared.isAuthenticated
     }
 
@@ -725,6 +845,17 @@ struct SettingsView: View {
             summaryStatusText = apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 ? "OpenRouter key cleared."
                 : "OpenRouter key saved in Keychain."
+        } catch {
+            summaryStatusText = error.localizedDescription
+        }
+    }
+
+    private func saveCustomLLMAPIKey(_ apiKey: String) {
+        do {
+            try MeetingSummaryClient.saveCustomLLMAPIKey(apiKey)
+            summaryStatusText = apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? "Custom server key cleared."
+                : "Custom server key saved in Keychain."
         } catch {
             summaryStatusText = error.localizedDescription
         }
@@ -806,6 +937,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     case dictionary
     case models
     case aiSummaries
+    case quill
     case syncPrivacy
     case appearance
     case about
@@ -824,6 +956,8 @@ enum SettingsSection: String, CaseIterable, Identifiable {
             "Models"
         case .aiSummaries:
             "AI Summaries"
+        case .quill:
+            "Quill"
         case .syncPrivacy:
             "Sync & Privacy"
         case .appearance:
@@ -845,6 +979,8 @@ enum SettingsSection: String, CaseIterable, Identifiable {
             "Choose and automatically download local Parakeet or Whisper models."
         case .aiSummaries:
             "Meeting summary providers, auth, and model selection."
+        case .quill:
+            "Tap Quill on the keyboard and say what to change. Uses your Custom LLM server."
         case .syncPrivacy:
             "Private iCloud sync between this iPhone and your Mac."
         case .appearance:
@@ -866,6 +1002,8 @@ enum SettingsSection: String, CaseIterable, Identifiable {
             "cpu"
         case .aiSummaries:
             "sparkles"
+        case .quill:
+            "pencil.and.outline"
         case .syncPrivacy:
             "icloud"
         case .appearance:
@@ -1219,6 +1357,52 @@ private struct SettingsToggleRow: View {
                 .labelsHidden()
                 .tint(MuesliTheme.accent)
         }
+    }
+}
+
+/// When the ready keyboard mic turns itself off. Its own row, because it is a separate choice from the toggle
+/// above: that one decides whether the mic stays ready at all.
+private struct SettingsKeyboardMicAutoOffRow: View {
+    @Binding var minutes: Int
+    let isAvailable: Bool
+
+    var body: some View {
+        HStack(alignment: .top, spacing: MuesliTheme.spacing12) {
+            Image(systemName: "timer")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(MuesliTheme.accent)
+                .frame(width: 22)
+
+            VStack(alignment: .leading, spacing: MuesliTheme.spacing4) {
+                Text("Turn mic off when idle")
+                    .font(MuesliTheme.headline())
+                    .foregroundStyle(MuesliTheme.textPrimary)
+                Text(detail)
+                    .font(MuesliTheme.caption())
+                    .foregroundStyle(MuesliTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: MuesliTheme.spacing12)
+
+            Picker("Turn mic off when idle", selection: $minutes) {
+                ForEach(KeyboardMicAutoOff.choices, id: \.self) { choice in
+                    Text(KeyboardMicAutoOff.label(forMinutes: choice)).tag(choice)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .tint(MuesliTheme.accent)
+            .disabled(!isAvailable)
+        }
+        .opacity(isAvailable ? 1 : 0.5)
+    }
+
+    private var detail: String {
+        guard isAvailable else {
+            return "Not needed while the mic turns off after each dictation."
+        }
+        return "Turns off a ready mic after this long unused, to save battery. Always off when the screen locks."
     }
 }
 
@@ -1594,6 +1778,113 @@ final class AppleSyncAccountManager {
                         continuation.resume(returning: ("Unknown", false))
                     }
                 }
+        }
+    }
+}
+
+
+/// The Custom LLM model: a dropdown of what the server lists, or a text field when it cannot be asked.
+private struct CustomLLMModelRow: View {
+    @Binding var model: String
+    let baseURL: String
+    let apiKey: String
+
+    private enum Listing: Equatable {
+        case idle
+        case loading
+        case loaded([String])
+        case failed(String)
+    }
+
+    @State private var listing = Listing.idle
+    @State private var refreshCount = 0
+
+    private var loadID: String { "\(baseURL)\u{1F}\(apiKey)\u{1F}\(refreshCount)" }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MuesliTheme.spacing8) {
+            HStack(spacing: MuesliTheme.spacing12) {
+                Image(systemName: "cpu")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(MuesliTheme.accent)
+                    .frame(width: 22)
+                Text("Model")
+                    .font(MuesliTheme.headline())
+                    .foregroundStyle(MuesliTheme.textPrimary)
+                Spacer()
+                if listing == .loading {
+                    ProgressView()
+                } else {
+                    Button {
+                        refreshCount += 1
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 15, weight: .semibold))
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(MuesliTheme.accent)
+                    .accessibilityLabel("Refresh model list")
+                }
+            }
+
+            switch listing {
+            case .loaded(let ids):
+                Picker("Model", selection: $model) {
+                    if model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text("Choose a model").tag("")
+                    }
+                    ForEach(CustomLLMModelCatalog.pickerChoices(listed: ids, current: model), id: \.self) { id in
+                        Text(id).tag(id)
+                    }
+                }
+                .pickerStyle(.menu)
+                .tint(MuesliTheme.textPrimary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, MuesliTheme.spacing12)
+                .frame(height: 42)
+                .background(MuesliTheme.surfacePrimary)
+                .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall))
+            case .idle, .loading, .failed:
+                TextField("model name on the server", text: $model)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .font(MuesliTheme.body())
+                    .foregroundStyle(MuesliTheme.textPrimary)
+                    .padding(.horizontal, MuesliTheme.spacing12)
+                    .frame(height: 42)
+                    .background(MuesliTheme.surfacePrimary)
+                    .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall))
+                if case .failed(let reason) = listing {
+                    Text("Could not list the server's models: \(reason). Type the model name instead.")
+                        .font(MuesliTheme.caption())
+                        .foregroundStyle(MuesliTheme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .task(id: loadID) { await load() }
+    }
+
+    private func load() async {
+        guard CustomLLMModelCatalog.modelsURL(from: baseURL) != nil else {
+            listing = .idle
+            return
+        }
+        // Wait out typing in the URL or key field before asking the server.
+        try? await Task.sleep(for: .milliseconds(600))
+        guard !Task.isCancelled else { return }
+        listing = .loading
+        do {
+            let ids = try await CustomLLMModelCatalog.fetch(baseURL: baseURL, apiKey: apiKey)
+            guard !Task.isCancelled else { return }
+            listing = .loaded(ids)
+        } catch is CancellationError {
+            return
+        } catch {
+            guard !Task.isCancelled else { return }
+            listing = .failed(error.localizedDescription)
         }
     }
 }

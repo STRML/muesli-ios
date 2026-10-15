@@ -31,7 +31,7 @@ enum KeyboardDiagnosticsLog {
     )
 
     private static let fileName = "keyboard-diagnostics.log"
-    private static let queue = DispatchQueue(label: "com.phequals7.muesli.keyboard-diagnostics")
+    private static let queue = DispatchQueue(label: "com.samuelreed.muesli.keyboard-diagnostics")
 
     /// Records one transition. `detail` values are truncated and must never
     /// carry user content.
@@ -118,7 +118,7 @@ enum KeyboardDiagnosticsLog {
         #if DEBUG
         // A development-only mirror lets tethered diagnostics use the app's
         // container without attaching a debugger or reading recorded content.
-        if Bundle.main.bundleIdentifier == "com.phequals7.muesli.ios.dev",
+        if Bundle.main.bundleIdentifier == "com.samuelreed.muesli.ios.dev",
            let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
             try? FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
             let mirror = cache.appendingPathComponent(fileName)

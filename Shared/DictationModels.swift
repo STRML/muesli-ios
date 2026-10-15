@@ -174,15 +174,19 @@ struct DictationRequest: Codable, Sendable, Equatable, Identifiable {
     let id: UUID
     let createdAt: Date
     let sourceBundleIdentifier: String?
+    /// Set when the keyboard asked for a voice rewrite: the spoken words are an instruction for this text.
+    let rewrite: RewriteContext?
 
     init(
         id: UUID = UUID(),
         createdAt: Date = .now,
-        sourceBundleIdentifier: String? = nil
+        sourceBundleIdentifier: String? = nil,
+        rewrite: RewriteContext? = nil
     ) {
         self.id = id
         self.createdAt = createdAt
         self.sourceBundleIdentifier = sourceBundleIdentifier
+        self.rewrite = rewrite
     }
 }
 
@@ -398,6 +402,8 @@ struct DictationResult: Codable, Sendable, Equatable, Identifiable {
     let createdAt: Date
     let engineIdentifier: String
     let source: String?
+    /// Set when `text` replaces this text in the field instead of being inserted at the cursor.
+    let rewrite: RewriteContext?
 
     init(
         id: UUID = UUID(),
@@ -406,7 +412,8 @@ struct DictationResult: Codable, Sendable, Equatable, Identifiable {
         text: String,
         createdAt: Date = .now,
         engineIdentifier: String,
-        source: String? = nil
+        source: String? = nil,
+        rewrite: RewriteContext? = nil
     ) {
         self.id = id
         self.requestID = requestID
@@ -415,6 +422,7 @@ struct DictationResult: Codable, Sendable, Equatable, Identifiable {
         self.createdAt = createdAt
         self.engineIdentifier = engineIdentifier
         self.source = source
+        self.rewrite = rewrite
     }
 
     var syncOrigin: SyncOrigin {
@@ -834,6 +842,8 @@ struct KeyboardRuntimeStatus: Codable, Sendable, Equatable {
     let supportsBackgroundStart: Bool
     let canAcceptStartCommand: Bool
     let inputLevel: Double
+    /// The app has a Custom LLM configured, so the keyboard may offer voice rewrite.
+    let rewriteAvailable: Bool
     let updatedAt: Date
 
     init(
@@ -844,6 +854,7 @@ struct KeyboardRuntimeStatus: Codable, Sendable, Equatable {
         supportsBackgroundStart: Bool = false,
         canAcceptStartCommand: Bool? = nil,
         inputLevel: Double = 0,
+        rewriteAvailable: Bool = false,
         updatedAt: Date = .now
     ) {
         self.isActive = isActive
@@ -853,6 +864,7 @@ struct KeyboardRuntimeStatus: Codable, Sendable, Equatable {
         self.supportsBackgroundStart = supportsBackgroundStart
         self.canAcceptStartCommand = canAcceptStartCommand ?? (isActive && supportsBackgroundStart)
         self.inputLevel = min(max(inputLevel, 0), 1)
+        self.rewriteAvailable = rewriteAvailable
         self.updatedAt = updatedAt
     }
 
@@ -864,6 +876,7 @@ struct KeyboardRuntimeStatus: Codable, Sendable, Equatable {
         case supportsBackgroundStart
         case canAcceptStartCommand
         case inputLevel
+        case rewriteAvailable
         case updatedAt
     }
 
@@ -876,6 +889,7 @@ struct KeyboardRuntimeStatus: Codable, Sendable, Equatable {
         supportsBackgroundStart = try container.decodeIfPresent(Bool.self, forKey: .supportsBackgroundStart) ?? false
         canAcceptStartCommand = try container.decodeIfPresent(Bool.self, forKey: .canAcceptStartCommand) ?? (isActive && supportsBackgroundStart)
         inputLevel = try container.decodeIfPresent(Double.self, forKey: .inputLevel) ?? 0
+        rewriteAvailable = try container.decodeIfPresent(Bool.self, forKey: .rewriteAvailable) ?? false
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
     }
 }

@@ -484,7 +484,7 @@ final class KeyboardControllerTests: XCTestCase {
     }
 }
 
-private final class StubEventBus: CrossProcessEventStreaming, @unchecked Sendable {
+final class StubEventBus: CrossProcessEventStreaming, @unchecked Sendable {
     private let lock = NSLock()
     private var storage: [CrossProcessEvent] = []
 

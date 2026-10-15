@@ -270,7 +270,7 @@ enum MuesliBridgeDeviceIdentity {
 
 
 final class ICloudTextSyncEngine: @unchecked Sendable {
-    static let containerIdentifier = "iCloud.com.mueslihq.muesli"
+    static let containerIdentifier = "iCloud.com.samuelreed.muesli"
     private static let logger = Logger(
         subsystem: "com.mueslihq.muesli",
         category: "icloud-preflight"

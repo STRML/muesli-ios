@@ -283,6 +283,47 @@ final class MuesliSmokeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Start a new meeting"].waitForExistence(timeout: 5))
     }
 
+    func testThePhoneShellHasNoSidebar() {
+        let app = launchApp()
+
+        XCTAssertTrue(app.buttons["tab.settings"].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.buttons["Open sidebar"].exists)
+        XCTAssertFalse(app.staticTexts["Pin up to 3 sections"].exists)
+    }
+
+    func testSwipingSidewaysDoesNotChangeTabs() {
+        let app = launchApp()
+
+        XCTAssertTrue(app.staticTexts["Start Quick Note"].waitForExistence(timeout: 8))
+        app.swipeLeft()
+        XCTAssertTrue(app.staticTexts["Start Quick Note"].exists, "a sideways swipe moved off Voice Notes")
+        XCTAssertFalse(app.staticTexts["Start a new meeting"].exists)
+    }
+
+    func testBackSwipeInADeepSettingsScreenGoesBackInsteadOfLeavingSettings() {
+        let app = launchApp()
+
+        XCTAssertTrue(app.buttons["tab.settings"].waitForExistence(timeout: 8))
+        app.buttons["tab.settings"].tap()
+        let about = app.staticTexts["About"]
+        for _ in 0..<5 where !about.exists {
+            app.swipeUp()
+        }
+        about.tap()
+        XCTAssertTrue(app.staticTexts["OPEN SOURCE LIBRARIES"].waitForExistence(timeout: 5)
+                      || app.staticTexts["About"].waitForExistence(timeout: 5))
+
+        // The iOS back gesture starts at the left edge.
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.04, dy: 0.5))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5))
+        let settingsListHeader = app.staticTexts["Voice notes, meetings, local models, and privacy."]
+        XCTAssertFalse(settingsListHeader.exists, "the About screen did not open")
+        start.press(forDuration: 0.1, thenDragTo: end)
+
+        XCTAssertTrue(settingsListHeader.waitForExistence(timeout: 5), "the swipe did not go back to the Settings list")
+        XCTAssertFalse(app.staticTexts["Start a new meeting"].exists, "the swipe moved to the Meetings tab")
+    }
+
     func testSettingsPrioritizeCoreWorkflowsAndAboutListsOpenSourceLibraries() {
         let app = launchApp()
 

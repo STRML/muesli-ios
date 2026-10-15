@@ -76,6 +76,15 @@ final class KeyboardSessionKeeperTests: XCTestCase {
     }
 }
 
+final class KeyboardSessionKeeperRouteTests: XCTestCase {
+    func testOnlyTheFormatNotSupportedCodeTriggersTheOutputEnabledRetry() {
+        let domain = "com.apple.coreaudio.avfaudio"
+        XCTAssertTrue(KeyboardSessionKeeper.isFormatNotSupported(NSError(domain: domain, code: -10868)))
+        XCTAssertFalse(KeyboardSessionKeeper.isFormatNotSupported(NSError(domain: domain, code: -10851)))
+        XCTAssertFalse(KeyboardSessionKeeper.isFormatNotSupported(NSError(domain: NSOSStatusErrorDomain, code: -10868)))
+    }
+}
+
 @MainActor
 private final class PendingKeyboardMicPermission {
     var continuation: CheckedContinuation<Bool, Never>?

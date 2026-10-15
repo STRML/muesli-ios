@@ -7,6 +7,15 @@ final class KeyboardMicActivityController {
     private var lastState: KeyboardMicActivityAttributes.ContentState?
     private var updateTask: Task<Void, Never>?
     private var completionTask: Task<Void, Never>?
+    private var keepAliveTask: Task<Void, Never>?
+
+    /// The Island goes stale when the app stops vouching for it. While the mic session is alive the app
+    /// renews this every `keepAliveInterval`; if iOS suspends or kills the app the renewals stop, the
+    /// activity turns stale, and the widget shows "Mic off" instead of claiming the mic is on.
+    static let staleAfter: TimeInterval = 180
+    static let keepAliveInterval: TimeInterval = 60
+
+    private static func staleDate() -> Date { Date.now.addingTimeInterval(staleAfter) }
 
     func hasActivity(sessionID: UUID?) -> Bool {
         guard let sessionID else { return false }
@@ -21,10 +30,11 @@ final class KeyboardMicActivityController {
             let state = KeyboardMicActivityAttributes.ContentState(isRecording: isRecording, isReady: true)
             activity = try Activity.request(
                 attributes: KeyboardMicActivityAttributes(sessionID: sessionID.uuidString),
-                content: ActivityContent(state: state, staleDate: nil),
+                content: ActivityContent(state: state, staleDate: Self.staleDate()),
                 pushType: nil
             )
             lastState = state
+            startKeepAlive()
         } catch {
             KeyboardDiagnosticsLog.record("keyboardMic.activityFailed", ["error": String(describing: error)])
         }
@@ -72,7 +82,7 @@ final class KeyboardMicActivityController {
             await previous?.value
             guard !Task.isCancelled, self.activity?.id == activity.id,
                   self.lastState == state else { return }
-            await activity.update(ActivityContent(state: state, staleDate: nil))
+            await activity.update(ActivityContent(state: state, staleDate: Self.staleDate()))
         }
     }
 
@@ -84,8 +94,39 @@ final class KeyboardMicActivityController {
         await updateTask?.value
     }
 
+    private func startKeepAlive() {
+        keepAliveTask?.cancel()
+        keepAliveTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(Self.keepAliveInterval))
+                guard !Task.isCancelled, let self, let activity = self.activity,
+                      let state = self.lastState else { return }
+                await activity.update(ActivityContent(state: state, staleDate: Self.staleDate()))
+            }
+        }
+    }
+
+    /// Ends every keyboard mic activity, whatever session it belongs to. For when the mic is known to be off.
+    func endAll() async {
+        keepAliveTask?.cancel()
+        keepAliveTask = nil
+        completionTask?.cancel()
+        completionTask = nil
+        activity = nil
+        lastState = nil
+        let pendingUpdate = updateTask
+        updateTask = nil
+        pendingUpdate?.cancel()
+        await pendingUpdate?.value
+        for item in Activity<KeyboardMicActivityAttributes>.activities {
+            await item.end(nil, dismissalPolicy: .immediate)
+        }
+    }
+
     func end(sessionID: UUID) async {
         if activity?.attributes.sessionID == sessionID.uuidString {
+            keepAliveTask?.cancel()
+            keepAliveTask = nil
             completionTask?.cancel()
             completionTask = nil
             activity = nil

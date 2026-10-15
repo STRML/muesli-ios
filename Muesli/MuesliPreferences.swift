@@ -7,6 +7,7 @@ enum MuesliPreferences {
     static let liveActivitiesForMeetingsKey = "muesli.liveActivities.meetings"
 
     static let keyboardSessionModeKey = "muesli.keyboardSession.enabled"
+    static let keyboardMicAutoOffMinutesKey = "muesli.keyboardSession.autoOffMinutes"
     static let retiredKeyboardSessionModeKey = "muesli.keyboardSession.keepReadyBetweenDictations"
 
     static func migrateKeyboardSessionPreference(in defaults: UserDefaults = .standard) {
@@ -29,6 +30,8 @@ enum MuesliPreferences {
     static let meetingSummaryBackendKey = "muesli.meetings.summary.backend"
     static let openRouterModelKey = "muesli.meetings.summary.openRouter.model"
     static let chatGPTModelKey = "muesli.meetings.summary.chatGPT.model"
+    static let customLLMBaseURLKey = "muesli.meetings.summary.customLLM.baseURL"
+    static let customLLMModelKey = "muesli.meetings.summary.customLLM.model"
     static let meetingTemplateKey = "muesli.meetings.template"
     static let iCloudSyncEnabledKey = "muesli.sync.icloud.enabled"
     static let pinnedSectionsKey = "muesli.navigation.pinnedSections"
@@ -55,6 +58,12 @@ enum MuesliPreferences {
 
     static var liveActivitiesForMeetingsEnabled: Bool {
         bool(for: liveActivitiesForMeetingsKey, defaultValue: true)
+    }
+
+    /// Idle minutes before the keyboard mic turns itself off; 0 means never.
+    static var keyboardMicAutoOffMinutes: Int {
+        let stored = UserDefaults.standard.object(forKey: keyboardMicAutoOffMinutesKey) as? Int
+        return KeyboardMicAutoOff.resolved(minutes: stored ?? KeyboardMicAutoOff.defaultMinutes)
     }
 
     static var keyboardSessionModeEnabled: Bool {
@@ -144,6 +153,21 @@ enum MuesliPreferences {
         return trimmedValue
     }
 
+    static var customLLMBaseURL: String {
+        (UserDefaults.standard.string(forKey: customLLMBaseURLKey) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static var customLLMModel: String {
+        (UserDefaults.standard.string(forKey: customLLMModelKey) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Voice rewrite runs on the Custom LLM, so it is offered only when one is set up.
+    static var isVoiceRewriteConfigured: Bool {
+        CustomLLMEndpoint.chatCompletionsURL(from: customLLMBaseURL) != nil && !customLLMModel.isEmpty
+    }
+
     static var chatGPTModel: String {
         let value = UserDefaults.standard.string(forKey: chatGPTModelKey) ?? ""
         let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -173,6 +197,7 @@ enum MuesliPreferences {
 enum MeetingSummaryBackend: String, CaseIterable, Identifiable {
     case openRouter = "openrouter"
     case chatGPT = "chatgpt"
+    case customLLM = "custom_llm"
 
     static let defaultOpenRouterModel = "stepfun/step-3.5-flash:free"
     static let defaultChatGPTModel = "gpt-5.5"
@@ -185,6 +210,8 @@ enum MeetingSummaryBackend: String, CaseIterable, Identifiable {
             "OpenRouter"
         case .chatGPT:
             "ChatGPT"
+        case .customLLM:
+            "Custom"
         }
     }
 
@@ -194,7 +221,27 @@ enum MeetingSummaryBackend: String, CaseIterable, Identifiable {
             Self.defaultOpenRouterModel
         case .chatGPT:
             Self.defaultChatGPTModel
+        case .customLLM:
+            ""
         }
+    }
+}
+
+/// An OpenAI-compatible server the user runs or trusts, such as a home server reached over Tailscale.
+enum CustomLLMEndpoint {
+    private static let suffix = "/chat/completions"
+
+    /// Accepts a base URL (`https://host/v1`) or a pasted full path, and returns the chat completions URL.
+    /// Only https is accepted, so credentials and transcripts never travel in the clear.
+    static func chatCompletionsURL(from value: String) -> URL? {
+        var text = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        while text.hasSuffix("/") { text.removeLast() }
+        if text.hasSuffix(suffix) { text.removeLast(suffix.count) }
+        guard let components = URLComponents(string: text + suffix),
+              components.scheme == "https",
+              let host = components.host, !host.isEmpty
+        else { return nil }
+        return components.url
     }
 }
 
@@ -235,6 +282,9 @@ struct SummaryModelPreset: Identifiable, Hashable {
             openRouterModels
         case .chatGPT:
             chatGPTModels
+        case .customLLM:
+            // A custom server's model names are the user's own; they never go to telemetry.
+            [SummaryModelPreset]()
         }
         return presets.contains(where: { $0.id == trimmedModel }) ? trimmedModel : "custom"
     }

@@ -22,6 +22,7 @@ enum MeetingSummaryError: Error, LocalizedError {
 
 enum MeetingSummaryClient {
     static let openRouterAPIKeyAccount = "openrouter_api_key"
+    static let customLLMAPIKeyAccount = "custom_llm_api_key"
 
     private static let openRouterURL = URL(string: "https://openrouter.ai/api/v1/chat/completions")!
     private static let whamURL = URL(string: "https://chatgpt.com/backend-api/wham/responses")!
@@ -52,6 +53,40 @@ enum MeetingSummaryClient {
         }
     }
 
+    static func storedCustomLLMAPIKey() -> String {
+        (try? keychain.string(for: customLLMAPIKeyAccount)) ?? ""
+    }
+
+    static func saveCustomLLMAPIKey(_ apiKey: String) throws {
+        let trimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            keychain.delete(account: customLLMAPIKeyAccount)
+        } else {
+            try keychain.set(trimmed, for: customLLMAPIKeyAccount)
+        }
+    }
+
+    /// One chat completion against the Custom LLM, for voice rewrite. A short timeout: the user is
+    /// waiting at the keyboard.
+    static func completeWithCustomLLM(system: String, user: String) async throws -> String {
+        guard let url = CustomLLMEndpoint.chatCompletionsURL(from: MuesliPreferences.customLLMBaseURL),
+              !MuesliPreferences.customLLMModel.isEmpty
+        else {
+            throw VoiceRewriteError.notConfigured
+        }
+        return try await callChatCompletions(
+            url: url,
+            backend: "Custom",
+            apiKey: storedCustomLLMAPIKey(),
+            model: MuesliPreferences.customLLMModel,
+            systemPrompt: system,
+            userPrompt: user,
+            maxTokens: 8_000,
+            extraHeaders: [:],
+            timeout: 30
+        )
+    }
+
     static func summarize(
         transcript: String,
         meetingTitle: String,
@@ -59,6 +94,38 @@ enum MeetingSummaryClient {
     ) async throws -> MeetingSummaryResult {
         let backend = MuesliPreferences.meetingSummaryBackend
         switch backend {
+        case .customLLM:
+            guard let url = CustomLLMEndpoint.chatCompletionsURL(from: MuesliPreferences.customLLMBaseURL),
+                  !MuesliPreferences.customLLMModel.isEmpty
+            else {
+                throw MeetingSummaryError.missingCredentials(.customLLM)
+            }
+            let model = MuesliPreferences.customLLMModel
+            let notes = try await callChatCompletions(
+                url: url,
+                backend: "Custom",
+                apiKey: storedCustomLLMAPIKey(),
+                model: model,
+                systemPrompt: baseSummaryInstructions,
+                userPrompt: summaryPrompt(
+                    transcript: transcript,
+                    meetingTitle: meetingTitle,
+                    manualNotesToRetain: manualNotesToRetain
+                ),
+                maxTokens: maxOutputTokens,
+                extraHeaders: [:]
+            )
+            let title = (try? await callChatCompletions(
+                url: url,
+                backend: "Custom",
+                apiKey: storedCustomLLMAPIKey(),
+                model: model,
+                systemPrompt: titleInstructions,
+                userPrompt: String(transcript.prefix(1500)),
+                maxTokens: 80,
+                extraHeaders: [:]
+            ))?.trimmingCharacters(in: .whitespacesAndNewlines.union(.init(charactersIn: "\""))) ?? meetingTitle
+            return MeetingSummaryResult(notes: notes, title: title, backend: backend, model: model)
         case .openRouter:
             let model = MuesliPreferences.openRouterModel
             let notes = try await summarizeWithOpenRouter(
@@ -236,7 +303,8 @@ enum MeetingSummaryClient {
         systemPrompt: String,
         userPrompt: String,
         maxTokens: Int,
-        extraHeaders: [String: String]
+        extraHeaders: [String: String],
+        timeout: TimeInterval = 60
     ) async throws -> String {
         let body: [String: Any] = [
             "model": model,
@@ -249,8 +317,11 @@ enum MeetingSummaryClient {
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.timeoutInterval = timeout
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        if !apiKey.isEmpty {
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
         for (key, value) in extraHeaders {
             request.setValue(value, forHTTPHeaderField: key)
         }

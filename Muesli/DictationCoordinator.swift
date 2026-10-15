@@ -76,8 +76,12 @@ final class DictationCoordinator {
     private var keyboardSessionRetryTask: Task<Void, Never>?
     private var keyboardSessionRetryAttempt = 0
     private var keyboardWaveformLevelThrottle = MuesliWaveformLevelThrottle()
+    private var keyboardRuntimeStatusPublishPolicy = KeyboardRuntimeStatusPublishPolicy()
+    @ObservationIgnored private let voiceRewriteService = VoiceRewriteService { system, user in
+        try await MeetingSummaryClient.completeWithCustomLLM(system: system, user: user)
+    }
     private let keyboardRuntimeStatusQueue = DispatchQueue(
-        label: "com.phequals7.muesli.keyboard-runtime-status",
+        label: "com.samuelreed.muesli.keyboard-runtime-status",
         qos: .utility
     )
     private var persistentKeyboardSessionRequestIDs = Set<UUID>()
@@ -105,11 +109,16 @@ final class DictationCoordinator {
     private var meetingLifecycleRunner: MeetingLifecycleRunner?
     private var voiceNoteLifecycleState = VoiceNoteLifecycleState()
     private var voiceNoteLifecycleRunner: VoiceNoteLifecycleRunner?
-    private let meetingVadQueue = DispatchQueue(label: "com.phequals7.muesli.meeting-vad")
+    private let meetingVadQueue = DispatchQueue(label: "com.samuelreed.muesli.meeting-vad")
     private var transcriptionBackgroundTask: UIBackgroundTaskIdentifier = .invalid
     nonisolated(unsafe) private var audioRouteObserver: NSObjectProtocol?
     nonisolated(unsafe) private var audioInterruptionObserver: NSObjectProtocol?
     nonisolated(unsafe) private var mediaServicesResetObserver: NSObjectProtocol?
+    nonisolated(unsafe) private var screenLockObserver: NSObjectProtocol?
+    nonisolated(unsafe) private var screenUnlockObserver: NSObjectProtocol?
+    private var keyboardIdleShutoffTask: Task<Void, Never>?
+    /// Set when the screen locks mid-dictation, so the mic goes off as soon as that request is over.
+    private var keyboardMicOffWhenIdle = false
 
     private var activeRequest: DictationRequest?
     private var activeSession: RecordingSession?
@@ -411,6 +420,20 @@ final class DictationCoordinator {
                 )
             }
         }
+        screenLockObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.protectedDataWillBecomeUnavailableNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.handleScreenLocked() }
+        }
+        screenUnlockObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.protectedDataDidBecomeAvailableNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.keyboardMicOffWhenIdle = false }
+        }
         mediaServicesResetObserver = NotificationCenter.default.addObserver(
             forName: AVAudioSession.mediaServicesWereResetNotification,
             object: AVAudioSession.sharedInstance(),
@@ -504,6 +527,12 @@ final class DictationCoordinator {
         if let mediaServicesResetObserver {
             NotificationCenter.default.removeObserver(mediaServicesResetObserver)
         }
+        if let screenLockObserver {
+            NotificationCenter.default.removeObserver(screenLockObserver)
+        }
+        if let screenUnlockObserver {
+            NotificationCenter.default.removeObserver(screenUnlockObserver)
+        }
         if let iCloudRemoteChangesObserver {
             NotificationCenter.default.removeObserver(iCloudRemoteChangesObserver)
         }
@@ -523,8 +552,70 @@ final class DictationCoordinator {
     }
 
     private func transitionKeyboardSession(_ event: KeyboardSessionEvent) {
+        // The session id is gone after `.micStopped`, so name the activity before reducing.
+        let sessionID = keyboardMicSession.id
         keyboardSessionState = KeyboardSessionReducer.reduce(keyboardSessionState, event: event)
         publishKeyboardModelCatalog()
+        if let sessionID, KeyboardMicActivityPolicy.endsActivity(after: event) {
+            Task { await keyboardMicActivity.end(sessionID: sessionID) }
+        }
+        applyKeyboardMicAutoOff()
+    }
+
+    /// Keeps the idle timer and any screen-lock request in step with the session. A hot mic costs battery.
+    private func applyKeyboardMicAutoOff() {
+        if keyboardMicOffWhenIdle {
+            switch KeyboardMicAutoOff.screenOffAction(for: keyboardSessionState) {
+            case .turnOffWhenIdle:
+                break
+            case .turnOffNow:
+                keyboardMicOffWhenIdle = false
+                turnOffKeyboardMicSoon(reason: "screen_locked")
+            case .ignore:
+                keyboardMicOffWhenIdle = false
+            }
+        }
+        let delay = KeyboardMicAutoOff.idleDelay(
+            for: keyboardSessionState,
+            minutes: MuesliPreferences.keyboardMicAutoOffMinutes
+        )
+        guard let delay else {
+            keyboardIdleShutoffTask?.cancel()
+            keyboardIdleShutoffTask = nil
+            return
+        }
+        guard keyboardIdleShutoffTask == nil else { return }
+        keyboardIdleShutoffTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled, let self else { return }
+            self.keyboardIdleShutoffTask = nil
+            guard self.keyboardSessionState.phase == .ready else { return }
+            self.turnOffKeyboardMicSoon(reason: "idle")
+        }
+    }
+
+    private func turnOffKeyboardMicSoon(reason: String) {
+        KeyboardDiagnosticsLog.record("keyboard.autoOff", ["reason": reason])
+        let sessionID = keyboardMicSession.id
+        Task { await turnOffKeyboardMic(sessionID: sessionID) }
+    }
+
+    private func handleScreenLocked() {
+        switch KeyboardMicAutoOff.screenOffAction(for: keyboardSessionState) {
+        case .turnOffNow:
+            turnOffKeyboardMicSoon(reason: "screen_locked")
+        case .turnOffWhenIdle:
+            keyboardMicOffWhenIdle = true
+        case .ignore:
+            break
+        }
+    }
+
+    func setKeyboardMicAutoOffMinutes(_ minutes: Int) {
+        UserDefaults.standard.set(KeyboardMicAutoOff.resolved(minutes: minutes), forKey: MuesliPreferences.keyboardMicAutoOffMinutesKey)
+        keyboardIdleShutoffTask?.cancel()
+        keyboardIdleShutoffTask = nil
+        applyKeyboardMicAutoOff()
     }
 
     @discardableResult
@@ -3642,6 +3733,15 @@ final class DictationCoordinator {
         }
     }
 
+    /// Foreground check: no keyboard mic session means no keyboard mic Island, whatever ended it
+    /// (iOS can drop the session while the app is suspended, and an activity outlives its app).
+    func reconcileKeyboardMicActivity() {
+        // A capture that took the mic from the session also resumes it afterwards: leave that Island alone.
+        guard !isKeyboardMicOn, !isKeyboardSessionArmed,
+              !isRecording, !hasMeetingRecordingInProgress, activeRequest == nil else { return }
+        Task { await keyboardMicActivity.endAll() }
+    }
+
     func applyLiveActivityPreferences() {
         Task {
             await liveActivityController.endDisabledActivities()
@@ -5023,6 +5123,7 @@ final class DictationCoordinator {
                     runnerID: lifecycleRunnerID
                 ) else { return }
                 let text = postProcessTranscript(rawText)
+                let delivery = try await finalDeliveryText(for: request, transcript: text)
                 let savedTranscript = Transcript(
                     sessionID: session.id,
                     text: text,
@@ -5053,14 +5154,15 @@ final class DictationCoordinator {
                     id: existingResult?.id ?? UUID(),
                     requestID: request.id,
                     sessionID: savedTranscript.sessionID,
-                    text: text,
+                    text: delivery.text,
                     createdAt: completedSession.createdAt,
                     engineIdentifier: engine.identifier,
-                    source: completedSession.source
+                    source: completedSession.source,
+                    rewrite: delivery.rewrite
                 )
                 try store.saveResult(result)
                 scheduleICloudSyncAfterLocalChange(reason: "dictation_completed")
-                deliverKeyboardTranscript(text, requestID: request.id)
+                deliverKeyboardTranscript(delivery.text, requestID: request.id)
                 try store.clearPendingRequest(matching: request.id)
                 activeRequest = nil
                 activeSession = nil
@@ -5413,6 +5515,7 @@ final class DictationCoordinator {
                 if isKeyboardSessionArmed {
                     transitionKeyboardSession(.transcribing(request.id))
                 }
+                let delivery = try await finalDeliveryText(for: request, transcript: text)
                 let completedSession = activeSession ?? session
                 let transcript: Transcript?
                 let resultCreatedAt: Date
@@ -5448,15 +5551,16 @@ final class DictationCoordinator {
                 let result = DictationResult(
                     requestID: request.id,
                     sessionID: transcript?.sessionID,
-                    text: text,
+                    text: delivery.text,
                     createdAt: resultCreatedAt,
                     engineIdentifier: engine.identifier,
-                    source: completedSession?.source
+                    source: completedSession?.source,
+                    rewrite: delivery.rewrite
                 )
                 try store.saveResult(result)
                 scheduleICloudSyncAfterLocalChange(reason: "dictation_completed")
                 if startedFromKeyboard {
-                    deliverKeyboardTranscript(text, requestID: request.id)
+                    deliverKeyboardTranscript(delivery.text, requestID: request.id)
                 }
                 try store.clearPendingRequest(matching: request.id)
                 refreshHistory()
@@ -6593,9 +6697,11 @@ final class DictationCoordinator {
                 summaryState = .failed
                 let backend = MuesliPreferences.meetingSummaryBackend
                 summaryBackend = backend.rawValue
-                summaryModel = backend == .chatGPT
-                    ? MuesliPreferences.chatGPTModel
-                    : MuesliPreferences.openRouterModel
+                summaryModel = switch backend {
+                case .chatGPT: MuesliPreferences.chatGPTModel
+                case .customLLM: MuesliPreferences.customLLMModel
+                case .openRouter: MuesliPreferences.openRouterModel
+                }
                 summaryErrorMessage = error.localizedDescription
                 AppTelemetry.failure(
                     "meeting_summary_failed",
@@ -7124,7 +7230,8 @@ final class DictationCoordinator {
             activeRequestID: nil,
             phase: .idle,
             message: "Keyboard session ready",
-            supportsBackgroundStart: true
+            supportsBackgroundStart: true,
+            coalescingUnchanged: true
         )
     }
 
@@ -7207,7 +7314,8 @@ final class DictationCoordinator {
         phase: DictationPhase,
         message: String?,
         supportsBackgroundStart: Bool = false,
-        inputLevel: Double? = nil
+        inputLevel: Double? = nil,
+        coalescingUnchanged: Bool = false
     ) {
         if let sessionID = keyboardMicSession.id {
             keyboardMicActivity.update(
@@ -7224,6 +7332,12 @@ final class DictationCoordinator {
             supportsBackgroundStart: supportsBackgroundStart,
             inputLevel: inputLevel
         )
+
+        let now = Date()
+        if coalescingUnchanged, !keyboardRuntimeStatusPublishPolicy.shouldPublish(status, now: now) {
+            return
+        }
+        keyboardRuntimeStatusPublishPolicy.notePublished(status, now: now)
 
         // Lifecycle writes stay ordered behind any queued waveform samples so a
         // stale recording level cannot overwrite a later terminal phase.
@@ -7252,7 +7366,8 @@ final class DictationCoordinator {
             message: message,
             supportsBackgroundStart: supportsBackgroundStart,
             canAcceptStartCommand: canAcceptStartCommand,
-            inputLevel: runtimeInputLevel
+            inputLevel: runtimeInputLevel,
+            rewriteAvailable: MuesliPreferences.isVoiceRewriteConfigured
         )
     }
 
@@ -7268,6 +7383,7 @@ final class DictationCoordinator {
             inputLevel: publishedLevel
         )
         let store = store
+        keyboardRuntimeStatusPublishPolicy.invalidate()
         keyboardRuntimeStatusQueue.async {
             try? store.saveKeyboardRuntimeStatus(status)
         }
@@ -7341,6 +7457,29 @@ final class DictationCoordinator {
         let previousCount = pasteboard.changeCount
         pasteboard.string = text
         return pasteboard.changeCount != previousCount
+    }
+
+    /// The text to deliver for a finished keyboard transcription. For a voice rewrite request the
+    /// transcript is the spoken instruction: it is applied to the request's text, and a failure
+    /// throws so the instruction is never inserted into the field.
+    private func finalDeliveryText(
+        for request: DictationRequest,
+        transcript: String
+    ) async throws -> (text: String, rewrite: RewriteContext?) {
+        guard request.rewrite != nil else { return (transcript, nil) }
+        saveKeyboardHandoff(requestID: request.id, phase: .transcribingStarted, message: "Rewriting")
+        AppTelemetry.signal("voice_rewrite_started")
+        do {
+            let text = try await voiceRewriteService.finalText(
+                rewriteOriginal: request.rewrite?.original,
+                transcript: transcript
+            )
+            AppTelemetry.signal("voice_rewrite_finished")
+            return (text, request.rewrite)
+        } catch {
+            AppTelemetry.signal("voice_rewrite_failed")
+            throw error
+        }
     }
 
     func deliverKeyboardTranscript(_ text: String, requestID: UUID) {

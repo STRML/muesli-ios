@@ -15,7 +15,7 @@ set -euo pipefail
 
 SCHEME="${MUESLI_IOS_SCHEME:-Muesli}"
 CONFIGURATION="${MUESLI_IOS_CONFIGURATION:-Debug}"
-BUNDLE_ID="${MUESLI_IOS_BUNDLE_ID:-com.phequals7.muesli.ios}"
+BUNDLE_ID="${MUESLI_IOS_BUNDLE_ID:-com.samuelreed.muesli.ios}"
 PRODUCT_NAME="${MUESLI_IOS_PRODUCT_NAME:-Muesli}"
 SIMULATOR_NAME="${MUESLI_IOS_SIMULATOR_NAME:-iPhone 17 Pro}"
 SIMULATOR_OS="${MUESLI_IOS_SIMULATOR_OS:-26.5}"
@@ -72,7 +72,7 @@ while [[ $# -gt 0 ]]; do
     --dev)
       SCHEME="MuesliDev"
       CONFIGURATION="MuesliDev"
-      BUNDLE_ID="com.phequals7.muesli.ios.dev"
+      BUNDLE_ID="com.samuelreed.muesli.ios.dev"
       PRODUCT_NAME="MuesliDev"
       shift
       ;;

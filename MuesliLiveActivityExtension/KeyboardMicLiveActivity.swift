@@ -13,10 +13,17 @@ struct KeyboardMicLiveActivity: Widget {
             DynamicIsland {
                 DynamicIslandExpandedRegion(.bottom) { controls(context) }
             } compactLeading: {
-                LiveActivityMicrophoneMark()
-                    .accessibilityLabel("Muesli microphone on")
+                if context.isStale {
+                    Image(systemName: "mic.slash.fill")
+                        .accessibilityLabel("Muesli microphone off")
+                } else {
+                    LiveActivityMicrophoneMark()
+                        .accessibilityLabel("Muesli microphone on")
+                }
             } compactTrailing: {
-                if context.state.isRecording {
+                if context.isStale {
+                    EmptyView()
+                } else if context.state.isRecording {
                     LiveActivityInputWaveform(samples: context.state.waveform)
                         .frame(width: 24, height: 20)
                 } else if context.state.showsCompletion() {
@@ -27,7 +34,10 @@ struct KeyboardMicLiveActivity: Widget {
                         .accessibilityLabel(context.state.title)
                 }
             } minimal: {
-                if context.state.isRecording {
+                if context.isStale {
+                    Image(systemName: "mic.slash.fill")
+                        .accessibilityLabel("Muesli microphone off")
+                } else if context.state.isRecording {
                     LiveActivityInputWaveform(samples: context.state.waveform)
                         .frame(width: 24, height: 20)
                 } else {
@@ -40,19 +50,22 @@ struct KeyboardMicLiveActivity: Widget {
 
     private func controls(_ context: ActivityViewContext<KeyboardMicActivityAttributes>) -> some View {
         LiveActivityStatusRow(
-            title: context.state.title,
+            title: context.isStale ? "Mic off" : context.state.title,
             subtitle: "muesli",
-            isRecording: context.state.isRecording,
-            samples: context.state.waveform
+            isRecording: !context.isStale && context.state.isRecording,
+            samples: context.isStale ? nil : context.state.waveform
         ) {
-            Button(intent: TurnOffKeyboardMicIntent(sessionID: context.attributes.sessionID)) {
-                Label("Turn mic off", systemImage: "mic.slash.fill")
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 10)
-                    .frame(minHeight: 44)
-                    .background(.red.opacity(0.25), in: Capsule())
+            // A stale activity is a leftover: the session it described is gone, so there is nothing to turn off.
+            if !context.isStale {
+                Button(intent: TurnOffKeyboardMicIntent(sessionID: context.attributes.sessionID)) {
+                    Label("Turn mic off", systemImage: "mic.slash.fill")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 10)
+                        .frame(minHeight: 44)
+                        .background(.red.opacity(0.25), in: Capsule())
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
         .foregroundStyle(.white)
     }

@@ -46,6 +46,12 @@ final class KeyboardViewController: UIInputViewController {
                 self?.textDocumentProxy.deleteBackward()
             }
         }
+        controller.textContextProvider = { [weak self] in
+            KeyboardTextContext(
+                selectedText: self?.textDocumentProxy.selectedText,
+                textBeforeCursor: self?.textDocumentProxy.documentContextBeforeInput
+            )
+        }
         controller.inputModeSwitcher = { [weak self] in
             self?.advanceToNextInputMode()
         }
