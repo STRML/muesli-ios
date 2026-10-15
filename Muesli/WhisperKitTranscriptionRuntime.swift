@@ -26,7 +26,7 @@ actor WhisperKitTranscriptionRuntime {
         progress?(0.92, "Loading downloaded Whisper model...")
         let modelFolder = Self.modelDirectory(for: variant)
 
-        progress?(0.94, "Optimizing WhisperKit for this iPhone...")
+        progress?(0.94, "Loading Whisper model...")
         let configuration = WhisperKitConfig(
             model: nil,
             modelFolder: modelFolder.path,
@@ -35,14 +35,33 @@ actor WhisperKitTranscriptionRuntime {
                 textDecoderCompute: .cpuAndNeuralEngine
             )
         )
+        let loadStart = ContinuousClock.now
         do {
-            whisperKit = try await WhisperKit(configuration)
+            let kit = try await WhisperKit(configuration)
+            whisperKit = kit
             loadedVariant = variant
+            Self.recordLoadTimings(variant: variant, kit: kit, total: ContinuousClock.now - loadStart)
             progress?(1, "Whisper model ready")
         } catch {
             Self.invalidateCompletionMarker(at: modelFolder)
             throw error
         }
+    }
+
+    /// Specialization is the Neural Engine compile. It is slow when the system's cache for this model is cold
+    /// (after a reboot, an OS update or a cache purge) and near zero when it is warm, so the diagnostics log
+    /// shows which of the two a slow launch was.
+    private static func recordLoadTimings(variant: String, kit: WhisperKit, total: Duration) {
+        let timings = kit.currentTimings
+        func seconds(_ value: Double) -> String { String(format: "%.2f", value) }
+        KeyboardDiagnosticsLog.record("whisper.loaded", [
+            "variant": variant,
+            "total_s": seconds(Double(total.components.seconds) + Double(total.components.attoseconds) / 1e18),
+            "encoder_load_s": seconds(timings.encoderLoadTime),
+            "encoder_specialization_s": seconds(timings.encoderSpecializationTime),
+            "decoder_load_s": seconds(timings.decoderLoadTime),
+            "decoder_specialization_s": seconds(timings.decoderSpecializationTime),
+        ])
     }
 
     func transcribe(audioURL: URL) async throws -> String {
