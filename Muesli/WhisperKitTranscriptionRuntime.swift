@@ -35,12 +35,18 @@ actor WhisperKitTranscriptionRuntime {
                 textDecoderCompute: .cpuAndNeuralEngine
             )
         )
-        let loadStart = ContinuousClock.now
+        // SuspendingClock stops while the app is suspended, so a load that straddles a backgrounding reports
+        // the time it spent running. WhisperKit's own timings are wall-clock and can include the suspension.
+        let loadStart = SuspendingClock.now
+        let wallStart = Date()
         do {
             let kit = try await WhisperKit(configuration)
             whisperKit = kit
             loadedVariant = variant
-            Self.recordLoadTimings(variant: variant, kit: kit, total: ContinuousClock.now - loadStart)
+            Self.recordLoadTimings(
+                variant: variant, kit: kit,
+                total: SuspendingClock.now - loadStart, wall: Date().timeIntervalSince(wallStart)
+            )
             progress?(1, "Whisper model ready")
         } catch {
             Self.invalidateCompletionMarker(at: modelFolder)
@@ -51,12 +57,13 @@ actor WhisperKitTranscriptionRuntime {
     /// Specialization is the Neural Engine compile. It is slow when the system's cache for this model is cold
     /// (after a reboot, an OS update or a cache purge) and near zero when it is warm, so the diagnostics log
     /// shows which of the two a slow launch was.
-    private static func recordLoadTimings(variant: String, kit: WhisperKit, total: Duration) {
+    private static func recordLoadTimings(variant: String, kit: WhisperKit, total: Duration, wall: TimeInterval) {
         let timings = kit.currentTimings
         func seconds(_ value: Double) -> String { String(format: "%.2f", value) }
         KeyboardDiagnosticsLog.record("whisper.loaded", [
             "variant": variant,
             "total_s": seconds(Double(total.components.seconds) + Double(total.components.attoseconds) / 1e18),
+            "wall_s": seconds(wall),
             "encoder_load_s": seconds(timings.encoderLoadTime),
             "encoder_specialization_s": seconds(timings.encoderSpecializationTime),
             "decoder_load_s": seconds(timings.decoderLoadTime),
