@@ -1,7 +1,7 @@
 import XCTest
 @testable import Muesli
 
-/// The keyboard half of voice rewrite: the Fix key captures what to rewrite, and a rewrite result is
+/// The keyboard half of voice rewrite: the Quill key captures what to rewrite, and a rewrite result is
 /// applied only to a field that still holds the text it was made from.
 @MainActor
 final class KeyboardRewriteTests: XCTestCase {
@@ -55,7 +55,7 @@ final class KeyboardRewriteTests: XCTestCase {
         controller.prepareInitialPresentationState()
     }
 
-    // MARK: Fix key
+    // MARK: Quill key
 
     func testTheFixKeyRecordsAnInstructionForTheSelection() throws {
         try publishRewriteAvailable(true)

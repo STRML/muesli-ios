@@ -46,7 +46,7 @@ final class KeyboardController {
     var launchURL: URL?
     var textInserter: (@MainActor (String) -> Void)?
     var textDeleter: (@MainActor (Int) -> Void)?
-    /// What the host field holds around the cursor, read when Fix is tapped and again before a rewrite is applied.
+    /// What the host field holds around the cursor, read when Quill is tapped and again before a rewrite is applied.
     var textContextProvider: (@MainActor () -> KeyboardTextContext)?
     var inputModeSwitcher: (@MainActor () -> Void)?
     var keyboardDismisser: (@MainActor () -> Void)?
@@ -169,7 +169,7 @@ final class KeyboardController {
 
     var canUndoRewrite: Bool { lastRewrite != nil }
 
-    /// The app has a Custom LLM, so the Fix key can work.
+    /// The app has a Custom LLM, so the Quill key can work.
     var canRewrite: Bool {
         latestRuntimeStatus?.rewriteAvailable == true
     }
@@ -308,7 +308,7 @@ final class KeyboardController {
         launchURL = makeLaunchURL(for: request)
     }
 
-    /// The Fix key: record a spoken instruction and rewrite the selection, or the last paragraph before the
+    /// The Quill key: record a spoken instruction and rewrite the selection, or the last paragraph before the
     /// cursor, with it.
     func startRewrite() {
         guard !isBlockedByAppVoiceNote else { return }

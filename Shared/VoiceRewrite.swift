@@ -1,6 +1,6 @@
 import Foundation
 
-/// What a voice rewrite acts on. Captured by the keyboard when the user taps Fix, and carried
+/// What a voice rewrite acts on. Captured by the keyboard when the user taps Quill, and carried
 /// back with the result so the keyboard can check the field still holds this text.
 struct RewriteContext: Codable, Sendable, Equatable {
     enum Target: String, Codable, Sendable {

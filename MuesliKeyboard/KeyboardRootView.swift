@@ -103,9 +103,21 @@ struct KeyboardRootView: View {
     }
 
     private func sideLabel(_ icon: String, _ title: String, tint: Color) -> some View {
+        sideLabel(Image(systemName: icon).font(.system(size: 22, weight: .semibold)), title, tint: tint)
+    }
+
+    /// The Mac's Quill feather, so the key and the Mac's Quill look like the same feature.
+    private func quillLabel(tint: Color) -> some View {
+        sideLabel(
+            Image("QuillIcon").resizable().scaledToFit().frame(width: 24, height: 24),
+            "Quill",
+            tint: tint
+        )
+    }
+
+    private func sideLabel(_ icon: some View, _ title: String, tint: Color) -> some View {
         VStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.system(size: 22, weight: .semibold))
+            icon
             Text(title)
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
         }
@@ -125,33 +137,29 @@ struct KeyboardRootView: View {
         Button {
             controller.startRewrite()
         } label: {
-            sideLabel(
-                "wand.and.stars",
-                "Fix",
-                tint: controller.canRewrite ? MuesliTheme.accent : MuesliTheme.textTertiary
-            )
+            quillLabel(tint: controller.canRewrite ? MuesliTheme.accent : MuesliTheme.textTertiary)
         }
         .buttonStyle(KeyboardPressStyle())
-        .accessibilityLabel("Fix text")
+        .accessibilityLabel("Quill")
         .accessibilityHint("Say what to change in the selected text, or the text before the cursor")
-        .accessibilityIdentifier("keyboard.fix")
+        .accessibilityIdentifier("keyboard.quill")
     }
 
-    /// Fix keeps its slot while listening so the row stays balanced and nothing moves. It only reports the mode:
+    /// Quill keeps its slot while listening so the row stays balanced and nothing moves. It only reports the mode:
     /// lit while the recording is an edit instruction, dim while it is plain dictation.
     private var fixIndicator: some View {
         let editing = controller.activeRewrite != nil
-        return sideLabel("wand.and.stars", "Fix", tint: editing ? Color.white : MuesliTheme.textTertiary)
+        return quillLabel(tint: editing ? Color.white : MuesliTheme.textTertiary)
             .background(
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .fill(editing ? MuesliTheme.accent : Color.clear)
             )
             .opacity(editing ? 1 : 0.55)
             .allowsHitTesting(false)
-            .accessibilityLabel(editing ? "Editing by voice" : "Fix unavailable while dictating")
+            .accessibilityLabel(editing ? "Editing by voice" : "Quill unavailable while dictating")
     }
 
-    /// In the slot Fix occupies, so a thumb that learned one layout finds the right control in the other.
+    /// In the slot Quill occupies, so a thumb that learned one layout finds the right control in the other.
     private var cancelButton: some View {
         Button(action: controller.cancelActiveDictation) {
             sideLabel("xmark", "Cancel", tint: MuesliTheme.textPrimary)
@@ -337,7 +345,7 @@ struct KeyboardRootView: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(MuesliTheme.textSecondary)
             Text(controller.canRewrite
-                 ? "Select text, then tap Fix to edit it by voice"
+                 ? "Select text, then tap Quill to edit it by voice"
                  : "Set up a Custom LLM in Muesli to edit by voice")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(MuesliTheme.textTertiary)
