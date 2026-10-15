@@ -96,30 +96,17 @@ final class KeyboardSessionKeeper: @unchecked Sendable {
             prepareForStart()
 
             let targetFormat = try Self.makeTargetFormat()
-            let inputNode = engine.inputNode
-            // Match the working input-only recorder. Standby does not play audio.
-            inputNode.auAudioUnit.isOutputEnabled = false
-            let inputFormat = inputNode.outputFormat(forBus: 0)
-            converter = Self.requiresConversion(from: inputFormat, to: targetFormat)
-                ? AVAudioConverter(from: inputFormat, to: targetFormat)
-                : nil
-
-            KeyboardDiagnosticsLog.record("keyboardMic.startStep", ["step": "inputTap"])
-            inputNode.installTap(onBus: 0, bufferSize: Self.bufferSize, format: nil,
-                                 block: makeInputTap(targetFormat: targetFormat))
-            setTapInstalled(true)
-            KeyboardDiagnosticsLog.record("keyboardMic.startStep", ["step": "enginePrepare"])
-            engine.prepare()
-            let unit = inputNode.auAudioUnit
-            KeyboardDiagnosticsLog.record("keyboardMic.ioConfiguration", [
-                "input_enabled": String(unit.isInputEnabled),
-                "output_enabled": String(unit.isOutputEnabled)
-            ])
-            guard unit.isInputEnabled && !unit.isOutputEnabled else {
-                throw AudioRecorder.RecordingError.startFailed(stage: "keyboard input-only configuration")
+            do {
+                try startEngine(targetFormat: targetFormat, inputOnly: true)
+            } catch let error as NSError where Self.isFormatNotSupported(error) {
+                // A Bluetooth hands-free route (a car, for one) shares one device for input and output,
+                // and the engine refuses to run it with the output half switched off.
+                KeyboardDiagnosticsLog.record("keyboardMic.retryWithOutput", [
+                    "domain": error.domain, "code": String(error.code)
+                ])
+                prepareForStart()
+                try startEngine(targetFormat: targetFormat, inputOnly: false)
             }
-            KeyboardDiagnosticsLog.record("keyboardMic.startStep", ["step": "engineStart"])
-            try engine.start()
 
             setEngineRunning(true)
             KeyboardDiagnosticsLog.record("keyboardMic.started")
@@ -132,6 +119,40 @@ final class KeyboardSessionKeeper: @unchecked Sendable {
             }
             throw AudioRecorder.RecordingError.startFailed(stage: "keyboard session")
         }
+    }
+
+    /// kAudioUnitErr_FormatNotSupported, what AVAudioEngine reports when the route cannot run input-only.
+    nonisolated static func isFormatNotSupported(_ error: NSError) -> Bool {
+        error.domain == "com.apple.coreaudio.avfaudio" && error.code == -10868
+    }
+
+    @MainActor
+    private func startEngine(targetFormat: AVAudioFormat, inputOnly: Bool) throws {
+        let inputNode = engine.inputNode
+        // Standby does not play audio, so the output half stays off unless the route needs it.
+        inputNode.auAudioUnit.isOutputEnabled = !inputOnly
+        let inputFormat = inputNode.outputFormat(forBus: 0)
+        converter = Self.requiresConversion(from: inputFormat, to: targetFormat)
+            ? AVAudioConverter(from: inputFormat, to: targetFormat)
+            : nil
+
+        KeyboardDiagnosticsLog.record("keyboardMic.startStep", ["step": "inputTap"])
+        inputNode.installTap(onBus: 0, bufferSize: Self.bufferSize, format: nil,
+                             block: makeInputTap(targetFormat: targetFormat))
+        setTapInstalled(true)
+        KeyboardDiagnosticsLog.record("keyboardMic.startStep", ["step": "enginePrepare"])
+        engine.prepare()
+        let unit = inputNode.auAudioUnit
+        KeyboardDiagnosticsLog.record("keyboardMic.ioConfiguration", [
+            "input_enabled": String(unit.isInputEnabled),
+            "output_enabled": String(unit.isOutputEnabled),
+            "input_sample_rate": String(inputFormat.sampleRate)
+        ])
+        guard unit.isInputEnabled && unit.isOutputEnabled == !inputOnly else {
+            throw AudioRecorder.RecordingError.startFailed(stage: "keyboard input configuration")
+        }
+        KeyboardDiagnosticsLog.record("keyboardMic.startStep", ["step": "engineStart"])
+        try engine.start()
     }
 
     func setInputActivityHandler(
