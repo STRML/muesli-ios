@@ -698,13 +698,17 @@ final class KeyboardController {
         if lastRecordedHandoff?.phase != handoffState.phase
             || lastRecordedHandoff?.requestID != requestID {
             lastRecordedHandoff = (requestID, handoffState.phase)
-            KeyboardDiagnosticsLog.record("handoff.observed", [
+            var observed = [
                 "phase": handoffState.phase.rawValue,
                 "request": requestID.uuidString.prefix(8).lowercased(),
                 "localPhase": dictationPhase.rawValue,
                 "active": activeRequestID?.uuidString.prefix(8).lowercased() ?? "none",
                 "inserted": insertedRequestIDs.contains(requestID) ? "yes" : "no"
-            ])
+            ]
+            if handoffState.phase == .failed, let message = handoffState.message {
+                observed["reason"] = message
+            }
+            KeyboardDiagnosticsLog.record("handoff.observed", observed)
         }
 
         if insertedRequestIDs.contains(requestID) {
