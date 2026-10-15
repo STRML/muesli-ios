@@ -7,6 +7,7 @@ enum MuesliPreferences {
     static let liveActivitiesForMeetingsKey = "muesli.liveActivities.meetings"
 
     static let keyboardSessionModeKey = "muesli.keyboardSession.enabled"
+    static let keyboardMicAutoOffMinutesKey = "muesli.keyboardSession.autoOffMinutes"
     static let retiredKeyboardSessionModeKey = "muesli.keyboardSession.keepReadyBetweenDictations"
 
     static func migrateKeyboardSessionPreference(in defaults: UserDefaults = .standard) {
@@ -57,6 +58,12 @@ enum MuesliPreferences {
 
     static var liveActivitiesForMeetingsEnabled: Bool {
         bool(for: liveActivitiesForMeetingsKey, defaultValue: true)
+    }
+
+    /// Idle minutes before the keyboard mic turns itself off; 0 means never.
+    static var keyboardMicAutoOffMinutes: Int {
+        let stored = UserDefaults.standard.object(forKey: keyboardMicAutoOffMinutesKey) as? Int
+        return KeyboardMicAutoOff.resolved(minutes: stored ?? KeyboardMicAutoOff.defaultMinutes)
     }
 
     static var keyboardSessionModeEnabled: Bool {

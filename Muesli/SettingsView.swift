@@ -11,6 +11,7 @@ struct SettingsView: View {
     @AppStorage(MuesliPreferences.liveActivitiesForDictationsKey) private var liveActivitiesForDictations = true
     @AppStorage(MuesliPreferences.liveActivitiesForMeetingsKey) private var liveActivitiesForMeetings = true
     @AppStorage(MuesliPreferences.keyboardSessionModeKey) private var keyboardSessionMode = true
+    @AppStorage(MuesliPreferences.keyboardMicAutoOffMinutesKey) private var keyboardMicAutoOffMinutes = KeyboardMicAutoOff.defaultMinutes
     @AppStorage(MuesliPreferences.recordingMicrophonePreferenceKey) private var microphonePreference = RecordingMicrophonePreference.automatic.rawValue
     @AppStorage(MuesliPreferences.keepDictationAudioRecordingsKey) private var keepDictationAudioRecordings = false
     @AppStorage(MuesliPreferences.longVoiceNoteModeEnabledKey) private var longVoiceNoteModeEnabled = true
@@ -301,6 +302,18 @@ struct SettingsView: View {
                         detail: keyboardSessionModeDetail,
                         isOn: keyboardSessionBinding
                     )
+                    Picker(selection: keyboardMicAutoOffBinding) {
+                        ForEach(KeyboardMicAutoOff.choices, id: \.self) { minutes in
+                            Text(KeyboardMicAutoOff.label(forMinutes: minutes)).tag(minutes)
+                        }
+                    } label: {
+                        Label("Turn mic off when idle", systemImage: "timer")
+                            .font(MuesliTheme.headline())
+                    }
+                    Text("The mic also turns off whenever the screen locks, so it never listens in your pocket. A dictation in progress finishes first.")
+                        .font(MuesliTheme.caption())
+                        .foregroundStyle(MuesliTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
                     if coordinator.isKeyboardMicOn {
                         Button("Turn mic off", systemImage: "mic.slash.fill") {
                             Task { await coordinator.turnOffKeyboardMic() }
@@ -338,6 +351,16 @@ struct SettingsView: View {
         Binding(get: { !keyboardSessionMode }, set: { stopAfterEach in
             coordinator.setKeyboardSessionModeEnabled(!stopAfterEach)
         })
+    }
+
+    private var keyboardMicAutoOffBinding: Binding<Int> {
+        Binding(
+            get: { keyboardMicAutoOffMinutes },
+            set: { minutes in
+                keyboardMicAutoOffMinutes = minutes
+                coordinator.setKeyboardMicAutoOffMinutes(minutes)
+            }
+        )
     }
 
     private var keyboardSessionModeDetail: String {

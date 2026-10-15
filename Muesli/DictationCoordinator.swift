@@ -114,6 +114,11 @@ final class DictationCoordinator {
     nonisolated(unsafe) private var audioRouteObserver: NSObjectProtocol?
     nonisolated(unsafe) private var audioInterruptionObserver: NSObjectProtocol?
     nonisolated(unsafe) private var mediaServicesResetObserver: NSObjectProtocol?
+    nonisolated(unsafe) private var screenLockObserver: NSObjectProtocol?
+    nonisolated(unsafe) private var screenUnlockObserver: NSObjectProtocol?
+    private var keyboardIdleShutoffTask: Task<Void, Never>?
+    /// Set when the screen locks mid-dictation, so the mic goes off as soon as that request is over.
+    private var keyboardMicOffWhenIdle = false
 
     private var activeRequest: DictationRequest?
     private var activeSession: RecordingSession?
@@ -415,6 +420,20 @@ final class DictationCoordinator {
                 )
             }
         }
+        screenLockObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.protectedDataWillBecomeUnavailableNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.handleScreenLocked() }
+        }
+        screenUnlockObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.protectedDataDidBecomeAvailableNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.keyboardMicOffWhenIdle = false }
+        }
         mediaServicesResetObserver = NotificationCenter.default.addObserver(
             forName: AVAudioSession.mediaServicesWereResetNotification,
             object: AVAudioSession.sharedInstance(),
@@ -508,6 +527,12 @@ final class DictationCoordinator {
         if let mediaServicesResetObserver {
             NotificationCenter.default.removeObserver(mediaServicesResetObserver)
         }
+        if let screenLockObserver {
+            NotificationCenter.default.removeObserver(screenLockObserver)
+        }
+        if let screenUnlockObserver {
+            NotificationCenter.default.removeObserver(screenUnlockObserver)
+        }
         if let iCloudRemoteChangesObserver {
             NotificationCenter.default.removeObserver(iCloudRemoteChangesObserver)
         }
@@ -534,6 +559,63 @@ final class DictationCoordinator {
         if let sessionID, KeyboardMicActivityPolicy.endsActivity(after: event) {
             Task { await keyboardMicActivity.end(sessionID: sessionID) }
         }
+        applyKeyboardMicAutoOff()
+    }
+
+    /// Keeps the idle timer and any screen-lock request in step with the session. A hot mic costs battery.
+    private func applyKeyboardMicAutoOff() {
+        if keyboardMicOffWhenIdle {
+            switch KeyboardMicAutoOff.screenOffAction(for: keyboardSessionState) {
+            case .turnOffWhenIdle:
+                break
+            case .turnOffNow:
+                keyboardMicOffWhenIdle = false
+                turnOffKeyboardMicSoon(reason: "screen_locked")
+            case .ignore:
+                keyboardMicOffWhenIdle = false
+            }
+        }
+        let delay = KeyboardMicAutoOff.idleDelay(
+            for: keyboardSessionState,
+            minutes: MuesliPreferences.keyboardMicAutoOffMinutes
+        )
+        guard let delay else {
+            keyboardIdleShutoffTask?.cancel()
+            keyboardIdleShutoffTask = nil
+            return
+        }
+        guard keyboardIdleShutoffTask == nil else { return }
+        keyboardIdleShutoffTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled, let self else { return }
+            self.keyboardIdleShutoffTask = nil
+            guard self.keyboardSessionState.phase == .ready else { return }
+            self.turnOffKeyboardMicSoon(reason: "idle")
+        }
+    }
+
+    private func turnOffKeyboardMicSoon(reason: String) {
+        KeyboardDiagnosticsLog.record("keyboard.autoOff", ["reason": reason])
+        let sessionID = keyboardMicSession.id
+        Task { await turnOffKeyboardMic(sessionID: sessionID) }
+    }
+
+    private func handleScreenLocked() {
+        switch KeyboardMicAutoOff.screenOffAction(for: keyboardSessionState) {
+        case .turnOffNow:
+            turnOffKeyboardMicSoon(reason: "screen_locked")
+        case .turnOffWhenIdle:
+            keyboardMicOffWhenIdle = true
+        case .ignore:
+            break
+        }
+    }
+
+    func setKeyboardMicAutoOffMinutes(_ minutes: Int) {
+        UserDefaults.standard.set(KeyboardMicAutoOff.resolved(minutes: minutes), forKey: MuesliPreferences.keyboardMicAutoOffMinutesKey)
+        keyboardIdleShutoffTask?.cancel()
+        keyboardIdleShutoffTask = nil
+        applyKeyboardMicAutoOff()
     }
 
     @discardableResult
