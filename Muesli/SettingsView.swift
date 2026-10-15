@@ -760,19 +760,14 @@ struct SettingsView: View {
         .keyboardType(.URL)
 
         SettingsTextFieldRow(
-            icon: "cpu",
-            title: "Model",
-            placeholder: "model name on the server",
-            text: $customLLMModel
-        )
-
-        SettingsTextFieldRow(
             icon: "key",
             title: "API Key (optional)",
             placeholder: "Bearer token",
             text: $customLLMAPIKey,
             isSecure: true
         )
+
+        CustomLLMModelRow(model: $customLLMModel, baseURL: customLLMBaseURL, apiKey: customLLMAPIKey)
     }
 
     private var quillSettings: some View {
@@ -1744,6 +1739,113 @@ final class AppleSyncAccountManager {
                         continuation.resume(returning: ("Unknown", false))
                     }
                 }
+        }
+    }
+}
+
+
+/// The Custom LLM model: a dropdown of what the server lists, or a text field when it cannot be asked.
+private struct CustomLLMModelRow: View {
+    @Binding var model: String
+    let baseURL: String
+    let apiKey: String
+
+    private enum Listing: Equatable {
+        case idle
+        case loading
+        case loaded([String])
+        case failed(String)
+    }
+
+    @State private var listing = Listing.idle
+    @State private var refreshCount = 0
+
+    private var loadID: String { "\(baseURL)\u{1F}\(apiKey)\u{1F}\(refreshCount)" }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MuesliTheme.spacing8) {
+            HStack(spacing: MuesliTheme.spacing12) {
+                Image(systemName: "cpu")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(MuesliTheme.accent)
+                    .frame(width: 22)
+                Text("Model")
+                    .font(MuesliTheme.headline())
+                    .foregroundStyle(MuesliTheme.textPrimary)
+                Spacer()
+                if listing == .loading {
+                    ProgressView()
+                } else {
+                    Button {
+                        refreshCount += 1
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 15, weight: .semibold))
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(MuesliTheme.accent)
+                    .accessibilityLabel("Refresh model list")
+                }
+            }
+
+            switch listing {
+            case .loaded(let ids):
+                Picker("Model", selection: $model) {
+                    if model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text("Choose a model").tag("")
+                    }
+                    ForEach(CustomLLMModelCatalog.pickerChoices(listed: ids, current: model), id: \.self) { id in
+                        Text(id).tag(id)
+                    }
+                }
+                .pickerStyle(.menu)
+                .tint(MuesliTheme.textPrimary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, MuesliTheme.spacing12)
+                .frame(height: 42)
+                .background(MuesliTheme.surfacePrimary)
+                .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall))
+            case .idle, .loading, .failed:
+                TextField("model name on the server", text: $model)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .font(MuesliTheme.body())
+                    .foregroundStyle(MuesliTheme.textPrimary)
+                    .padding(.horizontal, MuesliTheme.spacing12)
+                    .frame(height: 42)
+                    .background(MuesliTheme.surfacePrimary)
+                    .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall))
+                if case .failed(let reason) = listing {
+                    Text("Could not list the server's models: \(reason). Type the model name instead.")
+                        .font(MuesliTheme.caption())
+                        .foregroundStyle(MuesliTheme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .task(id: loadID) { await load() }
+    }
+
+    private func load() async {
+        guard CustomLLMModelCatalog.modelsURL(from: baseURL) != nil else {
+            listing = .idle
+            return
+        }
+        // Wait out typing in the URL or key field before asking the server.
+        try? await Task.sleep(for: .milliseconds(600))
+        guard !Task.isCancelled else { return }
+        listing = .loading
+        do {
+            let ids = try await CustomLLMModelCatalog.fetch(baseURL: baseURL, apiKey: apiKey)
+            guard !Task.isCancelled else { return }
+            listing = .loaded(ids)
+        } catch is CancellationError {
+            return
+        } catch {
+            guard !Task.isCancelled else { return }
+            listing = .failed(error.localizedDescription)
         }
     }
 }
