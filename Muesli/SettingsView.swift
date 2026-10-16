@@ -1819,6 +1819,14 @@ private struct RemoteProcessingRow: View {
             )
             .accessibilityIdentifier("settings.remoteProcessing")
 
+            if let warning = RemoteTranscriptionPolicy.publicEndpointWarning(baseURL: baseURL) {
+                Label(warning, systemImage: "exclamationmark.triangle")
+                    .font(MuesliTheme.caption())
+                    .foregroundStyle(MuesliTheme.destructive)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("settings.remoteProcessing.publicWarning")
+            }
+
             HStack(spacing: MuesliTheme.spacing12) {
                 if let status {
                     Text(status.statusRowText)

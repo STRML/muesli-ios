@@ -26,6 +26,30 @@ final class PolicyTests: XCTestCase {
         XCTAssertEqual(RemoteTranscriptionPolicy.eligibility(for: context(enabled: true, endpoint: false)), .skip(.noEndpoint))
     }
 
+    func testRow16PrivateLookingEndpointsGetNoWarningAndPublicOnesDo() {
+        let privateHosts = [
+            "https://studio.tail13013.ts.net/v1", "http://127.0.0.1:11240/v1", "http://localhost:8080",
+            "http://192.168.1.20/v1", "http://10.0.0.5", "http://172.16.4.2", "http://172.31.255.1",
+            "http://100.64.0.1", "http://100.127.9.9", "http://studio.local/v1", "http://[::1]:8080",
+            "http://[fd12:3456::1]/v1", "http://169.254.10.10",
+        ]
+        for url in privateHosts {
+            XCTAssertNil(RemoteTranscriptionPolicy.publicEndpointWarning(baseURL: url), url)
+        }
+        let publicHosts = [
+            "https://api.openai.com/v1", "https://openrouter.ai/api/v1", "https://example.com",
+            "http://172.32.0.1", "http://100.128.0.1", "http://8.8.8.8", "https://ts.net.evil.com/v1",
+        ]
+        for url in publicHosts {
+            XCTAssertEqual(
+                RemoteTranscriptionPolicy.publicEndpointWarning(baseURL: url),
+                RemoteTranscriptionPolicy.publicEndpointWarningText,
+                url
+            )
+        }
+        XCTAssertNil(RemoteTranscriptionPolicy.publicEndpointWarning(baseURL: "not a url"))
+    }
+
     func testRow15SwitchingAwayFromCustomLLMStopsUploadsTheHiddenCheckboxWouldKeepSending() {
         XCTAssertTrue(RemoteTranscriptionPolicy.isSettingActive(stored: true, endpointConfigured: true, summaryBackendIsCustomLLM: true))
         XCTAssertFalse(RemoteTranscriptionPolicy.isSettingActive(stored: true, endpointConfigured: true, summaryBackendIsCustomLLM: false))

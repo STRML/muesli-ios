@@ -91,6 +91,33 @@ enum RemoteTranscriptionPolicy {
         stored && endpointConfigured && summaryBackendIsCustomLLM
     }
 
+    static let publicEndpointWarningText = "This address doesn't look like a private server. Dictation recordings would leave your network."
+
+    /// A warning, never a block: the user decides whom to trust. Private means loopback, LAN, link-local,
+    /// Tailscale (100.64.0.0/10 or *.ts.net) or a .local name. Nil for those and for an unparseable address.
+    static func publicEndpointWarning(baseURL: String) -> String? {
+        guard let host = URL(string: baseURL.trimmingCharacters(in: .whitespacesAndNewlines))?.host?.lowercased(),
+              !host.isEmpty
+        else { return nil }
+        return isPrivateHost(host) ? nil : publicEndpointWarningText
+    }
+
+    private static func isPrivateHost(_ host: String) -> Bool {
+        let bare = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        if bare == "localhost" || bare.hasSuffix(".local") || bare.hasSuffix(".ts.net") { return true }
+        if bare.contains(":") {
+            return bare == "::1" || bare.hasPrefix("fc") || bare.hasPrefix("fd") || bare.hasPrefix("fe80")
+        }
+        let octets = bare.split(separator: ".").compactMap { Int($0) }
+        guard octets.count == 4, octets.allSatisfy({ (0...255).contains($0) }) else { return false }
+        switch (octets[0], octets[1]) {
+        case (10, _), (127, _), (192, 168), (169, 254): return true
+        case (172, 16...31): return true
+        case (100, 64...127): return true
+        default: return false
+        }
+    }
+
     static func keyboardBanner(remoteProcessingEnabled: Bool, hasFullAccess: Bool) -> String? {
         remoteProcessingEnabled && !hasFullAccess ? fullAccessBanner : nil
     }
