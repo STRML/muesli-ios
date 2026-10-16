@@ -52,6 +52,10 @@ final class KeyboardViewController: UIInputViewController {
                 textBeforeCursor: self?.textDocumentProxy.documentContextBeforeInput
             )
         }
+        let typingDocument = controller.typing.document
+        typingDocument.beforeReader = { [weak self] in self?.textDocumentProxy.documentContextBeforeInput }
+        typingDocument.afterReader = { [weak self] in self?.textDocumentProxy.documentContextAfterInput }
+        typingDocument.identifierReader = { [weak self] in self?.textDocumentProxy.documentIdentifier }
         controller.inputModeSwitcher = { [weak self] in
             self?.advanceToNextInputMode()
         }
@@ -104,6 +108,9 @@ final class KeyboardViewController: UIInputViewController {
 
         super.viewWillAppear(animated)
 
+        refreshTypingTraits()
+        controller.typing.loadLexicon(from: self)
+
         isKeyboardPresented = true
         hasEnteredAppearance = true
         hasActivatedKeyboardRuntime = false
@@ -135,6 +142,21 @@ final class KeyboardViewController: UIInputViewController {
         refreshLaunchSnapshot()
     }
 
+    override func textDidChange(_ textInput: UITextInput?) {
+        super.textDidChange(textInput)
+        refreshTypingTraits()
+    }
+
+    override func selectionDidChange(_ textInput: UITextInput?) {
+        super.selectionDidChange(textInput)
+        refreshTypingTraits()
+    }
+
+    override func didReceiveMemoryWarning() {
+        super.didReceiveMemoryWarning()
+        controller.typing.releaseMemory()
+    }
+
     override func viewWillDisappear(_ animated: Bool) {
         appearanceGuard.endAppearance()
         super.viewWillDisappear(animated)
@@ -150,6 +172,20 @@ final class KeyboardViewController: UIInputViewController {
 }
 
 private extension KeyboardViewController {
+    /// Traits can arrive late or change when focus moves to another field, so they are re-read on every host
+    /// change instead of once at launch. The host's keyboard appearance picks light or dark for the whole panel.
+    func refreshTypingTraits() {
+        let proxy = textDocumentProxy
+        controller.typing.setDocumentLanguage(proxy.documentInputMode?.primaryLanguage)
+        controller.typing.hostDidChange(traits: proxy)
+        let style: UIUserInterfaceStyle = switch controller.typing.state.traits.appearance {
+        case .dark: .dark
+        case .light: .light
+        case .unspecified: .unspecified
+        }
+        hostingController?.overrideUserInterfaceStyle = style
+    }
+
     static let settledHeightTolerance: CGFloat = 1
     static let requiredStableGeometryFrames = 2
 

@@ -53,6 +53,9 @@ final class TypingEngine {
     private let now: @MainActor () -> TimeInterval
 
     private(set) var state = TypingState()
+    /// What `onChange` last heard. `state` is edited in place before a refresh, so change detection compares
+    /// against this, not against `state`.
+    private var published = TypingState()
     var onChange: (@MainActor (TypingState) -> Void)?
     var completionHandler: TypingWordCompletionHandling?
 
@@ -88,11 +91,13 @@ final class TypingEngine {
 
     /// Traits are re-read whenever the host's text changes, and can arrive late; this is safe to call at any time.
     func apply(traits: TypingTraits) {
+        let changed = !hasAppliedTraits || state.traits != traits
         let variantChanged = !hasAppliedTraits || state.traits.variant != traits.variant
         hasAppliedTraits = true
         state.traits = traits
         if variantChanged { state.page = traits.initialPage }
-        lastAutocapKey = nil
+        // The host echoes the same traits after every keystroke; only a real change re-evaluates auto-capitalize.
+        if changed { lastAutocapKey = nil }
         refresh()
     }
 
@@ -267,8 +272,9 @@ final class TypingEngine {
         next.shift = machine.state
         next.suggestions = suggestions
         next.isReturnEnabled = isReturnEnabled
-        guard next != state else { return }
         state = next
+        guard next != published else { return }
+        published = next
         onChange?(next)
     }
 }

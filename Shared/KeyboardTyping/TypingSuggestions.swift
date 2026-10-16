@@ -124,7 +124,9 @@ final class TypingSuggestionBuilder: TypingSuggestionSource {
         guard checker.isMisspelled(partial, language: language) else { return completions }
         let guesses = checker.guesses(forWord: partial, language: language)
             .map { TypingSuggestion(text: $0, kind: .correction) }
-        return [TypingSuggestion(text: partial, kind: .verbatim)] + guesses + completions
+        // Best guess and best completion first: "offi" should offer "office", not only five near-misses.
+        return [TypingSuggestion(text: partial, kind: .verbatim)]
+            + guesses.prefix(1) + completions.prefix(1) + guesses.dropFirst() + completions.dropFirst()
     }
 
     private func resolvedChecker() -> TypingSpellChecking {

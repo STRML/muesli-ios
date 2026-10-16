@@ -74,6 +74,14 @@ final class TypingSuggestionBuilderTests: XCTestCase {
         XCTAssertEqual(texts(builder.suggestions(forPartial: "helo")), ["helo", "hello", "helot"])
     }
 
+    func testAPartialWordKeepsRoomForItsCompletionAmongTheGuesses() {
+        let builder = builder()
+        checker.misspelled = ["offi"]
+        checker.guessTable["offi"] = ["off", "offa", "offs"]
+        checker.completionTable["offi"] = ["office", "officer"]
+        XCTAssertEqual(texts(builder.suggestions(forPartial: "offi")), ["offi", "off", "office"])
+    }
+
     // G3: a text replacement matches its shortcut exactly and leads the strip.
     func testATextReplacementShortcutIsOfferedFirst() {
         let builder = builder()

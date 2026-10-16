@@ -145,6 +145,23 @@ final class TypingEngineTests: XCTestCase {
         XCTAssertEqual(engine.state.shift, .once)
     }
 
+    func testTheHostEchoingTheSameTraitsDoesNotRearmACancelledShift() {
+        let traits = TypingTraits()
+        engine.apply(traits: traits)
+        XCTAssertEqual(engine.state.shift, .once)
+        engine.tapShift()
+        engine.apply(traits: traits)
+        XCTAssertEqual(engine.state.shift, .off)
+    }
+
+    func testTheHostEchoingTheSameTraitsDoesNotResetThePage() {
+        let traits = TypingTraits()
+        engine.apply(traits: traits)
+        engine.switchPage(.numbers)
+        engine.apply(traits: traits)
+        XCTAssertEqual(engine.state.page, .numbers)
+    }
+
     // S13 through the engine: the host moved the cursor away from a sentence start.
     func testAnAutomaticShiftIsDroppedWhenTheHostMovesTheCursorMidSentence() {
         engine.documentDidChange()
@@ -513,6 +530,18 @@ final class TypingEngineTests: XCTestCase {
         XCTAssertEqual(engine.state.shift, .locked)
         engine.switchPage(.letters)
         XCTAssertEqual(engine.state.shift, .locked)
+    }
+
+    /// The Observable shell only hears `onChange`: page and trait changes must reach it, not just shift.
+    func testPageAndTraitChangesAreReportedToOnChange() {
+        var seen: [TypingState] = []
+        engine.onChange = { seen.append($0) }
+        engine.switchPage(.symbols)
+        XCTAssertEqual(seen.last?.page, .symbols)
+        var traits = TypingTraits()
+        traits.returnKey = .send
+        engine.apply(traits: traits)
+        XCTAssertEqual(seen.last?.traits.returnKey, .send)
     }
 
     func testOnChangeFiresWithTheNewState() {
