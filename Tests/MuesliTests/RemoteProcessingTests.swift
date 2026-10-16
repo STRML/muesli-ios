@@ -77,6 +77,6 @@ final class RemoteProcessingTests: XCTestCase {
     }
 
     func testARemoteTranscriptIsLabelledByItsEngine() {
-        XCTAssertEqual(TranscriptionDisplayName.engineName(for: RemoteTranscriptionService.engineIdentifier), "Remote (Custom LLM)")
+        XCTAssertEqual(TranscriptionDisplayName.engineName(for: RemoteTranscriptionService.engineIdentifier), "Remote (your server)")
     }
 }
