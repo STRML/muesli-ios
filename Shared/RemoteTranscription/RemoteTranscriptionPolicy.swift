@@ -6,6 +6,15 @@ enum RemoteDictationOrigin: Sendable, Equatable {
     case keyboard(hasFullAccess: Bool)
 }
 
+extension RemoteDictationOrigin {
+    /// The Action Button hands its result to the keyboard when one is visible, but it is the app's own dictation:
+    /// the Full Access rule is about the keyboard extension only. Unknown Full Access counts as none.
+    static func resolve(startedFromKeyboard: Bool, isActionButton: Bool, keyboardHasFullAccess: Bool?) -> Self {
+        guard startedFromKeyboard, !isActionButton else { return .app }
+        return .keyboard(hasFullAccess: keyboardHasFullAccess == true)
+    }
+}
+
 enum RemoteSkipReason: Sendable, Equatable {
     case settingOff
     case noEndpoint

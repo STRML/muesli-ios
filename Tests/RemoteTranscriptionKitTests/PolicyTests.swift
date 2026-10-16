@@ -52,6 +52,25 @@ final class PolicyTests: XCTestCase {
         XCTAssertNil(RemoteTranscriptionPolicy.keyboardBanner(remoteProcessingEnabled: false, hasFullAccess: false))
     }
 
+    func testRow10OnlyTheKeyboardExtensionNeedsFullAccessNotTheActionButton() {
+        typealias Origin = RemoteDictationOrigin
+        XCTAssertEqual(Origin.resolve(startedFromKeyboard: false, isActionButton: false, keyboardHasFullAccess: false), .app)
+        XCTAssertEqual(Origin.resolve(startedFromKeyboard: true, isActionButton: true, keyboardHasFullAccess: nil), .app)
+        XCTAssertEqual(
+            Origin.resolve(startedFromKeyboard: true, isActionButton: false, keyboardHasFullAccess: true),
+            .keyboard(hasFullAccess: true)
+        )
+        XCTAssertEqual(
+            Origin.resolve(startedFromKeyboard: true, isActionButton: false, keyboardHasFullAccess: false),
+            .keyboard(hasFullAccess: false)
+        )
+        XCTAssertEqual(
+            Origin.resolve(startedFromKeyboard: true, isActionButton: false, keyboardHasFullAccess: nil),
+            .keyboard(hasFullAccess: false),
+            "an unknown Full Access state fails closed"
+        )
+    }
+
     func testRow12PrivateContentIsNeverRemoteFromAnyOrigin() {
         XCTAssertEqual(RemoteTranscriptionPolicy.eligibility(for: context(isPrivate: true)), .skip(.privateContent))
         XCTAssertEqual(

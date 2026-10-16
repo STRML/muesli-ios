@@ -6943,12 +6943,12 @@ final class DictationCoordinator {
     }
 
     /// Where a dictation was started, for the remote processing rule that the keyboard needs Full Access.
-    /// A keyboard whose Full Access is unknown counts as having none.
-    /// The Action Button hands its result to the keyboard when one is visible, but it is the app's own dictation:
-    /// the Full Access rule is about the keyboard extension only.
     private func remoteProcessingOrigin(startedFromKeyboard: Bool, source: String?) -> RemoteDictationOrigin {
-        guard startedFromKeyboard, !ActionButtonCaptureSource.isActionButton(source) else { return .app }
-        return .keyboard(hasFullAccess: (try? store.keyboardExtensionStatus())?.hasOpenAccess == true)
+        .resolve(
+            startedFromKeyboard: startedFromKeyboard,
+            isActionButton: ActionButtonCaptureSource.isActionButton(source),
+            keyboardHasFullAccess: (try? store.keyboardExtensionStatus())?.hasOpenAccess
+        )
     }
 
     private func prewarmRemoteProcessing(startedFromKeyboard: Bool, source: String?) {
