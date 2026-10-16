@@ -84,7 +84,11 @@ final class MuesliSmokeUITests: XCTestCase {
         try await Task.sleep(for: .seconds(6))
         captureActionButton(springboard, name: "Dynamic Island returned to quiet")
         springboard.buttons["Stop keyboard dictation recording"].tap()
-        XCTAssertTrue(springboard.staticTexts["Transcribing"].waitForExistence(timeout: 5))
+        // The Stop intent reaches the app through the system's
+        // BackgroundShortcutRunner. On CI that hop took 1.4-3.5 s in 18 runs and
+        // 6.8 s once, when the runner launched cold. The fixture holds
+        // Transcribing for 7 s after the intent lands, so 15 s still sees it.
+        XCTAssertTrue(springboard.staticTexts["Transcribing"].waitForExistence(timeout: 15))
         XCTAssertFalse(springboard.staticTexts["Listening"].exists)
         captureActionButton(springboard, name: "Dynamic Island processing after recording")
         XCTAssertFalse(springboard.buttons["Stop keyboard dictation recording"].exists)
