@@ -691,6 +691,13 @@ struct SettingsView: View {
 
                     customLLMFields
                         .disabled(!meetingSummariesEnabled)
+
+                    if RemoteTranscriptionPolicy.showsCheckbox(
+                        endpointConfigured: CustomLLMEndpoint.transcriptionsURL(from: customLLMBaseURL) != nil
+                    ) {
+                        // Outside the summaries switch: it is about dictation, not notes.
+                        RemoteProcessingRow(isOn: $remoteProcessingEnabled, baseURL: customLLMBaseURL, apiKey: customLLMAPIKey)
+                    }
                 } else {
                     SettingsRow(
                         icon: "person.crop.circle.badge.checkmark",
@@ -762,12 +769,6 @@ struct SettingsView: View {
         )
 
         CustomLLMModelRow(model: $customLLMModel, baseURL: customLLMBaseURL, apiKey: customLLMAPIKey)
-
-        if RemoteTranscriptionPolicy.showsCheckbox(
-            endpointConfigured: CustomLLMEndpoint.transcriptionsURL(from: customLLMBaseURL) != nil
-        ) {
-            RemoteProcessingRow(isOn: $remoteProcessingEnabled, baseURL: customLLMBaseURL, apiKey: customLLMAPIKey)
-        }
     }
 
     private var quillSettings: some View {
@@ -1810,10 +1811,12 @@ private struct RemoteProcessingRow: View {
             .accessibilityIdentifier("settings.remoteProcessing")
 
             HStack(spacing: MuesliTheme.spacing12) {
-                Text(status?.statusRowText ?? "Not tested")
-                    .font(MuesliTheme.caption())
-                    .foregroundStyle(statusColor)
-                    .accessibilityIdentifier("settings.remoteProcessing.status")
+                if let status {
+                    Text(status.statusRowText)
+                        .font(MuesliTheme.caption())
+                        .foregroundStyle(statusColor)
+                        .accessibilityIdentifier("settings.remoteProcessing.status")
+                }
                 Spacer()
                 if isTesting {
                     ProgressView()

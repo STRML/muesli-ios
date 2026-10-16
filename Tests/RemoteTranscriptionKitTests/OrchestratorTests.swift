@@ -352,3 +352,57 @@ final class ProbeCacheTests: XCTestCase {
         XCTAssertEqual(calls.value, 1)
     }
 }
+
+/// A verdict from before the server went away must not cost every following dictation the full budget.
+final class StaleVerdictTests: XCTestCase {
+    private let timing = RemoteTranscriptionTiming(probeThreshold: 0.1, resultBudget: 0.3, unresolvedProbeGrace: 0.05)
+    private let audio = URL(fileURLWithPath: "/dev/null/recording.m4a")
+    private let eligible = RemoteRequestContext(settingEnabled: true, endpointConfigured: true)
+
+    func testRow14AnUploadThatMissesTheBudgetMakesTheNextRecordingProbeAgain() async throws {
+        let probes = Counter()
+        let hanging = Flag()
+        let cache = RemoteProbeCache(ttl: 30, probe: {
+            probes.increment()
+            return hanging.value ? .timedOut : .reachable(latency: 0.02)
+        })
+        let orchestrator = RemoteTranscriptionOrchestrator(
+            timing: timing,
+            probe: { await cache.outcome() },
+            upload: { _ in
+                hanging.set()
+                try await Task.sleep(for: .seconds(5))
+                return "late"
+            },
+            invalidateProbe: { await cache.invalidate() }
+        )
+        let first = try await orchestrator.transcribe(audioURL: audio, context: eligible, local: { "on device" })
+        XCTAssertEqual(first.source, .onDevice)
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(probes.value, 1)
+
+        let start = ContinuousClock.now
+        let second = try await orchestrator.transcribe(audioURL: audio, context: eligible, local: { "on device" })
+        XCTAssertEqual(second.source, .onDevice)
+        XCTAssertEqual(probes.value, 2, "the stale 'fast' verdict was dropped and probed again")
+        XCTAssertLessThan(seconds(ContinuousClock.now - start), timing.resultBudget, "no second wait for the full budget")
+    }
+
+    func testRow05AFailedUploadInvalidatesTheVerdictAndASuccessDoesNot() async throws {
+        for (fails, expected) in [(true, 1), (false, 0)] {
+            let invalidations = Counter()
+            let orchestrator = RemoteTranscriptionOrchestrator(
+                timing: timing,
+                probe: { .reachable(latency: 0.02) },
+                upload: { _ in
+                    if fails { throw RemoteTranscriptionError.transport(-1005) }
+                    return "remote"
+                },
+                invalidateProbe: { invalidations.increment() }
+            )
+            _ = try await orchestrator.transcribe(audioURL: audio, context: eligible, local: { "on device" })
+            try await Task.sleep(for: .milliseconds(30))
+            XCTAssertEqual(invalidations.value, expected, "fails=\(fails)")
+        }
+    }
+}

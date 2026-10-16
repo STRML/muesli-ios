@@ -39,10 +39,9 @@ actor RemoteTranscriptionService {
     /// The Settings Test button: a fresh probe of the typed address, not the cached one, with room to show a slow answer.
     static func test(baseURL: String, apiKey: String) async -> RemoteProbeOutcome {
         guard let endpoint = CustomLLMEndpoint.transcriptionsURL(from: baseURL) else { return .unreachable }
-        let client = RemoteTranscriptionClient(
-            endpoint: endpoint, apiKey: apiKey, session: RemoteTranscriptionClient.makeSession()
-        )
-        return await client.probe(timeout: 5)
+        let session = RemoteTranscriptionClient.makeSession()
+        defer { session.finishTasksAndInvalidate() }
+        return await RemoteTranscriptionClient(endpoint: endpoint, apiKey: apiKey, session: session).probe(timeout: 5)
     }
 
     private static func context(origin: RemoteDictationOrigin, isPrivateContent: Bool) -> RemoteRequestContext {
@@ -72,7 +71,8 @@ actor RemoteTranscriptionService {
             probe: { await probeCache.outcome() },
             upload: { try await client.transcribe(audioURL: $0) },
             prewarm: { await probeCache.prewarm() },
-            log: { Self.logger.notice("\($0, privacy: .public)") }
+            log: { Self.logger.notice("\($0, privacy: .public)") },
+            invalidateProbe: { await probeCache.invalidate() }
         )
         cached = (fingerprint, orchestrator)
         return orchestrator

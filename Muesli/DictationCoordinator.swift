@@ -4799,7 +4799,7 @@ final class DictationCoordinator {
             completion?(.failed("Muesli is busy"))
             return
         }
-        prewarmRemoteProcessing(startedFromKeyboard: isKeyboardHandoffActive)
+        prewarmRemoteProcessing(startedFromKeyboard: isKeyboardHandoffActive, source: source)
         recordingStartupInProgress = true
         activeRequest = request
         let usesPersistentKeyboardSession = (source == "keyboard" && MuesliPreferences.keyboardSessionModeEnabled)
@@ -5479,7 +5479,8 @@ final class DictationCoordinator {
                     let outcome = try await runKeyboardTranscriptionJob(
                         audioURL: audioURL,
                         request: request,
-                        startedFromKeyboard: startedFromKeyboard
+                        startedFromKeyboard: startedFromKeyboard,
+                        source: (activeSession ?? session)?.source
                     )
                     guard case .completed(let transcription) = outcome else {
                         throw VoiceNoteRetryError.timeout
@@ -6943,13 +6944,15 @@ final class DictationCoordinator {
 
     /// Where a dictation was started, for the remote processing rule that the keyboard needs Full Access.
     /// A keyboard whose Full Access is unknown counts as having none.
-    private func remoteProcessingOrigin(startedFromKeyboard: Bool) -> RemoteDictationOrigin {
-        guard startedFromKeyboard else { return .app }
+    /// The Action Button hands its result to the keyboard when one is visible, but it is the app's own dictation:
+    /// the Full Access rule is about the keyboard extension only.
+    private func remoteProcessingOrigin(startedFromKeyboard: Bool, source: String?) -> RemoteDictationOrigin {
+        guard startedFromKeyboard, !ActionButtonCaptureSource.isActionButton(source) else { return .app }
         return .keyboard(hasFullAccess: (try? store.keyboardExtensionStatus())?.hasOpenAccess == true)
     }
 
-    private func prewarmRemoteProcessing(startedFromKeyboard: Bool) {
-        let origin = remoteProcessingOrigin(startedFromKeyboard: startedFromKeyboard)
+    private func prewarmRemoteProcessing(startedFromKeyboard: Bool, source: String?) {
+        let origin = remoteProcessingOrigin(startedFromKeyboard: startedFromKeyboard, source: source)
         Task { await RemoteTranscriptionService.shared.prewarm(origin: origin) }
     }
 
@@ -6958,9 +6961,10 @@ final class DictationCoordinator {
     private func runKeyboardTranscriptionJob(
         audioURL: URL,
         request: DictationRequest,
-        startedFromKeyboard: Bool
+        startedFromKeyboard: Bool,
+        source: String?
     ) async throws -> OfflineTranscriptionJobOutcome<RemoteTranscriptionOrchestrator.Outcome> {
-        let origin = remoteProcessingOrigin(startedFromKeyboard: startedFromKeyboard)
+        let origin = remoteProcessingOrigin(startedFromKeyboard: startedFromKeyboard, source: source)
         return try await runOfflineTranscriptionJob(
             audioURL: audioURL,
             onProgress: { [weak self] update in

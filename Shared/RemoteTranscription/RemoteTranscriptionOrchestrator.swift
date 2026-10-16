@@ -12,6 +12,7 @@ struct RemoteTranscriptionOrchestrator: Sendable {
     typealias Upload = @Sendable (URL) async throws -> String
     typealias Prewarm = @Sendable () async -> Void
     typealias Log = @Sendable (String) -> Void
+    typealias Invalidate = @Sendable () async -> Void
 
     enum Source: Sendable, Equatable { case onDevice, remote }
 
@@ -33,19 +34,22 @@ struct RemoteTranscriptionOrchestrator: Sendable {
     let upload: Upload
     let prewarm: Prewarm
     let log: Log
+    let invalidateProbe: Invalidate
 
     init(
         timing: RemoteTranscriptionTiming = .standard,
         probe: @escaping Probe,
         upload: @escaping Upload,
         prewarm: @escaping Prewarm = {},
-        log: @escaping Log = { _ in }
+        log: @escaping Log = { _ in },
+        invalidateProbe: @escaping Invalidate = {}
     ) {
         self.timing = timing
         self.probe = probe
         self.upload = upload
         self.prewarm = prewarm
         self.log = log
+        self.invalidateProbe = invalidateProbe
     }
 
     /// Call when recording starts, so the probe has an answer by the time it ends. Sends nothing for a request that
@@ -68,7 +72,7 @@ struct RemoteTranscriptionOrchestrator: Sendable {
         let deadline = ContinuousClock.now + .seconds(timing.resultBudget)
         let grace = timing.unresolvedProbeGrace
         let threshold = timing.probeThreshold
-        let (probe, upload, log) = (self.probe, self.upload, self.log)
+        let (probe, upload, log, invalidateProbe) = (self.probe, self.upload, self.log, self.invalidateProbe)
 
         let localTask = Task {
             do { events.yield(.local(.success(try await local()))) } catch { events.yield(.local(.failure(error))) }
@@ -92,6 +96,7 @@ struct RemoteTranscriptionOrchestrator: Sendable {
             } catch {
                 guard !Task.isCancelled else { return }
                 log("remote transcription failed: \(Self.category(of: error))")
+                await invalidateProbe()
                 events.yield(.remoteDone(nil))
             }
         }
@@ -120,6 +125,8 @@ struct RemoteTranscriptionOrchestrator: Sendable {
                 if let text { return Outcome(text: text, source: .remote) }
                 remoteIsOver = true
             case .deadline:
+                // The probe passed, yet no text came in time: the cached verdict is stale.
+                if !remoteIsOver, probeIsResolved { Task { await invalidateProbe() } }
                 remoteIsOver = true
             case .local(let result):
                 localResult = result

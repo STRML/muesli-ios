@@ -26,6 +26,12 @@ actor RemoteProbeCache {
         _ = runningProbe()
     }
 
+    /// Forgets the verdict after the server let an upload down, so the next recording probes again instead of
+    /// trusting an answer from before the server went away.
+    func invalidate() {
+        verdict = nil
+    }
+
     func outcome() async -> RemoteProbeOutcome {
         if let fresh = freshVerdict() { return fresh }
         return await runningProbe().value
