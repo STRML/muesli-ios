@@ -227,24 +227,6 @@ enum MeetingSummaryBackend: String, CaseIterable, Identifiable {
     }
 }
 
-/// An OpenAI-compatible server the user runs or trusts, such as a home server reached over Tailscale.
-enum CustomLLMEndpoint {
-    private static let suffix = "/chat/completions"
-
-    /// Accepts a base URL (`https://host/v1`) or a pasted full path, and returns the chat completions URL.
-    /// Only https is accepted, so credentials and transcripts never travel in the clear.
-    static func chatCompletionsURL(from value: String) -> URL? {
-        var text = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        while text.hasSuffix("/") { text.removeLast() }
-        if text.hasSuffix(suffix) { text.removeLast(suffix.count) }
-        guard let components = URLComponents(string: text + suffix),
-              components.scheme == "https",
-              let host = components.host, !host.isEmpty
-        else { return nil }
-        return components.url
-    }
-}
-
 struct SummaryModelPreset: Identifiable, Hashable {
     let id: String
     let label: String
