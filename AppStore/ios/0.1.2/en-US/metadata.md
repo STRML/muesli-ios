@@ -66,7 +66,7 @@ GA readiness blocker: the current home page presents Muesli as a Mac app. Add an
 - Terms of service: https://muesli.works/terms
 - Public legal and privacy contact: pranav@muesli.works
 
-GA readiness blocker: the privacy policy and terms currently describe Muesli as macOS software. Update both documents to cover the iOS app, its local storage, optional iCloud sync, microphone access, custom keyboard behavior, optional Full Access, optional providers, and analytics before GA.
+GA readiness blocker: the privacy policy and terms currently describe Muesli as macOS software. Update both documents to cover the iOS app, its local storage, optional iCloud sync, microphone access, custom keyboard behavior, Full Access for keyboard dictation, optional providers, and analytics before GA.
 
 ## Copyright
 
@@ -95,7 +95,7 @@ Muesli is a local-first voice note and meeting transcription app.
 
 No account is required for the core experience. On first use, select and download a local transcription model. Microphone access is required to record voice notes and in-person meetings.
 
-The optional Muesli keyboard is installed through iOS Settings. Full Access lets the keyboard extension exchange a dictation request and result with the containing app through the shared App Group. The keyboard extension does not record audio itself.
+The optional Muesli keyboard is installed through iOS Settings. Dictating from the keyboard requires Full Access, because Full Access is what lets the keyboard extension exchange a dictation request and result with the containing app through the shared App Group. The keyboard extension does not record audio itself and makes no network requests.
 
 Optional AI meeting summaries require the reviewer to connect a supported provider. This is not required to review local recording and transcription.
 

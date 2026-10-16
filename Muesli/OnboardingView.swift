@@ -1500,7 +1500,7 @@ struct KeyboardSetupVerificationView: View {
                     Text("Verify the keyboard")
                         .font(MuesliTheme.headline())
                         .foregroundStyle(MuesliTheme.textPrimary)
-                    Text("Add Muesli Keyboard and enable Full Access in Settings. Then return, select Muesli with the globe key, and tap its Verify button below.")
+                    Text("Add Muesli Keyboard in Settings and turn on Full Access. The keyboard can't dictate without it: iOS only lets a keyboard reach its app when Full Access is on. Muesli's keyboard never sends what you type anywhere. Then return, select Muesli with the globe key, and tap its Verify button below.")
                         .font(MuesliTheme.caption())
                         .foregroundStyle(MuesliTheme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)

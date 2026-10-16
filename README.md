@@ -104,7 +104,7 @@ Muesli for iOS asks only for permissions needed by the selected workflow.
 |---|---|
 | **Microphone** | Record speech for dictation and meetings |
 | **Keyboard** | Use the Muesli custom keyboard from text fields |
-| **Full Access** | Let the keyboard extension communicate with the containing app through the shared App Group |
+| **Full Access** | Required for keyboard dictation. Lets the keyboard extension exchange dictation requests and results with the containing app through the shared App Group; the keyboard makes no network requests |
 | **Live Activities** *(optional)* | Show active meeting recording state |
 
 The keyboard extension does not record audio directly. Recording is owned by the containing app so microphone permission, model runtime, and transcription state stay in one place.
