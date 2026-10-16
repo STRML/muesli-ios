@@ -210,4 +210,18 @@ final class TypingSuggestionBuilderTests: XCTestCase {
         checker.completionTable["a"] = ["apple", "ant", "ask"]
         XCTAssertEqual(texts(builder.suggestions(forPartial: "a")), ["apple", "ant"])
     }
+
+    // U8: UITextChecker.ignoreWord only lasts as long as one instance; the builder replays it.
+    func testIgnoredWordsAreReplayedIntoANewChecker() {
+        let sut = builder()
+        _ = sut.suggestions(forPartial: "te")
+        sut.ignore("teh")
+        XCTAssertEqual(checker.ignored, ["teh"], "the live checker hears it at once")
+        sut.documentDidChange()
+        let firstChecker = checker
+        checker = FakeSpellChecker()
+        _ = sut.suggestions(forPartial: "te")
+        XCTAssertEqual(checker.ignored, ["teh"], "a new checker gets it too")
+        XCTAssertNotEqual(ObjectIdentifier(firstChecker), ObjectIdentifier(checker))
+    }
 }
