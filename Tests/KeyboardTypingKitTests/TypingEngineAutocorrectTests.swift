@@ -403,6 +403,16 @@ final class TypingEngineAutocorrectTests: XCTestCase {
         XCTAssertEqual(document.before, "the")
     }
 
+    // E23b: a single quote used as an opening quote is not part of the word.
+    func testAWordAfterAnOpeningSingleQuoteIsCorrected() {
+        document.before = "he said "
+        engine.documentDidChange()
+        engine.type("'")
+        typeWord("teh")
+        engine.tapSpace()
+        XCTAssertEqual(document.before, "he said 'the ")
+    }
+
     // E24
     func testAnEmojiGluedToTheWordMeansNoCorrection() {
         engine.type("\u{1F600}")

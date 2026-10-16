@@ -268,7 +268,7 @@ final class TypingEngine {
             return
         }
         if case .partial(let word) = TypingWordExtractor.word(before: document.contextBefore, after: document.contextAfter),
-           word == typedWord {
+           word == TypingWordExtractor.withoutLeadingJoiners(typedWord) {
             // Still agrees with what was typed.
         } else {
             typedWord = ""
@@ -289,7 +289,7 @@ final class TypingEngine {
         let before = document.contextBefore
         let after = document.contextAfter
         // Only a word typed here, and seen by the proxy exactly as typed.
-        guard case .partial(let word) = TypingWordExtractor.word(before: before, after: after), word == typedWord else { return }
+        guard case .partial(let word) = TypingWordExtractor.word(before: before, after: after), word == TypingWordExtractor.withoutLeadingJoiners(typedWord) else { return }
         let event = TypingWordCompletedEvent(
             word: word, boundary: boundary, contextBefore: before, documentIdentifier: document.documentIdentifier
         )

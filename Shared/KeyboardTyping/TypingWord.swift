@@ -20,11 +20,16 @@ enum TypingWordExtractor {
     static func word(before: String?, after: String?) -> TypingCursorWord {
         guard let before, !before.isEmpty else { return .none }
         let run = String(before.reversed().prefix(while: isWordCharacter).reversed())
-        let trimmed = String(run.drop(while: { joiners.contains($0) }))
+        let trimmed = withoutLeadingJoiners(run)
         guard let last = trimmed.last, last.isLetter, !isEmojiLike(last) else { return .none }
         guard !trimmed.contains(where: { $0.isNumber }), trimmed.count <= maximumWordLength else { return .none }
         if let next = after?.first, next.isLetter || next.isNumber, !isEmojiLike(next) { return .insideWord }
         return .partial(trimmed)
+    }
+
+    /// A leading apostrophe or hyphen is a quote or a dash, not part of the word.
+    static func withoutLeadingJoiners(_ text: String) -> String {
+        String(text.drop(while: { joiners.contains($0) }))
     }
 
     /// Whether a typed character ends the word before it. Apostrophes and hyphens are part of words ("don't",
