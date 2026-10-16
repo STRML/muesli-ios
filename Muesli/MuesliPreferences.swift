@@ -138,7 +138,7 @@ enum MuesliPreferences {
     static var meetingSummaryBackend: MeetingSummaryBackend {
         MeetingSummaryBackend(
             rawValue: UserDefaults.standard.string(forKey: meetingSummaryBackendKey) ?? ""
-        ) ?? .openRouter
+        ) ?? .defaultBackend
     }
 
     static var meetingTemplate: MeetingTemplatePreset {
@@ -219,6 +219,9 @@ enum MeetingSummaryBackend: String, CaseIterable, Identifiable {
     case chatGPT = "chatgpt"
     case customLLM = "custom_llm"
 
+    /// New installs start on the user's own server, so nothing points at a hosted provider until they pick one.
+    /// A saved choice always wins.
+    static let defaultBackend = MeetingSummaryBackend.customLLM
     static let defaultOpenRouterModel = "stepfun/step-3.5-flash:free"
     static let defaultChatGPTModel = "gpt-5.5"
 
@@ -232,6 +235,19 @@ enum MeetingSummaryBackend: String, CaseIterable, Identifiable {
             "ChatGPT"
         case .customLLM:
             "Custom"
+        }
+    }
+
+    /// Shown under the backend picker in Settings and onboarding: which hosted service receives meeting text.
+    /// Custom LLM has its own line beside the server URL field.
+    var cloudDestinationNote: String? {
+        switch self {
+        case .openRouter:
+            "Meeting transcripts and your notes are sent to OpenRouter and the model provider you pick."
+        case .chatGPT:
+            "Meeting transcripts and your notes are sent to OpenAI through your ChatGPT account."
+        case .customLLM:
+            nil
         }
     }
 

@@ -68,6 +68,14 @@ final class KeyboardController {
         self.setupVerificationStore = setupVerificationStore
     }
 
+    static let unreachableAppMessage = "Couldn't reach Muesli. Open the app."
+
+    /// A shared-store error usually means Full Access is off. When it is on, asking for it again is wrong:
+    /// the App Group is unreachable for another reason, and opening the app is what can fix it.
+    private func sharedStoreFailureMessage(withoutFullAccess: String = "Enable Full Access") -> String {
+        (currentFullAccess?() ?? hasOpenAccessForSetup) ? Self.unreachableAppMessage : withoutFullAccess
+    }
+
     var hasPendingSetupVerification: Bool {
         setupVerificationChallenge?.isActive() == true
     }
@@ -288,7 +296,7 @@ final class KeyboardController {
             hasLatestDictation = true
             statusText = "Inserted"
         } catch {
-            statusText = "Enable Full Access"
+            statusText = sharedStoreFailureMessage()
         }
     }
 
@@ -305,7 +313,7 @@ final class KeyboardController {
             KeyboardDiagnosticsLog.record("model.select", ["model": model.rawValue])
         } catch {
             pendingModelRawValue = nil
-            statusText = "Enable Full Access"
+            statusText = sharedStoreFailureMessage()
         }
     }
 
@@ -356,7 +364,7 @@ final class KeyboardController {
             statusText = "Finish the current dictation"
             return
         } catch {
-            statusText = "Enable Full Access"
+            statusText = sharedStoreFailureMessage()
             return
         }
         preparedRequest = nil
@@ -387,7 +395,7 @@ final class KeyboardController {
                 )
             }
         } catch {
-            statusText = "Enable Full Access"
+            statusText = sharedStoreFailureMessage()
             activeRequestID = nil
             dictationPhase = .idle
             return
@@ -424,7 +432,7 @@ final class KeyboardController {
                 requestedPhase: .stopRequested
             )
         } catch {
-            statusText = "Enable Full Access"
+            statusText = sharedStoreFailureMessage()
         }
     }
 
@@ -498,7 +506,7 @@ final class KeyboardController {
                 requestedPhase: .cancelRequested
             )
         } catch {
-            statusText = "Enable Full Access"
+            statusText = sharedStoreFailureMessage()
         }
     }
 
@@ -569,7 +577,7 @@ final class KeyboardController {
                 isVisible: true
             ))
         } catch {
-            statusText = "Enable Full Access"
+            statusText = sharedStoreFailureMessage()
         }
     }
 
@@ -692,7 +700,7 @@ final class KeyboardController {
             }
         } catch {
             apply(runtimeStatus: latestRuntimeStatus)
-            statusText = "Waiting for Full Access"
+            statusText = sharedStoreFailureMessage(withoutFullAccess: "Waiting for Full Access")
         }
     }
 
@@ -716,7 +724,7 @@ final class KeyboardController {
             latestRuntimeStatus = runtimeStatus
             apply(runtimeStatus: runtimeStatus)
         } catch {
-            statusText = "Waiting for Full Access"
+            statusText = sharedStoreFailureMessage(withoutFullAccess: "Waiting for Full Access")
         }
     }
 
@@ -724,7 +732,7 @@ final class KeyboardController {
         do {
             apply(liveTranscript: try store.keyboardLiveTranscript())
         } catch {
-            statusText = "Waiting for Full Access"
+            statusText = sharedStoreFailureMessage(withoutFullAccess: "Waiting for Full Access")
         }
     }
 

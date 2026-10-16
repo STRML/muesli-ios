@@ -816,7 +816,7 @@ struct OnboardingView: View {
                 Text("Meeting Summaries")
                     .font(MuesliTheme.title1())
                     .foregroundStyle(MuesliTheme.textPrimary)
-                Text("Connect ChatGPT, OpenRouter or your own server now so meeting recordings can become structured notes after local transcription and diarization.")
+                Text("Connect ChatGPT, OpenRouter or your own server now so meeting recordings can become structured notes after local transcription and diarization. Summaries send meeting text off the phone, to the provider you pick.")
                     .font(MuesliTheme.body())
                     .foregroundStyle(MuesliTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -845,6 +845,13 @@ struct OnboardingView: View {
                     }
                     .pickerStyle(.segmented)
                     .disabled(!meetingSummariesEnabled)
+
+                    if let note = summaryBackend.cloudDestinationNote {
+                        Text(note)
+                            .font(MuesliTheme.caption())
+                            .foregroundStyle(MuesliTheme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
 
                     switch summaryBackend {
                     case .chatGPT:
@@ -1500,7 +1507,7 @@ struct KeyboardSetupVerificationView: View {
                     Text("Verify the keyboard")
                         .font(MuesliTheme.headline())
                         .foregroundStyle(MuesliTheme.textPrimary)
-                    Text("Add Muesli Keyboard and enable Full Access in Settings. Then return, select Muesli with the globe key, and tap its Verify button below.")
+                    Text("Add Muesli Keyboard in Settings and turn on Full Access. The keyboard can't dictate without it: iOS only lets a keyboard reach its app when Full Access is on. The keyboard itself never goes online. Quill, when you use it, sends the text you're fixing (your selection, or the paragraph before the cursor) to your own LLM endpoint. Then return, select Muesli with the globe key, and tap its Verify button below.")
                         .font(MuesliTheme.caption())
                         .foregroundStyle(MuesliTheme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)

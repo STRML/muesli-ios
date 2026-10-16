@@ -83,7 +83,8 @@ enum MeetingSummaryClient {
             userPrompt: user,
             maxTokens: 8_000,
             extraHeaders: [:],
-            timeout: 30
+            timeout: 30,
+            session: CustomLLMSession.shared
         )
     }
 
@@ -113,7 +114,8 @@ enum MeetingSummaryClient {
                     manualNotesToRetain: manualNotesToRetain
                 ),
                 maxTokens: maxOutputTokens,
-                extraHeaders: [:]
+                extraHeaders: [:],
+                session: CustomLLMSession.shared
             )
             let title = (try? await callChatCompletions(
                 url: url,
@@ -123,7 +125,8 @@ enum MeetingSummaryClient {
                 systemPrompt: titleInstructions,
                 userPrompt: String(transcript.prefix(1500)),
                 maxTokens: 80,
-                extraHeaders: [:]
+                extraHeaders: [:],
+                session: CustomLLMSession.shared
             ))?.trimmingCharacters(in: .whitespacesAndNewlines.union(.init(charactersIn: "\""))) ?? meetingTitle
             return MeetingSummaryResult(notes: notes, title: title, backend: backend, model: model)
         case .openRouter:
@@ -304,7 +307,8 @@ enum MeetingSummaryClient {
         userPrompt: String,
         maxTokens: Int,
         extraHeaders: [String: String],
-        timeout: TimeInterval = 60
+        timeout: TimeInterval = 60,
+        session: URLSession = .shared
     ) async throws -> String {
         let body: [String: Any] = [
             "model": model,
@@ -328,7 +332,7 @@ enum MeetingSummaryClient {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await session.data(for: request)
             try validateHTTPResponse(response, data: data, backend: backend)
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let text = extractChatCompletionsText(from: json),

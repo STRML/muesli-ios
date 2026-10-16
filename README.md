@@ -36,13 +36,13 @@ This repository is suitable for source review, local development, CI, and TestFl
 
 ## Features
 
-- **On-device transcription** - FluidAudio Parakeet models run locally through CoreML/ANE; audio does not need to leave the iPhone for transcription.
+- **On-device transcription** - FluidAudio Parakeet and WhisperKit Whisper models run locally through CoreML/ANE; audio does not need to leave the iPhone for transcription.
 - **Keyboard handoff** - The keyboard extension creates a dictation request in the shared App Group, opens the main app to record/transcribe, then polls for the result and inserts it into the active text field.
 - **Keyboard Session Mode** - Keep the containing app ready for lower-friction keyboard dictation while the extension remains the text input surface.
 - **Dictation history** - Saved local dictations can be copied, reused, and deleted from the main app.
 - **Meeting recorder** - Record in-person conversations, save sessions, transcribe locally, browse transcript history, and retain meeting audio only when enabled.
 - **Meeting templates** - Choose note formats for general meetings and structured follow-up workflows.
-- **Optional meeting summaries** - Generate structured notes with ChatGPT sign-in or OpenRouter BYOK after local transcription.
+- **Optional meeting summaries** - Generate structured notes with ChatGPT sign-in, OpenRouter BYOK, or your own OpenAI-compatible server (Custom LLM) after local transcription.
 - **Live Activities** - Track active meeting recording state from iOS surfaces when enabled.
 - **Personal dictionary** - Apply custom words, phrase replacements, and filler-word filtering after transcription.
 - **Local storage first** - App data is stored locally through the shared store and App Group boundary used by the app and keyboard.
@@ -104,7 +104,7 @@ Muesli for iOS asks only for permissions needed by the selected workflow.
 |---|---|
 | **Microphone** | Record speech for dictation and meetings |
 | **Keyboard** | Use the Muesli custom keyboard from text fields |
-| **Full Access** | Let the keyboard extension communicate with the containing app through the shared App Group |
+| **Full Access** | Required for keyboard dictation. Lets the keyboard extension exchange dictation requests and results with the containing app through the shared App Group. The keyboard makes no network requests itself; Quill (voice rewrite) hands the text being fixed to the app, which sends it to your Custom LLM endpoint |
 | **Live Activities** *(optional)* | Show active meeting recording state |
 
 The keyboard extension does not record audio directly. Recording is owned by the containing app so microphone permission, model runtime, and transcription state stay in one place.
@@ -150,9 +150,9 @@ Meeting sessions use the same local-first store, with optional retained audio, t
 |---|---|
 | App | Swift, SwiftUI, Observation |
 | Keyboard | UIKit keyboard extension with SwiftUI-hosted UI |
-| Local ASR | [FluidAudio](https://github.com/FluidInference/FluidAudio) Parakeet on CoreML/ANE |
+| Local ASR | [FluidAudio](https://github.com/FluidInference/FluidAudio) Parakeet and [WhisperKit](https://github.com/argmaxinc/WhisperKit) Whisper on CoreML/ANE |
 | Storage | SQLite-backed shared store in the app/App Group boundary |
-| Summaries | ChatGPT OAuth or OpenRouter BYOK |
+| Summaries | ChatGPT OAuth, OpenRouter BYOK, or a Custom LLM (any OpenAI-compatible server) |
 | Live status | ActivityKit Live Activities |
 | Telemetry | TelemetryDeck Swift SDK |
 | Project generation | XcodeGen |
@@ -205,8 +205,8 @@ The test suite currently includes:
 Muesli's default design is local-first:
 
 - audio is recorded by the app, not the keyboard extension;
-- transcription runs locally with FluidAudio/CoreML models;
-- saved dictations and meetings stay on device unless future sync features are explicitly enabled;
+- transcription runs locally with FluidAudio and WhisperKit CoreML models;
+- saved dictations and meetings stay on device unless you turn on iCloud Sync (off by default), which syncs them through your private iCloud account;
 - TelemetryDeck events avoid audio, transcript text, and user-provided content;
 - cloud summary providers are optional and separate from local transcription.
 
