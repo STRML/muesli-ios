@@ -2,8 +2,22 @@ import XCTest
 @testable import Muesli
 
 final class AppTelemetryTests: XCTestCase {
-    func testTelemetryDefaultsToEnabledWhenConfigurationIsAbsent() {
-        XCTAssertTrue(AppTelemetryConfiguration.isEnabled(nil))
+    func testTelemetryStaysOffWhenConfigurationIsAbsent() {
+        XCTAssertFalse(AppTelemetryConfiguration.isEnabled(nil))
+    }
+
+    func testAppIDIsMissingUnlessTheBuildSetsARealOne() {
+        XCTAssertNil(AppTelemetryConfiguration.appID(nil))
+        XCTAssertNil(AppTelemetryConfiguration.appID(""))
+        XCTAssertNil(AppTelemetryConfiguration.appID("   "))
+        XCTAssertNil(AppTelemetryConfiguration.appID("$(MUESLI_TELEMETRYDECK_APP_ID)"))
+        XCTAssertNil(AppTelemetryConfiguration.appID("disabled"))
+        XCTAssertNil(AppTelemetryConfiguration.appID(" Disabled "))
+        XCTAssertNil(AppTelemetryConfiguration.appID(42))
+        XCTAssertEqual(
+            AppTelemetryConfiguration.appID(" 11111111-2222-3333-4444-555555555555 "),
+            "11111111-2222-3333-4444-555555555555"
+        )
     }
 
     func testTelemetryRecognizesExplicitTruthyValues() {
