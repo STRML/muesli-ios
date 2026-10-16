@@ -38,5 +38,6 @@ struct KeyboardRuntimeStatusPublishPolicy: Equatable {
             && lhs.canAcceptStartCommand == rhs.canAcceptStartCommand
             && lhs.inputLevel == rhs.inputLevel
             && lhs.rewriteAvailable == rhs.rewriteAvailable
+            && lhs.remoteProcessingEnabled == rhs.remoteProcessingEnabled
     }
 }

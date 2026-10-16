@@ -23,6 +23,7 @@ struct SettingsView: View {
     @AppStorage(MuesliPreferences.chatGPTModelKey) private var chatGPTModel = MeetingSummaryBackend.defaultChatGPTModel
     @AppStorage(MuesliPreferences.customLLMBaseURLKey) private var customLLMBaseURL = ""
     @AppStorage(MuesliPreferences.customLLMModelKey) private var customLLMModel = ""
+    @AppStorage(MuesliPreferences.remoteProcessingEnabledKey) private var remoteProcessingEnabled = false
     @State private var customLLMAPIKey = ""
     @AppStorage(MuesliPreferences.meetingTemplateKey) private var meetingTemplate = MeetingTemplatePreset.general.rawValue
     @AppStorage(MuesliPreferences.iCloudSyncEnabledKey) private var iCloudSyncEnabled = false
@@ -690,13 +691,22 @@ struct SettingsView: View {
                     )
                     .disabled(!meetingSummariesEnabled)
                 } else if selectedSummaryBackend == .customLLM {
-                    Text("Any OpenAI-compatible server, for example your own over Tailscale. Notes and titles are sent only to this address. Quill uses the same server.")
+                    Text(remoteProcessingEnabled
+                        ? "Any OpenAI-compatible server, for example your own over Tailscale. Notes, titles and dictation recordings are sent only to this address. Quill uses the same server."
+                        : "Any OpenAI-compatible server, for example your own over Tailscale. Notes and titles are sent only to this address. Quill uses the same server.")
                         .font(MuesliTheme.caption())
                         .foregroundStyle(MuesliTheme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
 
                     customLLMFields
                         .disabled(!meetingSummariesEnabled)
+
+                    if RemoteTranscriptionPolicy.showsCheckbox(
+                        endpointConfigured: CustomLLMEndpoint.transcriptionsURL(from: customLLMBaseURL) != nil
+                    ) {
+                        // Outside the summaries switch: it is about dictation, not notes.
+                        RemoteProcessingRow(isOn: $remoteProcessingEnabled, baseURL: customLLMBaseURL, apiKey: customLLMAPIKey)
+                    }
                 } else {
                     SettingsRow(
                         icon: "person.crop.circle.badge.checkmark",
@@ -1791,6 +1801,65 @@ final class AppleSyncAccountManager {
 
 
 /// The Custom LLM model: a dropdown of what the server lists, or a text field when it cannot be asked.
+/// Opt-in for sending recordings to the Custom LLM server for transcription, with a probe of that route.
+private struct RemoteProcessingRow: View {
+    @Binding var isOn: Bool
+    let baseURL: String
+    let apiKey: String
+    @State private var status: RemoteProbeOutcome?
+    @State private var isTesting = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MuesliTheme.spacing8) {
+            SettingsToggleRow(
+                icon: "waveform.badge.magnifyingglass",
+                title: RemoteTranscriptionPolicy.checkboxTitle,
+                detail: RemoteTranscriptionPolicy.footnote,
+                isOn: $isOn
+            )
+            .accessibilityIdentifier("settings.remoteProcessing")
+
+            if let warning = RemoteTranscriptionPolicy.publicEndpointWarning(baseURL: baseURL) {
+                Label(warning, systemImage: "exclamationmark.triangle")
+                    .font(MuesliTheme.caption())
+                    .foregroundStyle(MuesliTheme.destructive)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("settings.remoteProcessing.publicWarning")
+            }
+
+            HStack(spacing: MuesliTheme.spacing12) {
+                if let status {
+                    Text(status.statusRowText)
+                        .font(MuesliTheme.caption())
+                        .foregroundStyle(statusColor)
+                        .accessibilityIdentifier("settings.remoteProcessing.status")
+                }
+                Spacer()
+                if isTesting {
+                    ProgressView()
+                } else {
+                    Button("Test") { Task { await runTest() } }
+                        .font(MuesliTheme.headline())
+                        .foregroundStyle(MuesliTheme.accent)
+                        .accessibilityIdentifier("settings.remoteProcessing.test")
+                }
+            }
+        }
+        .onChange(of: baseURL) { _, _ in status = nil }
+    }
+
+    private var statusColor: Color {
+        guard case .reachable = status else { return MuesliTheme.textTertiary }
+        return MuesliTheme.success
+    }
+
+    private func runTest() async {
+        isTesting = true
+        defer { isTesting = false }
+        status = await RemoteTranscriptionService.test(baseURL: baseURL, apiKey: apiKey)
+    }
+}
+
 private struct CustomLLMModelRow: View {
     @Binding var model: String
     let baseURL: String

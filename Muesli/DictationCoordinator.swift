@@ -4799,6 +4799,10 @@ final class DictationCoordinator {
             completion?(.failed("Muesli is busy"))
             return
         }
+        // Notepad bursts never upload, so they never probe: a probe tells the server when the user is recording.
+        if !startsAsNotepad {
+            prewarmRemoteProcessing(startedFromKeyboard: isKeyboardHandoffActive, source: source)
+        }
         recordingStartupInProgress = true
         activeRequest = request
         let usesPersistentKeyboardSession = (source == "keyboard" && MuesliPreferences.keyboardSessionModeEnabled)
@@ -5473,16 +5477,21 @@ final class DictationCoordinator {
                 }
 
                 let text: String
+                var transcriptEngineIdentifier = engine.identifier
                 if realtimeText.isEmpty {
                     let outcome = try await runKeyboardTranscriptionJob(
                         audioURL: audioURL,
                         request: request,
-                        startedFromKeyboard: startedFromKeyboard
+                        startedFromKeyboard: startedFromKeyboard,
+                        source: (activeSession ?? session)?.source
                     )
-                    guard case .completed(let rawText) = outcome else {
+                    guard case .completed(let transcription) = outcome else {
                         throw VoiceNoteRetryError.timeout
                     }
-                    text = postProcessTranscript(rawText)
+                    if transcription.source == .remote {
+                        transcriptEngineIdentifier = RemoteTranscriptionService.engineIdentifier
+                    }
+                    text = postProcessTranscript(transcription.text)
                 } else {
                     text = realtimeText
                 }
@@ -5524,14 +5533,14 @@ final class DictationCoordinator {
                     let savedTranscript = Transcript(
                         sessionID: completedSession.id,
                         text: text,
-                        engineIdentifier: engine.identifier
+                        engineIdentifier: transcriptEngineIdentifier
                     )
                     try store.saveTranscript(savedTranscript)
                     cacheTranscript(savedTranscript)
                     completedSession.phase = .completed
                     completedSession.audioFileName = completedSession.audioFileName ?? audioURL.lastPathComponent
                     completedSession.transcriptID = savedTranscript.id
-                    completedSession.engineIdentifier = engine.identifier
+                    completedSession.engineIdentifier = transcriptEngineIdentifier
                     completedSession.errorMessage = nil
                     completedSession.protectedAudioUntilTranscriptCompletes = false
                     completedSession.hasDurableAudioCheckpoint = false
@@ -5553,7 +5562,7 @@ final class DictationCoordinator {
                     sessionID: transcript?.sessionID,
                     text: delivery.text,
                     createdAt: resultCreatedAt,
-                    engineIdentifier: engine.identifier,
+                    engineIdentifier: transcriptEngineIdentifier,
                     source: completedSession?.source,
                     rewrite: delivery.rewrite
                 )
@@ -6936,12 +6945,30 @@ final class DictationCoordinator {
         }
     }
 
+    /// Where a dictation was started, for the remote processing rule that the keyboard needs Full Access.
+    private func remoteProcessingOrigin(startedFromKeyboard: Bool, source: String?) -> RemoteDictationOrigin {
+        .resolve(
+            startedFromKeyboard: startedFromKeyboard,
+            isActionButton: ActionButtonCaptureSource.isActionButton(source),
+            keyboardHasFullAccess: (try? store.keyboardExtensionStatus())?.hasOpenAccess
+        )
+    }
+
+    private func prewarmRemoteProcessing(startedFromKeyboard: Bool, source: String?) {
+        let origin = remoteProcessingOrigin(startedFromKeyboard: startedFromKeyboard, source: source)
+        Task { await RemoteTranscriptionService.shared.prewarm(origin: origin) }
+    }
+
+    /// The one path that can use the Custom LLM endpoint. Recovery, retries, notepad bursts, long voice notes,
+    /// meetings and the onboarding test stay on the phone.
     private func runKeyboardTranscriptionJob(
         audioURL: URL,
         request: DictationRequest,
-        startedFromKeyboard: Bool
-    ) async throws -> OfflineTranscriptionJobOutcome<String> {
-        try await runOfflineTranscriptionJob(
+        startedFromKeyboard: Bool,
+        source: String?
+    ) async throws -> OfflineTranscriptionJobOutcome<RemoteTranscriptionOrchestrator.Outcome> {
+        let origin = remoteProcessingOrigin(startedFromKeyboard: startedFromKeyboard, source: source)
+        return try await runOfflineTranscriptionJob(
             audioURL: audioURL,
             onProgress: { [weak self] update in
                 self?.keyboardTranscriptionProgressUpdate(
@@ -6952,7 +6979,9 @@ final class DictationCoordinator {
             },
             onTimeout: {}
         ) { [engine] progress in
-            try await engine.transcribe(audioURL: audioURL, progress: progress)
+            try await RemoteTranscriptionService.shared.transcribe(audioURL: audioURL, origin: origin) {
+                try await engine.transcribe(audioURL: audioURL, progress: progress)
+            }
         }
     }
 
@@ -7367,7 +7396,8 @@ final class DictationCoordinator {
             supportsBackgroundStart: supportsBackgroundStart,
             canAcceptStartCommand: canAcceptStartCommand,
             inputLevel: runtimeInputLevel,
-            rewriteAvailable: MuesliPreferences.isVoiceRewriteConfigured
+            rewriteAvailable: MuesliPreferences.isVoiceRewriteConfigured,
+            remoteProcessingEnabled: MuesliPreferences.isRemoteProcessingActive
         )
     }
 

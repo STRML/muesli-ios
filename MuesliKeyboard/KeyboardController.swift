@@ -182,6 +182,14 @@ final class KeyboardController {
         latestRuntimeStatus?.rewriteAvailable == true
     }
 
+    /// Remote processing is on in the app but this keyboard has no Full Access, so dictations stay on the phone.
+    var remoteProcessingBanner: String? {
+        RemoteTranscriptionPolicy.keyboardBanner(
+            remoteProcessingEnabled: latestRuntimeStatus?.remoteProcessingEnabled == true,
+            hasFullAccess: hasOpenAccessForSetup
+        )
+    }
+
     var showsActiveWaveform: Bool {
         [.requested, .recording, .transcribing].contains(dictationPhase)
     }

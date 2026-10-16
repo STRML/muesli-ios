@@ -349,6 +349,12 @@ struct KeyboardRootView: View {
                  : "Set up a Custom LLM in Muesli to edit by voice")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(MuesliTheme.textTertiary)
+            if let banner = controller.remoteProcessingBanner {
+                Text(banner)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(MuesliTheme.textSecondary)
+                    .accessibilityIdentifier("keyboard.remoteProcessingBanner")
+            }
         }
     }
 

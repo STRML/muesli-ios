@@ -32,6 +32,7 @@ enum MuesliPreferences {
     static let chatGPTModelKey = "muesli.meetings.summary.chatGPT.model"
     static let customLLMBaseURLKey = "muesli.meetings.summary.customLLM.baseURL"
     static let customLLMModelKey = "muesli.meetings.summary.customLLM.model"
+    static let remoteProcessingEnabledKey = "muesli.transcription.remoteProcessing.enabled"
     static let meetingTemplateKey = "muesli.meetings.template"
     static let iCloudSyncEnabledKey = "muesli.sync.icloud.enabled"
     static let pinnedSectionsKey = "muesli.navigation.pinnedSections"
@@ -163,6 +164,25 @@ enum MuesliPreferences {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Opt-in, off by default. Reads the stored choice only; `isRemoteProcessingActive` also needs an endpoint.
+    static var remoteProcessingEnabled: Bool {
+        bool(for: remoteProcessingEnabledKey, defaultValue: false)
+    }
+
+    static var hasCustomLLMEndpoint: Bool {
+        CustomLLMEndpoint.transcriptionsURL(from: customLLMBaseURL) != nil
+    }
+
+    /// The setting counts only while a Custom LLM endpoint is set and Custom LLM is the summary backend, where its
+    /// checkbox lives; a choice left over from a removed endpoint or another backend is ignored.
+    static var isRemoteProcessingActive: Bool {
+        RemoteTranscriptionPolicy.isSettingActive(
+            stored: remoteProcessingEnabled,
+            endpointConfigured: hasCustomLLMEndpoint,
+            summaryBackendIsCustomLLM: meetingSummaryBackend == .customLLM
+        )
+    }
+
     /// Voice rewrite runs on the Custom LLM, so it is offered only when one is set up.
     static var isVoiceRewriteConfigured: Bool {
         CustomLLMEndpoint.chatCompletionsURL(from: customLLMBaseURL) != nil && !customLLMModel.isEmpty
@@ -240,24 +260,6 @@ enum MeetingSummaryBackend: String, CaseIterable, Identifiable {
         case .customLLM:
             ""
         }
-    }
-}
-
-/// An OpenAI-compatible server the user runs or trusts, such as a home server reached over Tailscale.
-enum CustomLLMEndpoint {
-    private static let suffix = "/chat/completions"
-
-    /// Accepts a base URL (`https://host/v1`) or a pasted full path, and returns the chat completions URL.
-    /// Only https is accepted, so credentials and transcripts never travel in the clear.
-    static func chatCompletionsURL(from value: String) -> URL? {
-        var text = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        while text.hasSuffix("/") { text.removeLast() }
-        if text.hasSuffix(suffix) { text.removeLast(suffix.count) }
-        guard let components = URLComponents(string: text + suffix),
-              components.scheme == "https",
-              let host = components.host, !host.isEmpty
-        else { return nil }
-        return components.url
     }
 }
 
