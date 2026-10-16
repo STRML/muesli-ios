@@ -2,7 +2,8 @@
 import PackageDescription
 
 // Host-testable slice of the app: the remote transcription decision logic and its HTTP client, and the
-// two-pass dictation policy (which text is inserted, and what the keyboard preview shows). The same sources
+// two-pass dictation policy (which text is inserted, and what the keyboard preview shows), and the keyboard's
+// typing logic (layout, shift, autocapitalization, word-at-cursor, suggestions). The same sources
 // are compiled into the Muesli targets through project.yml's `Shared` path; this package exists so
 // `swift test` can run them on a Mac without an iOS Simulator.
 let package = Package(
@@ -29,6 +30,15 @@ let package = Package(
             name: "DictationPolicyKitTests",
             dependencies: ["DictationPolicyKit"],
             path: "Tests/DictationPolicyKitTests"
+        ),
+        .target(
+            name: "KeyboardTypingKit",
+            path: "Shared/KeyboardTyping"
+        ),
+        .testTarget(
+            name: "KeyboardTypingKitTests",
+            dependencies: ["KeyboardTypingKit"],
+            path: "Tests/KeyboardTypingKitTests"
         ),
     ]
 )
