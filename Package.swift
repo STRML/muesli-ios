@@ -1,8 +1,9 @@
 // swift-tools-version: 6.0
 import PackageDescription
 
-// Host-testable slice of the app: the remote transcription decision logic and its HTTP client. The same
-// sources are compiled into the Muesli targets through project.yml's `Shared` path; this package exists so
+// Host-testable slice of the app: the remote transcription decision logic and its HTTP client, and the
+// two-pass dictation policy (which text is inserted, and what the keyboard preview shows). The same sources
+// are compiled into the Muesli targets through project.yml's `Shared` path; this package exists so
 // `swift test` can run them on a Mac without an iOS Simulator.
 let package = Package(
     name: "RemoteTranscriptionKit",
@@ -19,6 +20,15 @@ let package = Package(
             name: "RemoteTranscriptionKitTests",
             dependencies: ["RemoteTranscriptionKit"],
             path: "Tests/RemoteTranscriptionKitTests"
+        ),
+        .target(
+            name: "DictationPolicyKit",
+            path: "Shared/DictationPolicy"
+        ),
+        .testTarget(
+            name: "DictationPolicyKitTests",
+            dependencies: ["DictationPolicyKit"],
+            path: "Tests/DictationPolicyKitTests"
         ),
     ]
 )
