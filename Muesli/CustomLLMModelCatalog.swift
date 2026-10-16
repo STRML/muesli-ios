@@ -49,7 +49,7 @@ enum CustomLLMModelCatalog {
     static func fetch(
         baseURL: String,
         apiKey: String,
-        transport: Transport = { try await URLSession.shared.data(for: $0) }
+        transport: Transport = { try await CustomLLMSession.shared.data(for: $0) }
     ) async throws -> [String] {
         guard let url = modelsURL(from: baseURL) else { throw CustomLLMModelCatalogError.invalidEndpoint }
         var request = URLRequest(url: url)
