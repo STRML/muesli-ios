@@ -105,17 +105,14 @@ final class MuesliPreferencesTests: XCTestCase {
 
     func testEveryCloudSummaryBackendSaysWhereTranscriptsGo() {
         XCTAssertEqual(
-            MeetingSummaryBackend.openRouter.dataDestinationNote,
+            MeetingSummaryBackend.openRouter.cloudDestinationNote,
             "Meeting transcripts and your notes are sent to OpenRouter and the model provider you pick."
         )
         XCTAssertEqual(
-            MeetingSummaryBackend.chatGPT.dataDestinationNote,
+            MeetingSummaryBackend.chatGPT.cloudDestinationNote,
             "Meeting transcripts and your notes are sent to OpenAI through your ChatGPT account."
         )
-        XCTAssertEqual(
-            MeetingSummaryBackend.customLLM.dataDestinationNote,
-            "Meeting transcripts and your notes are sent only to this address."
-        )
+        XCTAssertNil(MeetingSummaryBackend.customLLM.cloudDestinationNote)
     }
 
     func testOpenRouterModelReturnsCustomStoredValue() {

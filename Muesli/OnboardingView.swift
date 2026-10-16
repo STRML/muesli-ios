@@ -846,10 +846,12 @@ struct OnboardingView: View {
                     .pickerStyle(.segmented)
                     .disabled(!meetingSummariesEnabled)
 
-                    Text(summaryBackend.dataDestinationNote)
-                        .font(MuesliTheme.caption())
-                        .foregroundStyle(MuesliTheme.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    if let note = summaryBackend.cloudDestinationNote {
+                        Text(note)
+                            .font(MuesliTheme.caption())
+                            .foregroundStyle(MuesliTheme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
 
                     switch summaryBackend {
                     case .chatGPT:
@@ -961,7 +963,7 @@ struct OnboardingView: View {
 
     private var customLLMSummarySetup: some View {
         VStack(alignment: .leading, spacing: MuesliTheme.spacing12) {
-            Text("Any OpenAI-compatible server, for example your own over Tailscale.")
+            Text("Any OpenAI-compatible server, for example your own over Tailscale. Notes and titles are sent only to this address.")
                 .font(MuesliTheme.caption())
                 .foregroundStyle(MuesliTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)

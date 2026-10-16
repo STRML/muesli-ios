@@ -218,15 +218,16 @@ enum MeetingSummaryBackend: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Shown under the backend picker in Settings and onboarding: where a summary request sends meeting text.
-    var dataDestinationNote: String {
+    /// Shown under the backend picker in Settings and onboarding: which hosted service receives meeting text.
+    /// Custom LLM has its own line beside the server URL field.
+    var cloudDestinationNote: String? {
         switch self {
         case .openRouter:
             "Meeting transcripts and your notes are sent to OpenRouter and the model provider you pick."
         case .chatGPT:
             "Meeting transcripts and your notes are sent to OpenAI through your ChatGPT account."
         case .customLLM:
-            "Meeting transcripts and your notes are sent only to this address."
+            nil
         }
     }
 

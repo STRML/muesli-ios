@@ -665,10 +665,12 @@ struct SettingsView: View {
                 .pickerStyle(.segmented)
                 .disabled(!meetingSummariesEnabled)
 
-                Text(selectedSummaryBackend.dataDestinationNote)
-                    .font(MuesliTheme.caption())
-                    .foregroundStyle(MuesliTheme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                if let note = selectedSummaryBackend.cloudDestinationNote {
+                    Text(note)
+                        .font(MuesliTheme.caption())
+                        .foregroundStyle(MuesliTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
                 if selectedSummaryBackend == .openRouter {
                     SettingsTextFieldRow(
@@ -688,7 +690,7 @@ struct SettingsView: View {
                     )
                     .disabled(!meetingSummariesEnabled)
                 } else if selectedSummaryBackend == .customLLM {
-                    Text("Any OpenAI-compatible server, for example your own over Tailscale. Quill uses the same server.")
+                    Text("Any OpenAI-compatible server, for example your own over Tailscale. Notes and titles are sent only to this address. Quill uses the same server.")
                         .font(MuesliTheme.caption())
                         .foregroundStyle(MuesliTheme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
