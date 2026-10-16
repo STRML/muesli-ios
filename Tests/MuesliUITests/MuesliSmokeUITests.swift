@@ -71,12 +71,14 @@ final class MuesliSmokeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["islandPreview.ready"].waitForExistence(timeout: 15),
                       app.staticTexts["islandPreview.failure"].exists
                         ? app.staticTexts["islandPreview.failure"].label : "Island preview did not become ready")
+        let fixtureReady = Date()
         XCUIDevice.shared.press(.home)
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         try await Task.sleep(for: .seconds(6))
         captureActionButton(springboard, name: "Dynamic Island speech input")
-        springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.035)).press(forDuration: 1)
-        XCTAssertTrue(springboard.staticTexts["Listening"].waitForExistence(timeout: 15))
+        attachText(springboard.debugDescription, name: "SpringBoard before island press")
+        XCTAssertTrue(expandIsland(springboard, showing: springboard.staticTexts["Listening"], since: fixtureReady),
+                      "The expanded Live Activity never showed Listening")
         captureActionButton(springboard, name: "Dynamic Island expanded dictation")
         XCTAssertTrue(springboard.buttons["Stop keyboard dictation recording"].exists)
         try await Task.sleep(for: .seconds(6))
@@ -93,6 +95,38 @@ final class MuesliSmokeUITests: XCTestCase {
         XCTAssertTrue(app.alerts["Copied to clipboard"].waitForExistence(timeout: 8))
         captureActionButton(app, name: "Dictation copied in foreground")
         app.alerts["Copied to clipboard"].buttons["OK"].tap()
+    }
+
+    private func attachText(_ text: String, name: String) {
+        let attachment = XCTAttachment(string: text)
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    /// Long-presses the Dynamic Island until the expanded Live Activity shows `content`.
+    ///
+    /// On loaded CI simulators SpringBoard sometimes grows the island to its
+    /// expanded shape but never draws the extension's view: the island stays a
+    /// blank pill and its accessibility container has no children. Collapsing and
+    /// pressing again asks for a fresh render. The test still fails if no attempt
+    /// shows the content, and every attempt is logged with screenshots.
+    private func expandIsland(_ springboard: XCUIApplication, showing content: XCUIElement, since fixtureReady: Date) -> Bool {
+        let attempts = 3
+        for attempt in 1...attempts {
+            let elapsed = Int(Date().timeIntervalSince(fixtureReady))
+            let shown = XCTContext.runActivity(named: "Island expand attempt \(attempt), \(elapsed)s after the fixture was ready") { _ in
+                springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.035)).press(forDuration: 1)
+                return content.waitForExistence(timeout: attempt == attempts ? 15 : 8)
+            }
+            if shown { return true }
+            captureActionButton(springboard, name: "Dynamic Island blank after attempt \(attempt)")
+            attachText(springboard.debugDescription, name: "SpringBoard after island attempt \(attempt)")
+            // Tap empty wallpaper to collapse the blank island before trying again.
+            springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6)).tap()
+            Thread.sleep(forTimeInterval: 2)
+        }
+        return false
     }
 
     func testSettingsOpensActionButtonConfiguration() {

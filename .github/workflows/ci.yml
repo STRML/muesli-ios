@@ -64,3 +64,23 @@ jobs:
           name: test-results
           path: TestResults.xcresult
           retention-days: 7
+
+      # The Dynamic Island UI test depends on the system rendering the Live
+      # Activity extension. Keep the renderer's logs and any crash reports so a
+      # blank island can be traced past the screenshots.
+      - name: Collect Live Activity diagnostics
+        if: always() && steps.simulator.outputs.udid != ''
+        run: |
+          mkdir -p sim-diagnostics
+          xcrun simctl spawn '${{ steps.simulator.outputs.udid }}' log show --last 40m --style compact --info \
+            --predicate 'process == "chronod" OR process == "liveactivitiesd" OR process BEGINSWITH "MuesliLiveActivity" OR subsystem BEGINSWITH "com.apple.activitykit" OR subsystem BEGINSWITH "com.apple.chrono" OR (process == "SpringBoard" AND (category CONTAINS[c] "activit" OR category CONTAINS[c] "aperture"))' \
+            > sim-diagnostics/live-activity.log 2>&1 || true
+          cp -R ~/Library/Logs/DiagnosticReports sim-diagnostics/ 2>/dev/null || true
+          wc -l sim-diagnostics/live-activity.log || true
+      - name: Upload Live Activity diagnostics
+        if: always() && steps.simulator.outputs.udid != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: sim-diagnostics
+          path: sim-diagnostics
+          retention-days: 7
