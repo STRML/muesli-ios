@@ -95,7 +95,7 @@ Muesli is a local-first voice note and meeting transcription app.
 
 No account is required for the core experience. On first use, select and download a local transcription model. Microphone access is required to record voice notes and in-person meetings.
 
-The optional Muesli keyboard is installed through iOS Settings. Dictating from the keyboard requires Full Access, because Full Access is what lets the keyboard extension exchange a dictation request and result with the containing app through the shared App Group. The keyboard extension does not record audio and makes no network requests itself. If the user invokes voice rewrite, the keyboard passes the selected text or the paragraph before the cursor to the containing app, which sends it to the user's configured Custom LLM endpoint.
+The optional Muesli keyboard is installed through iOS Settings. Dictating from the keyboard requires Full Access, because Full Access is what lets the keyboard extension exchange a dictation request and result with the containing app through the shared App Group. The keyboard extension does not record audio and makes no network requests itself. If the user invokes Quill (voice rewrite), the keyboard passes the selected text or the paragraph before the cursor to the containing app, which sends it to the user's configured Custom LLM endpoint.
 
 Optional AI meeting summaries require the reviewer to connect a supported provider. This is not required to review local recording and transcription.
 
