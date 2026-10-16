@@ -161,3 +161,34 @@ Startup uses the normal recorder path; saved experimental preferences are no lon
 Failed recorder startup discards only that attempt's audio files. The session
 checkpoint manifest must survive retries so Stop can finalize the successful
 attempt. Full recording cancellation still removes the checkpoint directory.
+
+## Two-pass dictation
+
+When the streaming model produces partials, the keyboard shows them in a one-line
+preview in the status line under the controls: gray, truncated from the left so the
+newest words stay visible, with the recording dot and elapsed time. The preview is
+never written to the host field.
+
+On release the full-clip pass always runs (`runKeyboardTranscriptionJob`: on-device
+beside the remote endpoint inside its budget), and only its text is inserted, once.
+The preview dims with a shimmer meanwhile and clears when the result lands.
+`FinalTextPolicy` falls back to the streaming text when that pass fails, times out
+or comes back empty. When both are empty nothing is inserted. Cancellation never
+falls back. A long voice note keeps its streaming text without a second pass, and
+notepad bursts keep their own path.
+
+Partials come from Parakeet Realtime EOU 120M (`LivePreviewEnginePolicy`):
+
+- When it is the selected model, the one engine streams and runs the final pass.
+- Otherwise a dedicated preview engine streams beside the selected model for keyboard
+  dictations, fed from the persistent mic segment (`KeyboardSessionKeeper`) or the
+  checkpointing recorder. Action Button, in-app dictation and notepad bursts do not load it.
+- It runs only when the EOU model is downloaded. Settings offers
+  "Download live preview model (224 MB)" under the model picker while it is missing,
+  and waits while another model downloads (the download service runs one at a time).
+- It loads on the first dictation that uses it, and the streaming session starts inside
+  the buffer task, so loading never delays recording. A memory warning unloads it when
+  idle, or after the dictation it is streaming (`LivePreviewResidency`). Selecting EOU as
+  the model, or removing EOU, releases the dedicated copy.
+- Its text is only ever the preview and the short-dictation fallback. A long voice note
+  streamed by it still gets the selected model's pass, as before.

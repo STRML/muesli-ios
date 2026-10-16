@@ -400,6 +400,13 @@ struct SettingsView: View {
                         preparation: coordinator.modelPreparation,
                         onSelect: coordinator.selectTranscriptionModel
                     )
+                    if coordinator.livePreviewDownloadOffer != .hidden {
+                        Divider().overlay(MuesliTheme.surfaceBorder)
+                        LivePreviewDownloadRow(
+                            offer: coordinator.livePreviewDownloadOffer,
+                            onDownload: coordinator.downloadLivePreviewModel
+                        )
+                    }
                     Divider().overlay(MuesliTheme.surfaceBorder)
                     SettingsRow(
                         icon: "cpu",
@@ -1318,6 +1325,57 @@ private struct SettingsNavigationRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// Offers the Parakeet Realtime model that streams the keyboard's live preview beside the selected model.
+private struct LivePreviewDownloadRow: View {
+    let offer: LivePreviewDownloadOffer
+    let onDownload: () -> Void
+
+    var body: some View {
+        HStack(spacing: MuesliTheme.spacing12) {
+            Image(systemName: "text.viewfinder")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(MuesliTheme.accent)
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(MuesliTheme.headline())
+                    .foregroundStyle(MuesliTheme.textPrimary)
+                Text(detail)
+                    .font(MuesliTheme.caption())
+                    .foregroundStyle(MuesliTheme.textTertiary)
+            }
+            Spacer()
+            if case .downloading(let progress) = offer {
+                if let progress {
+                    ProgressView(value: progress).frame(width: 56)
+                } else {
+                    ProgressView()
+                }
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { if case .available = offer { onDownload() } }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier("settings.livePreviewDownload")
+    }
+
+    private var title: String {
+        switch offer {
+        case .available(let size): "Download live preview model (\(size))"
+        case .downloading: "Downloading live preview model"
+        case .waitingForOtherDownload, .hidden: "Live preview model"
+        }
+    }
+
+    private var detail: String {
+        switch offer {
+        case .waitingForOtherDownload: "Available after the current download finishes"
+        default: "Shows words in the keyboard while you speak. Your selected model still writes the text."
+        }
     }
 }
 

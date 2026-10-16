@@ -290,6 +290,8 @@ struct KeyboardRootView: View {
             if isActive {
                 if let edit = controller.activeRewrite, controller.dictationPhase != .transcribing {
                     editTarget(edit.original)
+                } else if let preview = controller.livePreview {
+                    KeyboardLivePreviewStrip(preview: preview, recordingStartedAt: controller.recordingStartedAt)
                 } else {
                     caption(activeCaption)
                 }
@@ -713,5 +715,71 @@ private struct MuesliKeyboardKeySurfaceModifier: ViewModifier {
             .overlay(shape.strokeBorder(keyTint.opacity(tint == nil ? 0.10 : 0.22), lineWidth: 1))
             .shadow(color: Color(hex: 0x02060C).opacity(0.28), radius: 4, x: 0, y: 2)
             .contentShape(shape)
+    }
+}
+
+/// One line of what the streaming model has heard, newest words kept visible by truncating from the left. Gray and
+/// display only; the final text is inserted once, after the final pass, and this strip then clears.
+private struct KeyboardLivePreviewStrip: View {
+    let preview: KeyboardLivePreview
+    let recordingStartedAt: Date?
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var shimmerPhase: CGFloat = -1
+
+    private var isFinalizing: Bool { preview.phase == .finalizing }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(isFinalizing ? MuesliTheme.textTertiary : MuesliTheme.recording)
+                .frame(width: 7, height: 7)
+            if !isFinalizing {
+                TimelineView(.periodic(from: recordingStartedAt ?? .now, by: 1)) { context in
+                    Text(KeyboardLivePreview.elapsedLabel(from: recordingStartedAt, to: context.date))
+                        .font(.system(size: 12, weight: .semibold, design: .rounded).monospacedDigit())
+                        .foregroundStyle(MuesliTheme.textSecondary)
+                }
+            }
+            Text(preview.text)
+                .font(.system(size: 13, weight: .regular))
+                .foregroundStyle(MuesliTheme.textSecondary)
+                .lineLimit(1)
+                .truncationMode(.head)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .opacity(isFinalizing ? 0.45 : 1)
+                .overlay { if isFinalizing && !reduceMotion { shimmer } }
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 28)
+        .frame(maxWidth: .infinity)
+        .background(Color.white.opacity(0.05), in: Capsule())
+        .animation(.easeOut(duration: 0.2), value: isFinalizing)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(isFinalizing ? "Finishing your text" : "Hearing: \(preview.text)")
+        .accessibilityIdentifier("keyboard.livePreview")
+    }
+
+    private var shimmer: some View {
+        GeometryReader { proxy in
+            LinearGradient(
+                colors: [.clear, Color.white.opacity(0.35), .clear],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+            .frame(width: proxy.size.width * 0.4)
+            .offset(x: shimmerPhase * proxy.size.width)
+            .onAppear {
+                withAnimation(.linear(duration: 1.1).repeatForever(autoreverses: false)) { shimmerPhase = 1.2 }
+            }
+        }
+        .allowsHitTesting(false)
+        .mask(
+            Text(preview.text)
+                .font(.system(size: 13, weight: .regular))
+                .lineLimit(1)
+                .truncationMode(.head)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        )
     }
 }

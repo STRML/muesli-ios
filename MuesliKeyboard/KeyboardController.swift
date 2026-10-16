@@ -42,7 +42,17 @@ final class KeyboardController {
 
     var statusText = "Record a voice note first"
     var hasLatestDictation = false
-    var dictationPhase: DictationPhase = .idle
+    var dictationPhase: DictationPhase = .idle {
+        didSet {
+            // The preview's elapsed time counts from when this keyboard saw recording begin.
+            if dictationPhase == .recording, oldValue != .recording {
+                recordingStartedAt = Date()
+            } else if dictationPhase != .recording, dictationPhase != .transcribing {
+                recordingStartedAt = nil
+            }
+        }
+    }
+    private(set) var recordingStartedAt: Date?
     var launchURL: URL?
     var textInserter: (@MainActor (String) -> Void)?
     var textDeleter: (@MainActor (Int) -> Void)?
@@ -51,6 +61,8 @@ final class KeyboardController {
     var inputModeSwitcher: (@MainActor () -> Void)?
     var keyboardDismisser: (@MainActor () -> Void)?
     var liveTranscript = ""
+    /// The app marks the final text it is about to deliver; it is never shown as a preview.
+    private var liveTranscriptIsFinal = false
     var inputLevel = 0.0
     var isLaunchSettled = false
     var modelCatalog: KeyboardTranscriptionModelCatalog?
@@ -86,10 +98,19 @@ final class KeyboardController {
             : "Proves Keyboard • Full Access still off"
     }
 
-    var showsLiveTranscript: Bool {
-        activeRequestID != nil
-            && !liveTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && [.recording, .transcribing].contains(dictationPhase)
+    var showsLiveTranscript: Bool { livePreview != nil }
+
+    /// The streaming words shown while recording, dimmed while the final pass runs. Display only:
+    /// only a delivered result is ever handed to `textInserter`.
+    var livePreview: KeyboardLivePreview? {
+        guard activeRequestID != nil else { return nil }
+        return KeyboardLivePreview.make(
+            isRecording: dictationPhase == .recording,
+            isTranscribing: dictationPhase == .transcribing,
+            isRewriting: activeRewrite != nil,
+            text: liveTranscript,
+            isFinal: liveTranscriptIsFinal
+        )
     }
 
     var primaryButtonTitle: String {
@@ -1066,6 +1087,7 @@ final class KeyboardController {
         }
 
         liveTranscript = transcript.text
+        liveTranscriptIsFinal = transcript.isFinal
     }
 
     private func markForRecoveryIfStale(_ status: DictationStatus, requestID: UUID) -> Bool {
