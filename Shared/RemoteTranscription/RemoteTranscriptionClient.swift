@@ -61,7 +61,6 @@ struct RemoteTranscriptionClient: Sendable {
         let audio = try readAudio(at: audioURL)
         var body = MultipartForm()
         body.addField("model", model)
-        body.addField("language", "en")
         body.addField("response_format", "json")
         body.addFile("file", filename: Self.filename(for: audioURL), contentType: Self.contentType(for: audioURL), data: audio)
         let request = makeRequest(contentType: body.contentType)

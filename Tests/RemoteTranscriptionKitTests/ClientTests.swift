@@ -102,7 +102,9 @@ final class ClientTests: XCTestCase {
         XCTAssertTrue(contentType.hasPrefix("multipart/form-data; boundary="))
         let body = request.bodyText
         XCTAssertTrue(body.contains("name=\"model\"\r\n\r\nqwen3-asr-1.7b"), body)
-        XCTAssertTrue(body.contains("name=\"language\"\r\n\r\nen"))
+        // No language field: the server detects it, as the on-device models do, so a non-English dictation is not forced
+        // through English decoding.
+        XCTAssertFalse(body.contains("name=\"language\""), body)
         XCTAssertTrue(body.contains("name=\"response_format\"\r\n\r\njson"))
         XCTAssertTrue(body.contains("name=\"file\"; filename=\"audio.m4a\""))
         XCTAssertTrue(body.contains("Content-Type: audio/mp4"))

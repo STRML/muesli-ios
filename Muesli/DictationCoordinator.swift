@@ -4799,7 +4799,10 @@ final class DictationCoordinator {
             completion?(.failed("Muesli is busy"))
             return
         }
-        prewarmRemoteProcessing(startedFromKeyboard: isKeyboardHandoffActive, source: source)
+        // Notepad bursts never upload, so they never probe: a probe tells the server when the user is recording.
+        if !startsAsNotepad {
+            prewarmRemoteProcessing(startedFromKeyboard: isKeyboardHandoffActive, source: source)
+        }
         recordingStartupInProgress = true
         activeRequest = request
         let usesPersistentKeyboardSession = (source == "keyboard" && MuesliPreferences.keyboardSessionModeEnabled)
