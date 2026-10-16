@@ -5390,7 +5390,10 @@ final class DictationCoordinator {
                         // The stream is a preview and a fallback; losing it must not cost the final pass.
                         do {
                             realtimeText = postProcessTranscript(try await engine.finishRealtimeSession())
+                        } catch is CancellationError {
+                            throw CancellationError()
                         } catch {
+                            // Best effort: the last partial can miss the tail that finish would have flushed.
                             AppTelemetry.failure(
                                 "realtime_dictation_finish_failed",
                                 domain: .transcription,
