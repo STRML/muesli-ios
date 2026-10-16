@@ -684,7 +684,9 @@ struct SettingsView: View {
                     )
                     .disabled(!meetingSummariesEnabled)
                 } else if selectedSummaryBackend == .customLLM {
-                    Text("Any OpenAI-compatible server, for example your own over Tailscale. Notes and titles are sent only to this address. Quill uses the same server.")
+                    Text(remoteProcessingEnabled
+                        ? "Any OpenAI-compatible server, for example your own over Tailscale. Notes, titles and dictation recordings are sent only to this address. Quill uses the same server."
+                        : "Any OpenAI-compatible server, for example your own over Tailscale. Notes and titles are sent only to this address. Quill uses the same server.")
                         .font(MuesliTheme.caption())
                         .foregroundStyle(MuesliTheme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
