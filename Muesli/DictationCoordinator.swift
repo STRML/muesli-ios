@@ -48,7 +48,17 @@ final class DictationCoordinator {
     private var meetingRecorder: StreamingMeetingRecorder?
     private var realtimeDictationRecorder: StreamingMeetingRecorder?
     private var realtimeDictationBufferPipe: RealtimeAudioBufferPipe?
-    private var realtimeDictationProcessingTask: Task<Void, Never>?
+    /// Resolves to whether the streaming session started; a preview that cannot load never fails the dictation.
+    private var realtimeDictationProcessingTask: Task<Bool, Never>?
+    /// The engine streaming the current dictation: the selected model when it streams, else the preview engine.
+    private var realtimeDictationEngine: FluidAudioTranscriptionEngine?
+    private var realtimeDictationStreamIsFromFinalModel = true
+    /// Parakeet Realtime EOU beside a non-streaming selected model, so keyboard dictation shows live words.
+    private let livePreviewEngine = FluidAudioTranscriptionEngine()
+    private var livePreviewResidency = LivePreviewResidency()
+    private(set) var isLivePreviewModelDownloading = false
+    private(set) var livePreviewDownloadProgress: Double?
+    nonisolated(unsafe) private var memoryWarningObserver: NSObjectProtocol?
     private var realtimeDictationChunksDirectory: URL?
     private var isRealtimeDictationSessionActive = false
     private var realtimeDictationCommittedText = ""
@@ -195,6 +205,10 @@ final class DictationCoordinator {
             )
             publishKeyboardModelCatalog()
             automaticallyPrepareSelectedModelIfNeeded()
+            if selectedTranscriptionModel.supportsRealtimeStreaming {
+                // One engine now streams and transcribes; the dedicated preview copy is redundant.
+                releaseDedicatedLivePreviewEngine()
+            }
         }
     }
     var modelPreparation = ModelPreparationState()
@@ -434,6 +448,13 @@ final class DictationCoordinator {
         ) { [weak self] _ in
             Task { @MainActor in self?.keyboardMicOffWhenIdle = false }
         }
+        memoryWarningObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.handleLivePreviewMemoryWarning() }
+        }
         mediaServicesResetObserver = NotificationCenter.default.addObserver(
             forName: AVAudioSession.mediaServicesWereResetNotification,
             object: AVAudioSession.sharedInstance(),
@@ -526,6 +547,9 @@ final class DictationCoordinator {
         }
         if let mediaServicesResetObserver {
             NotificationCenter.default.removeObserver(mediaServicesResetObserver)
+        }
+        if let memoryWarningObserver {
+            NotificationCenter.default.removeObserver(memoryWarningObserver)
         }
         if let screenLockObserver {
             NotificationCenter.default.removeObserver(screenLockObserver)
@@ -4189,6 +4213,10 @@ final class DictationCoordinator {
             await engine.unloadModel(model)
         }
 
+        if model == .parakeetRealtimeEou120m {
+            releaseDedicatedLivePreviewEngine()
+        }
+
         try await Task.detached(priority: .userInitiated) {
             try ModelBackgroundDownloadService.removeDownloadedModel(model)
         }.value
@@ -4603,28 +4631,14 @@ final class DictationCoordinator {
     private func startCheckpointingDictationRecorder(
         audioURL: URL,
         sessionID: UUID,
-        enablesRealtimeTranscription: Bool,
+        livePreview: LivePreviewEnginePolicy.Choice,
         usesDurableCheckpoints: Bool,
         validateStartup: () throws -> Void
     ) async throws {
         realtimeDictationCommittedText = ""
         liveDictationTranscript = ""
         clearKeyboardLiveTranscript()
-        if enablesRealtimeTranscription {
-            await engine.selectModel(selectedTranscriptionModel)
-            try await engine.startRealtimeSession(
-                partialTranscript: { [weak self] partial in
-                    Task { @MainActor in
-                        self?.updateRealtimeDictationPartial(partial)
-                    }
-                },
-                endOfUtterance: { [weak self] utterance in
-                    Task { @MainActor in
-                        self?.commitRealtimeDictationUtterance(utterance)
-                    }
-                }
-            )
-        }
+        let previewPipe = await beginRealtimeDictationStream(livePreview)
 
         let chunksDirectory: URL
         if usesDurableCheckpoints {
@@ -4633,28 +4647,6 @@ final class DictationCoordinator {
             chunksDirectory = try meetingChunkDirectory(for: sessionID)
             try? FileManager.default.removeItem(at: chunksDirectory)
             try FileManager.default.createDirectory(at: chunksDirectory, withIntermediateDirectories: true)
-        }
-
-        if enablesRealtimeTranscription {
-            let pipe = RealtimeAudioBufferPipe()
-            realtimeDictationBufferPipe = pipe
-            realtimeDictationProcessingTask = Task { [engine, pipe] in
-                for await audioBuffer in pipe.stream {
-                    do {
-                        try await engine.processRealtimeAudioBuffer(audioBuffer.buffer)
-                    } catch is CancellationError {
-                        return
-                    } catch {
-                        AppTelemetry.failure(
-                            "realtime_dictation_buffer_failed",
-                            domain: .transcription,
-                            stage: "streaming_buffer",
-                            error: error,
-                            parameters: ["surface": "dictation"]
-                        )
-                    }
-                }
-            }
         }
 
         var startupAttempt = 0
@@ -4667,8 +4659,8 @@ final class DictationCoordinator {
             fresh.onRecordingFailure = { [weak self] failure in
                 Task { @MainActor in self?.handleVoiceNoteWriterFailure(failure) }
             }
-            if let pipe = realtimeDictationBufferPipe {
-                fresh.onAudioBuffer = { [pipe] buffer in pipe.append(buffer) }
+            if let previewPipe {
+                fresh.onAudioBuffer = { [previewPipe] buffer in previewPipe.append(buffer) }
             }
             try fresh.start(chunksDirectory: chunksDirectory, retainedAudioURL: audioURL,
                             routeStage: "realtime dictation")
@@ -4698,7 +4690,177 @@ final class DictationCoordinator {
         KeyboardDiagnosticsLog.record("recording.inputReady")
         realtimeDictationRecorder = streamingRecorder
         realtimeDictationChunksDirectory = chunksDirectory
-        isRealtimeDictationSessionActive = enablesRealtimeTranscription
+        isRealtimeDictationSessionActive = previewPipe != nil
+    }
+
+    /// Starts streaming partials for the keyboard strip. The streaming session starts inside the processing task,
+    /// so loading the preview model never delays the recording; buffers queue in the pipe meanwhile.
+    private func beginRealtimeDictationStream(_ choice: LivePreviewEnginePolicy.Choice) async -> RealtimeAudioBufferPipe? {
+        guard choice.streams else { return nil }
+        let streamEngine: FluidAudioTranscriptionEngine
+        if choice == .dedicated {
+            streamEngine = livePreviewEngine
+            await livePreviewEngine.selectModel(.parakeetRealtimeEou120m)
+            livePreviewResidency.streamingStarted()
+        } else {
+            streamEngine = engine
+            await engine.selectModel(selectedTranscriptionModel)
+        }
+        let pipe = RealtimeAudioBufferPipe()
+        realtimeDictationBufferPipe = pipe
+        realtimeDictationEngine = streamEngine
+        realtimeDictationStreamIsFromFinalModel = choice == .finalModel
+        realtimeDictationProcessingTask = Task { [weak self, streamEngine, pipe] in
+            do {
+                try await streamEngine.startRealtimeSession(
+                    partialTranscript: { [weak self] partial in
+                        Task { @MainActor in self?.updateRealtimeDictationPartial(partial) }
+                    },
+                    endOfUtterance: { [weak self] utterance in
+                        Task { @MainActor in self?.commitRealtimeDictationUtterance(utterance) }
+                    }
+                )
+            } catch {
+                if !(error is CancellationError) {
+                    AppTelemetry.failure(
+                        "realtime_dictation_start_failed",
+                        domain: .transcription,
+                        stage: "streaming_start",
+                        error: error,
+                        parameters: ["surface": "dictation", "engine": choice == .dedicated ? "preview" : "selected"]
+                    )
+                }
+                // Keep draining so queued audio is released; the final pass still runs on the full clip.
+                for await _ in pipe.stream {}
+                return false
+            }
+            for await audioBuffer in pipe.stream {
+                do {
+                    try await streamEngine.processRealtimeAudioBuffer(audioBuffer.buffer)
+                } catch is CancellationError {
+                    return true
+                } catch {
+                    AppTelemetry.failure(
+                        "realtime_dictation_buffer_failed",
+                        domain: .transcription,
+                        stage: "streaming_buffer",
+                        error: error,
+                        parameters: ["surface": "dictation"]
+                    )
+                }
+            }
+            return true
+        }
+        return pipe
+    }
+
+    /// Ends the stream after the recorder stopped and returns what it heard (already post-processed).
+    private func endRealtimeDictationStream() async throws -> (text: String, isFromFinalModel: Bool) {
+        let isFromFinalModel = realtimeDictationStreamIsFromFinalModel
+        guard let pipe = realtimeDictationBufferPipe,
+              let task = realtimeDictationProcessingTask,
+              let streamEngine = realtimeDictationEngine
+        else {
+            resetRealtimeDictationStreamState()
+            return ("", isFromFinalModel)
+        }
+        pipe.finish()
+        let didStart = await task.value
+        resetRealtimeDictationStreamState()
+        defer { finishLivePreviewResidency(for: streamEngine) }
+        guard didStart else { return ("", isFromFinalModel) }
+        // The stream is a preview and a fallback; losing it must not cost the final pass.
+        do {
+            return (postProcessTranscript(try await streamEngine.finishRealtimeSession()), isFromFinalModel)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            AppTelemetry.failure(
+                "realtime_dictation_finish_failed",
+                domain: .transcription,
+                stage: "streaming_finish",
+                error: error,
+                parameters: ["surface": "dictation"]
+            )
+            // Best effort: the last partial can miss the tail that finish would have flushed.
+            return (postProcessTranscript(liveDictationTranscript), isFromFinalModel)
+        }
+    }
+
+    /// Cancel and startup-failure teardown: drop the stream without finishing it.
+    private func abandonRealtimeDictationStream() {
+        let streamEngine = realtimeDictationEngine
+        realtimeDictationBufferPipe?.finish()
+        realtimeDictationProcessingTask?.cancel()
+        resetRealtimeDictationStreamState()
+        if let streamEngine { finishLivePreviewResidency(for: streamEngine) }
+    }
+
+    private func resetRealtimeDictationStreamState() {
+        realtimeDictationBufferPipe = nil
+        realtimeDictationProcessingTask = nil
+        realtimeDictationEngine = nil
+        realtimeDictationStreamIsFromFinalModel = true
+        isRealtimeDictationSessionActive = false
+    }
+
+    private func finishLivePreviewResidency(for streamEngine: FluidAudioTranscriptionEngine) {
+        guard streamEngine === livePreviewEngine else { return }
+        applyLivePreviewResidency(livePreviewResidency.streamingEnded())
+    }
+
+    private func handleLivePreviewMemoryWarning() {
+        KeyboardDiagnosticsLog.record("livePreview.memoryWarning", ["loaded": String(livePreviewResidency.isLoaded)])
+        applyLivePreviewResidency(livePreviewResidency.memoryWarning())
+    }
+
+    private func releaseDedicatedLivePreviewEngine() {
+        applyLivePreviewResidency(livePreviewResidency.dedicatedEngineNotNeeded())
+    }
+
+    private func applyLivePreviewResidency(_ action: LivePreviewResidency.Action) {
+        guard action == .unload else { return }
+        Task { [livePreviewEngine] in await livePreviewEngine.unloadModel(.parakeetRealtimeEou120m) }
+    }
+
+    var livePreviewDownloadOffer: LivePreviewDownloadOffer {
+        LivePreviewDownloadOffer.state(
+            previewModelDownloaded: LocalTranscriptionModel.parakeetRealtimeEou120m.isDownloaded,
+            selectedModelStreams: selectedTranscriptionModel.supportsRealtimeStreaming,
+            previewDownloadProgress: livePreviewDownloadProgress,
+            isPreviewDownloading: isLivePreviewModelDownloading,
+            otherDownloadActive: modelPreparation.phase == .downloading
+        )
+    }
+
+    func downloadLivePreviewModel() {
+        guard case .available = livePreviewDownloadOffer else { return }
+        isLivePreviewModelDownloading = true
+        livePreviewDownloadProgress = nil
+        Task { [weak self] in
+            do {
+                let startedInBackground = try await ModelBackgroundDownloadService.shared.startDownload(
+                    for: .parakeetRealtimeEou120m
+                )
+                // false: already on disk (or finalized now), so the delegate will not call back.
+                if !startedInBackground { self?.finishLivePreviewDownload() }
+            } catch {
+                self?.finishLivePreviewDownload()
+                AppTelemetry.failure(
+                    "live_preview_download_failed",
+                    domain: .model,
+                    stage: "start",
+                    error: error,
+                    parameters: ["engine": LocalTranscriptionModel.parakeetRealtimeEou120m.engineIdentifier]
+                )
+            }
+        }
+    }
+
+    private func finishLivePreviewDownload() {
+        isLivePreviewModelDownloading = false
+        livePreviewDownloadProgress = nil
+        publishKeyboardModelCatalog()
     }
 
     private func updateRealtimeDictationPartial(_ partial: String) {
@@ -4813,6 +4975,12 @@ final class DictationCoordinator {
         realtimeDictationCommittedText = ""
         clearKeyboardLiveTranscript()
         let kind: RecordingSessionKind = deliversToKeyboard ? .keyboardDictation : .quickDictation
+        let livePreviewChoice = LivePreviewEnginePolicy.choose(
+            selectedModelStreams: selectedTranscriptionModel.supportsRealtimeStreaming,
+            isKeyboardDictation: source == "keyboard",
+            startsAsNotepad: startsAsNotepad,
+            previewModelDownloaded: LocalTranscriptionModel.parakeetRealtimeEou120m.isDownloaded
+        )
         let longModeThreshold = startsAsNotepad
             ? VoiceNoteRecordingSchedule.checkpointIntervalSeconds
             : configuredLongVoiceNoteThreshold()
@@ -4901,18 +5069,25 @@ final class DictationCoordinator {
                             } else {
                                 checkpointDirectory = nil
                             }
+                            let previewPipe = await beginRealtimeDictationStream(livePreviewChoice)
+                            var previewFeed: (@Sendable (AVAudioPCMBuffer) -> Void)?
+                            if let previewPipe {
+                                previewFeed = { buffer in previewPipe.append(buffer) }
+                            }
                             try validateStartup()
                             guard keyboardMicSession.owns(micSessionID), !Task.isCancelled else { throw CancellationError() }
                             try keyboardSessionKeeper.beginSegment(
                                 outputURL: audioURL,
-                                checkpointDirectory: checkpointDirectory
+                                checkpointDirectory: checkpointDirectory,
+                                onAudioBuffer: previewFeed
                             )
+                            isRealtimeDictationSessionActive = previewPipe != nil
                             transitionKeyboardSession(.recordingStarted(request.id))
-                        } else if selectedTranscriptionModel.supportsRealtimeStreaming || longModeThreshold != nil {
+                        } else if livePreviewChoice.streams || longModeThreshold != nil {
                             try await startCheckpointingDictationRecorder(
                                 audioURL: audioURL,
                                 sessionID: session.id,
-                                enablesRealtimeTranscription: selectedTranscriptionModel.supportsRealtimeStreaming,
+                                livePreview: livePreviewChoice,
                                 usesDurableCheckpoints: longModeThreshold != nil,
                                 validateStartup: validateStartup
                             )
@@ -5358,7 +5533,6 @@ final class DictationCoordinator {
 
             do {
                 let usesCheckpointingRecorder = realtimeDictationRecorder != nil
-                let usesRealtimeStreaming = usesCheckpointingRecorder && isRealtimeDictationSessionActive
                 let audioURL: URL
                 var finalCheckpoint: MeetingAudioChunk?
                 var finalWriterFailure: CheckpointingAudioWriterFailure?
@@ -5375,38 +5549,16 @@ final class DictationCoordinator {
                     realtimeDictationRecorder = nil
                     finalCheckpoint = stoppedAudio?.finalChunk
                     finalWriterFailure = stoppedAudio?.writerFailure
-                    if usesRealtimeStreaming {
-                        realtimeDictationBufferPipe?.finish()
-                        await realtimeDictationProcessingTask?.value
-                    }
-                    realtimeDictationProcessingTask = nil
-                    realtimeDictationBufferPipe = nil
-                    isRealtimeDictationSessionActive = false
                     guard let retainedAudioURL = stoppedAudio?.retainedAudioURL else {
                         throw AudioRecorder.RecordingError.noRecording
                     }
                     audioURL = retainedAudioURL
-                    if usesRealtimeStreaming {
-                        // The stream is a preview and a fallback; losing it must not cost the final pass.
-                        do {
-                            realtimeText = postProcessTranscript(try await engine.finishRealtimeSession())
-                        } catch is CancellationError {
-                            throw CancellationError()
-                        } catch {
-                            // Best effort: the last partial can miss the tail that finish would have flushed.
-                            AppTelemetry.failure(
-                                "realtime_dictation_finish_failed",
-                                domain: .transcription,
-                                stage: "streaming_finish",
-                                error: error,
-                                parameters: ["surface": "dictation"]
-                            )
-                            realtimeText = postProcessTranscript(liveDictationTranscript)
-                        }
-                    }
                 } else {
                     audioURL = try recorder.stop()
                 }
+                // Both recorders have stopped feeding the pipe; finish whichever engine streamed.
+                let stream = try await endRealtimeDictationStream()
+                realtimeText = stream.text
 
                 if let currentSession = activeSession ?? session,
                    currentSession.longFormThresholdSeconds != nil {
@@ -5496,6 +5648,7 @@ final class DictationCoordinator {
                 let decision = try await FinalTextPolicy.resolve(
                     streamingText: realtimeText,
                     isLongForm: (activeSession ?? session)?.isLongForm == true,
+                    streamingIsFromFinalModel: stream.isFromFinalModel,
                     timeoutError: VoiceNoteRetryError.timeout
                 ) {
                     // With streaming text to fall back to, the policy swallows this pass's failure; record why here.
@@ -5724,10 +5877,7 @@ final class DictationCoordinator {
                 clearPersistentKeyboardSessionRoute(for: request.id)
                 realtimeDictationRecorder?.cancel()
                 realtimeDictationRecorder = nil
-                realtimeDictationBufferPipe?.finish()
-                realtimeDictationBufferPipe = nil
-                realtimeDictationProcessingTask?.cancel()
-                realtimeDictationProcessingTask = nil
+                abandonRealtimeDictationStream()
                 if failedVoiceNoteSession?.protectedAudioUntilTranscriptCompletes != true,
                    let realtimeDictationChunksDirectory {
                     try? FileManager.default.removeItem(at: realtimeDictationChunksDirectory)
@@ -7805,11 +7955,7 @@ final class DictationCoordinator {
     private func cleanupRealtimeDictationRecorder() {
         realtimeDictationRecorder?.cancel()
         realtimeDictationRecorder = nil
-        realtimeDictationBufferPipe?.finish()
-        realtimeDictationBufferPipe = nil
-        realtimeDictationProcessingTask?.cancel()
-        realtimeDictationProcessingTask = nil
-        isRealtimeDictationSessionActive = false
+        abandonRealtimeDictationStream()
         if let realtimeDictationChunksDirectory {
             try? FileManager.default.removeItem(at: realtimeDictationChunksDirectory)
         }
@@ -8007,6 +8153,9 @@ private final class OfflineTranscriptionJobControl<Output: Sendable>: @unchecked
 
 extension DictationCoordinator: ModelBackgroundDownloadServiceDelegate {
     func modelBackgroundDownloadDidUpdate(model: LocalTranscriptionModel, progress: Double, detail: String) {
+        if model == .parakeetRealtimeEou120m, isLivePreviewModelDownloading {
+            livePreviewDownloadProgress = progress
+        }
         guard selectedTranscriptionModel == model else { return }
         modelPreparation = ModelPreparationState(
             phase: .downloading,
@@ -8017,6 +8166,7 @@ extension DictationCoordinator: ModelBackgroundDownloadServiceDelegate {
     }
 
     func modelBackgroundDownloadDidFinish(model: LocalTranscriptionModel) {
+        if model == .parakeetRealtimeEou120m, isLivePreviewModelDownloading { finishLivePreviewDownload() }
         publishKeyboardModelCatalog()
         guard selectedTranscriptionModel == model else { return }
         modelPreparation = ModelPreparationState(
@@ -8029,6 +8179,7 @@ extension DictationCoordinator: ModelBackgroundDownloadServiceDelegate {
     }
 
     func modelBackgroundDownloadDidFail(model: LocalTranscriptionModel, message: String) {
+        if model == .parakeetRealtimeEou120m, isLivePreviewModelDownloading { finishLivePreviewDownload() }
         publishKeyboardModelCatalog()
         guard selectedTranscriptionModel == model else { return }
         modelPreparationTask = nil

@@ -177,6 +177,18 @@ or comes back empty. When both are empty nothing is inserted. Cancellation never
 falls back. A long voice note keeps its streaming text without a second pass, and
 notepad bursts keep their own path.
 
-Partials exist only when the selected model streams (Parakeet Realtime EOU) and the
-capture uses the checkpointing recorder. Persistent keyboard mic segments
-(`KeyboardSessionKeeper`) do not stream yet, so they show no preview.
+Partials come from Parakeet Realtime EOU 120M (`LivePreviewEnginePolicy`):
+
+- When it is the selected model, the one engine streams and runs the final pass.
+- Otherwise a dedicated preview engine streams beside the selected model for keyboard
+  dictations, fed from the persistent mic segment (`KeyboardSessionKeeper`) or the
+  checkpointing recorder. Action Button, in-app dictation and notepad bursts do not load it.
+- It runs only when the EOU model is downloaded. Settings offers
+  "Download live preview model (224 MB)" under the model picker while it is missing,
+  and waits while another model downloads (the download service runs one at a time).
+- It loads on the first dictation that uses it, and the streaming session starts inside
+  the buffer task, so loading never delays recording. A memory warning unloads it when
+  idle, or after the dictation it is streaming (`LivePreviewResidency`). Selecting EOU as
+  the model, or removing EOU, releases the dedicated copy.
+- Its text is only ever the preview and the short-dictation fallback. A long voice note
+  streamed by it still gets the selected model's pass, as before.

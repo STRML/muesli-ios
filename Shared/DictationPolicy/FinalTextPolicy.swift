@@ -26,11 +26,16 @@ enum FinalTextPolicy {
     static func resolve(
         streamingText: String,
         isLongForm: Bool,
+        streamingIsFromFinalModel: Bool = true,
         timeoutError: @autoclosure () -> any Error,
         isolation: isolated (any Actor)? = #isolation,
         finalPass: () async throws -> FinalPass?
     ) async throws -> Decision {
-        let streaming = streamingText.trimmingCharacters(in: .whitespacesAndNewlines)
+        // A long voice note streamed by the preview model gets the selected model's pass, as it did before the
+        // preview existed; only the selected model's own stream may stand in for that pass.
+        let streaming = isLongForm && !streamingIsFromFinalModel
+            ? ""
+            : streamingText.trimmingCharacters(in: .whitespacesAndNewlines)
         // A long voice note keeps its streaming text, as before: a second pass over minutes of audio is not free.
         if isLongForm, !streaming.isEmpty {
             return Decision(text: streaming, source: .streaming)

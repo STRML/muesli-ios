@@ -23,6 +23,8 @@ final class KeyboardSessionKeeper: @unchecked Sendable {
         var lastInputBufferAt: Date?
         var lastInputActivityNotifiedAt = Date.distantPast
         var isFinishingSegment = false
+        /// The live preview's feed: each 16 kHz mono buffer written to the segment, on the audio thread.
+        var segmentAudioHandler: (@Sendable (AVAudioPCMBuffer) -> Void)?
     }
 
     private struct PendingFileWrite: @unchecked Sendable {
@@ -172,7 +174,11 @@ final class KeyboardSessionKeeper: @unchecked Sendable {
         }
     }
 
-    func beginSegment(outputURL: URL, checkpointDirectory: URL? = nil) throws {
+    func beginSegment(
+        outputURL: URL,
+        checkpointDirectory: URL? = nil,
+        onAudioBuffer: (@Sendable (AVAudioPCMBuffer) -> Void)? = nil
+    ) throws {
         guard isRunning else {
             throw AudioRecorder.RecordingError.startFailed(stage: "keyboard session inactive")
         }
@@ -201,6 +207,7 @@ final class KeyboardSessionKeeper: @unchecked Sendable {
         state.activeSegmentID = segmentID
         state.segmentFrames = 0
         state.isFinishingSegment = false
+        state.segmentAudioHandler = onAudioBuffer
         lock.unlock()
     }
 
@@ -208,6 +215,7 @@ final class KeyboardSessionKeeper: @unchecked Sendable {
     func finishSegment() throws -> SegmentResult {
         lock.lock()
         state.isFinishingSegment = true
+        state.segmentAudioHandler = nil
         let url = state.activeURL
         let segmentID = state.activeSegmentID
         let writer = state.checkpointWriter
@@ -250,6 +258,7 @@ final class KeyboardSessionKeeper: @unchecked Sendable {
     func cancelSegment() {
         lock.lock()
         state.isFinishingSegment = true
+        state.segmentAudioHandler = nil
         let url = state.activeURL
         let segmentID = state.activeSegmentID
         let writer = state.checkpointWriter
@@ -358,6 +367,7 @@ final class KeyboardSessionKeeper: @unchecked Sendable {
             if frameCount > 0 {
                 lock.lock()
                 let shouldWrite = state.activeSegmentID == segmentID && !state.isFinishingSegment
+                let segmentAudioHandler = shouldWrite ? state.segmentAudioHandler : nil
                 lock.unlock()
 
                 if shouldWrite {
@@ -371,6 +381,8 @@ final class KeyboardSessionKeeper: @unchecked Sendable {
                             frameCount: frameCount
                         ))
                     }
+                    // Each converted buffer is a fresh copy, so the preview can keep it past this callback.
+                    segmentAudioHandler?(monoBuffer)
                 }
             }
         }

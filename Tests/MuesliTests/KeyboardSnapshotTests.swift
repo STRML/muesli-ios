@@ -22,6 +22,8 @@ final class KeyboardSnapshotTests: XCTestCase {
         let name: String
         let setup: Setup
         let rewriteAvailable: Bool
+        /// Streaming words for the live preview strip.
+        var liveText: String?
     }
 
     private let editText = "Next Amazon order, I want to get a desk mat, a rack for my Mac minis, and a holder for my pen holders."
@@ -55,6 +57,10 @@ final class KeyboardSnapshotTests: XCTestCase {
             try store.saveKeyboardHandoffState(.init(
                 requestID: request.id, phase: recording ? .recordingStarted : .transcribingStarted))
             controller.prepareInitialPresentationState()
+            if let liveText = scene.liveText {
+                try store.saveKeyboardLiveTranscript(.init(requestID: request.id, text: liveText))
+                controller.prepareInitialPresentationState()
+            }
         case .editListening, .editTranscribing:
             try publish(.idle, requestID: nil)
             controller.prepareInitialPresentationState()
@@ -97,6 +103,10 @@ final class KeyboardSnapshotTests: XCTestCase {
             Scene(name: "ready-no-llm", setup: .ready, rewriteAvailable: false),
             Scene(name: "listening", setup: .listening, rewriteAvailable: true),
             Scene(name: "transcribing", setup: .transcribing, rewriteAvailable: true),
+            Scene(name: "preview-listening", setup: .listening, rewriteAvailable: true,
+                  liveText: "so the plan for tomorrow is to pick up the parts first and then head over to the shop"),
+            Scene(name: "preview-finalizing", setup: .transcribing, rewriteAvailable: true,
+                  liveText: "so the plan for tomorrow is to pick up the parts first and then head over to the shop"),
             Scene(name: "edit-listening", setup: .editListening, rewriteAvailable: true),
             Scene(name: "edit-transcribing", setup: .editTranscribing, rewriteAvailable: true),
             Scene(name: "undo", setup: .undoAvailable, rewriteAvailable: true),

@@ -734,12 +734,13 @@ private struct KeyboardLivePreviewStrip: View {
             Circle()
                 .fill(isFinalizing ? MuesliTheme.textTertiary : MuesliTheme.recording)
                 .frame(width: 7, height: 7)
-            TimelineView(.periodic(from: recordingStartedAt ?? .now, by: 1)) { context in
-                Text(KeyboardLivePreview.elapsedLabel(from: recordingStartedAt, to: context.date))
-                    .font(.system(size: 12, weight: .semibold, design: .rounded).monospacedDigit())
-                    .foregroundStyle(MuesliTheme.textSecondary)
+            if !isFinalizing {
+                TimelineView(.periodic(from: recordingStartedAt ?? .now, by: 1)) { context in
+                    Text(KeyboardLivePreview.elapsedLabel(from: recordingStartedAt, to: context.date))
+                        .font(.system(size: 12, weight: .semibold, design: .rounded).monospacedDigit())
+                        .foregroundStyle(MuesliTheme.textSecondary)
+                }
             }
-            .opacity(isFinalizing ? 0 : 1)
             Text(preview.text)
                 .font(.system(size: 13, weight: .regular))
                 .foregroundStyle(MuesliTheme.textSecondary)
