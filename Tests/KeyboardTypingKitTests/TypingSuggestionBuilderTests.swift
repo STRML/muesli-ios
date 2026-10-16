@@ -8,6 +8,9 @@ final class FakeSpellChecker: TypingSpellChecking {
     var completionTable: [String: [String]] = [:]
     var guessTable: [String: [String]] = [:]
     private(set) var calls: [String] = []
+    private(set) var ignored: [String] = []
+
+    func ignore(_ word: String) { ignored.append(word) }
 
     func isMisspelled(_ word: String, language: String) -> Bool {
         calls.append("misspelled:\(language)")

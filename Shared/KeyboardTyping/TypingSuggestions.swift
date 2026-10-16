@@ -8,6 +8,8 @@ struct TypingSuggestion: Sendable, Equatable, Identifiable {
         case completion
         /// A contact name or a text replacement from `UILexicon`.
         case lexicon
+        /// The word as typed, offered right after autocorrect changed it. A tap puts it back.
+        case original
     }
 
     let text: String
@@ -27,9 +29,16 @@ protocol TypingSpellChecking: AnyObject {
     func isMisspelled(_ word: String, language: String) -> Bool
     func completions(forPartial partial: String, language: String) -> [String]
     func guesses(forWord word: String, language: String) -> [String]
+    /// Stop flagging this word for the life of this checker.
+    func ignore(_ word: String)
 }
 
 enum TypingLanguageResolver {
+    /// "en" for "en_US" and "en-GB".
+    static func baseCode(of language: String) -> String {
+        language.split(whereSeparator: { $0 == "_" || $0 == "-" }).first.map { String($0).lowercased() } ?? ""
+    }
+
     /// The first candidate the checker has a dictionary for, spelled the way the checker spells it
     /// ("en-US" becomes "en_US"). A language with no dictionary at all resolves to nil, so the strip shows
     /// nothing instead of guesses from the wrong language.
@@ -68,6 +77,7 @@ final class TypingSuggestionBuilder: TypingSuggestionSource {
     private let limit: Int
     private var checker: TypingSpellChecking?
     private var lexicon: [TypingLexiconEntry] = []
+    private var ignoredWords = Set<String>()
 
     init(
         makeChecker: @escaping () -> TypingSpellChecking,
@@ -93,6 +103,16 @@ final class TypingSuggestionBuilder: TypingSuggestionSource {
     func documentDidChange() {
         checker = nil
     }
+
+    /// Words the user rejected, kept for the session and replayed into every new checker, so the strip stops
+    /// flagging a word the user insisted on. `UITextChecker.ignoreWord` only lasts as long as one instance.
+    func ignore(_ word: String) {
+        ignoredWords.insert(word)
+        checker?.ignore(word)
+    }
+
+    /// The checker for this document, made on first use. The autocorrector shares it with the strip.
+    func currentChecker() -> TypingSpellChecking { resolvedChecker() }
 
     func suggestions(forPartial partial: String) -> [TypingSuggestion] {
         guard !partial.isEmpty else { return [] }
@@ -132,6 +152,7 @@ final class TypingSuggestionBuilder: TypingSuggestionSource {
     private func resolvedChecker() -> TypingSpellChecking {
         if let checker { return checker }
         let made = makeChecker()
+        ignoredWords.forEach { made.ignore($0) }
         checker = made
         return made
     }

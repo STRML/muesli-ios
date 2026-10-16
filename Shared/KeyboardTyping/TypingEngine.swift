@@ -6,6 +6,8 @@ protocol TypingDocument: AnyObject {
     var contextBefore: String? { get }
     var contextAfter: String? { get }
     var documentIdentifier: UUID? { get }
+    /// The selected text, if any. A typed space replaces a selection, so nothing is corrected then.
+    var selectedText: String? { get }
     func insert(_ text: String)
     func deleteBackward()
 }
@@ -29,6 +31,12 @@ protocol TypingWordCompletionHandling: AnyObject {
     /// Return a plan to replace the word before the boundary is typed, or nil to leave it alone. A plan that
     /// carries `undo` is taken back by the next backspace.
     func wordCompleted(_ event: TypingWordCompletedEvent) -> TypingEditPlan?
+    /// The user took a replacement back (backspace, or a tap on the original in the strip).
+    func replacementWasRejected(_ undo: TypingReplacementUndo)
+}
+
+extension TypingWordCompletionHandling {
+    func replacementWasRejected(_ undo: TypingReplacementUndo) {}
 }
 
 struct TypingState: Sendable, Equatable {
@@ -63,6 +71,12 @@ final class TypingEngine {
     private var hasAppliedTraits = false
     private var suggestionsSuspended = false
     private var pendingUndo: TypingReplacementUndo?
+    /// The text after the cursor when the correction was made; the undo is only valid while it still matches.
+    private var undoContextAfter = ""
+    /// The letters typed through `type` since the last boundary. A finished word is only reported when it is
+    /// exactly this, so text Muesli inserted (a dictation), text pasted, a word the cursor was merely placed
+    /// after, and a keystroke the proxy has not shown yet are never corrected.
+    private var typedWord = ""
     private var lastAutocapKey: AutocapKey?
     private var knownDocumentID: UUID?
     private var snapshot: SuggestionSnapshot?
@@ -98,17 +112,28 @@ final class TypingEngine {
         if variantChanged { state.page = traits.initialPage }
         // The host echoes the same traits after every keystroke; only a real change re-evaluates auto-capitalize.
         if changed { lastAutocapKey = nil }
+        syncWithHost()
         refresh()
     }
 
     /// The host's text or selection changed (the user moved the cursor, a dictation was inserted, a paste).
     func documentDidChange() {
+        syncWithHost()
         refresh()
     }
 
     /// While a dictation owns the strip, no suggestion is computed or tappable.
     func setSuggestionsSuspended(_ suspended: Bool) {
         suggestionsSuspended = suspended
+        if suspended { pendingUndo = nil }
+        refresh()
+    }
+
+    /// Muesli itself put text in the field (a dictation, a rewrite, an Undo edit). Nothing typed before it is
+    /// a pending correction, and nothing in it is ever corrected.
+    func noteExternalInsertion() {
+        pendingUndo = nil
+        typedWord = ""
         refresh()
     }
 
@@ -118,6 +143,9 @@ final class TypingEngine {
         pendingUndo = nil
         if let character = text.first, text.count == 1, TypingWordExtractor.endsWord(character) {
             completeWord(boundary: .punctuation(text))
+            typedWord = ""
+        } else {
+            typedWord = text.count == 1 ? typedWord + text : ""
         }
         document.insert(text)
         machine.didInsertCharacter()
@@ -127,6 +155,7 @@ final class TypingEngine {
     func tapSpace() {
         pendingUndo = nil
         completeWord(boundary: .space)
+        typedWord = ""
         document.insert(" ")
         machine.didInsertCharacter()
         refresh()
@@ -135,20 +164,21 @@ final class TypingEngine {
     func tapReturn() {
         pendingUndo = nil
         completeWord(boundary: .returnKey)
+        typedWord = ""
         document.insert("\n")
         machine.didInsertCharacter()
         refresh()
     }
 
     func tapBackspace() {
-        if let undo = pendingUndo, document.contextBefore?.hasSuffix(undo.insertedText) == true {
-            pendingUndo = nil
-            for _ in 0..<undo.insertedText.count { document.deleteBackward() }
-            document.insert(undo.replacedText)
+        let hasSelection = !(document.selectedText ?? "").isEmpty
+        if let undo = pendingUndo, !hasSelection, isUndoLive(undo) {
+            restore(undo)
             refresh()
             return
         }
         pendingUndo = nil
+        if hasSelection { typedWord = "" } else if !typedWord.isEmpty { typedWord.removeLast() }
         // Always forwarded, even when the context looks empty: some hosts never show their text to a keyboard.
         document.deleteBackward()
         refresh()
@@ -161,6 +191,7 @@ final class TypingEngine {
     }
 
     func switchPage(_ page: TypingPage) {
+        pendingUndo = nil
         state.page = page
         lastAutocapKey = nil
         refresh()
@@ -170,6 +201,7 @@ final class TypingEngine {
     /// suggestion was computed for.
     @discardableResult
     func accept(_ suggestion: TypingSuggestion) -> Bool {
+        if suggestion.kind == .original { return acceptOriginal(suggestion) }
         guard !suggestionsSuspended, state.traits.allowsSuggestions,
               let snapshot, state.suggestions.contains(suggestion),
               snapshot.documentIdentifier == document.documentIdentifier
@@ -188,12 +220,61 @@ final class TypingEngine {
             return false
         }
         pendingUndo = nil
+        typedWord = ""
         apply(plan)
         refresh()
         return true
     }
 
+    /// The quoted original in the strip, right after a correction: puts back what the user typed, the same as a
+    /// backspace would, only if the document still ends with the correction.
+    private func acceptOriginal(_ suggestion: TypingSuggestion) -> Bool {
+        guard !suggestionsSuspended, state.traits.allowsSuggestions,
+              let undo = pendingUndo, undo.originalWord == suggestion.text, isUndoLive(undo)
+        else {
+            refresh()
+            return false
+        }
+        restore(undo)
+        refresh()
+        return true
+    }
+
     // MARK: Internals
+
+    private func restore(_ undo: TypingReplacementUndo) {
+        pendingUndo = nil
+        typedWord = ""
+        for _ in 0..<undo.insertedText.count { document.deleteBackward() }
+        document.insert(undo.replacedText)
+        completionHandler?.replacementWasRejected(undo)
+    }
+
+    /// The correction is still the last thing in the document, with the same text after the cursor. Anything
+    /// else (the cursor moved, the host changed the text, the proxy has not caught up) retires the undo, which
+    /// errs on the side of a plain backspace.
+    private func isUndoLive(_ undo: TypingReplacementUndo) -> Bool {
+        guard document.contextBefore?.hasSuffix(undo.insertedText) == true else { return false }
+        return (document.contextAfter ?? "") == undoContextAfter
+    }
+
+    /// Called when the host reports a change. The shadow of what was typed has to agree with the proxy, and a
+    /// pending undo has to still be where it was.
+    private func syncWithHost() {
+        guard !state.traits.isSecure else {
+            // A secure field is never read.
+            typedWord = ""
+            pendingUndo = nil
+            return
+        }
+        if case .partial(let word) = TypingWordExtractor.word(before: document.contextBefore, after: document.contextAfter),
+           word == typedWord {
+            // Still agrees with what was typed.
+        } else {
+            typedWord = ""
+        }
+        if let undo = pendingUndo, !isUndoLive(undo) { pendingUndo = nil }
+    }
 
     private func apply(_ plan: TypingEditPlan) {
         for _ in 0..<plan.deleteCount { document.deleteBackward() }
@@ -202,15 +283,20 @@ final class TypingEngine {
 
     /// Reports the word that ends at the cursor, and applies the handler's replacement if it is still valid.
     private func completeWord(boundary: TypingBoundary) {
-        guard let completionHandler, state.traits.allowsSuggestions else { return }
+        guard let completionHandler, state.traits.allowsSuggestions, !suggestionsSuspended,
+              (document.selectedText ?? "").isEmpty
+        else { return }
         let before = document.contextBefore
-        guard case .partial(let word) = TypingWordExtractor.word(before: before, after: document.contextAfter) else { return }
+        let after = document.contextAfter
+        // Only a word typed here, and seen by the proxy exactly as typed.
+        guard case .partial(let word) = TypingWordExtractor.word(before: before, after: after), word == typedWord else { return }
         let event = TypingWordCompletedEvent(
             word: word, boundary: boundary, contextBefore: before, documentIdentifier: document.documentIdentifier
         )
         guard let plan = completionHandler.wordCompleted(event),
               plan.isApplicable(toContextBefore: document.contextBefore)
         else { return }
+        undoContextAfter = after ?? ""
         apply(plan)
         pendingUndo = plan.undo
     }
@@ -230,7 +316,10 @@ final class TypingEngine {
 
         var suggestions: [TypingSuggestion] = []
         snapshot = nil
-        if traits.allowsSuggestions, !suggestionsSuspended {
+        if traits.allowsSuggestions, !suggestionsSuspended, let undo = pendingUndo {
+            // Right after a correction there is no partial word; the strip offers the original, in quotes.
+            suggestions = [TypingSuggestion(text: undo.originalWord, kind: .original)]
+        } else if traits.allowsSuggestions, !suggestionsSuspended {
             let word = TypingWordExtractor.word(before: before, after: document.contextAfter)
             if case .partial(let partial) = word {
                 suggestions = suggestionSource.suggestions(forPartial: partial)
@@ -245,6 +334,7 @@ final class TypingEngine {
         if let known = knownDocumentID, known != identifier {
             suggestionSource.documentDidChange()
             pendingUndo = nil
+            typedWord = ""
             lastAutocapKey = nil
         }
         knownDocumentID = identifier
