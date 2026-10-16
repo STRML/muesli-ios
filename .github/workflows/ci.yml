@@ -51,29 +51,6 @@ jobs:
             -resultBundlePath TestResults.xcresult \
             CODE_SIGNING_ALLOWED=NO
 
-      # TEMPORARY: repeat the Dynamic Island test on the booted device until it
-      # fails, so a blank island lands inside the Live Activity log window.
-      - name: Repeat Dynamic Island test
-        if: always()
-        run: |
-          xcodebuild \
-            test-without-building \
-            -project MuesliiOS.xcodeproj \
-            -scheme Muesli \
-            -destination 'platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}' \
-            -only-testing:MuesliUITests/MuesliSmokeUITests/testShortcutWaveformInDynamicIsland \
-            -test-iterations 15 \
-            -run-tests-until-failure \
-            -resultBundlePath IslandLoop.xcresult \
-            CODE_SIGNING_ALLOWED=NO
-      - name: Upload Dynamic Island loop results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: island-loop
-          path: IslandLoop.xcresult
-          retention-days: 7
-
       # Reported, not gated. A floor is only meaningful once there is a
       # baseline worth holding, and gating on a number nobody chose tends to
       # produce tests written to move the number. Pass --fail-under-watched to
