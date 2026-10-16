@@ -844,6 +844,8 @@ struct KeyboardRuntimeStatus: Codable, Sendable, Equatable {
     let inputLevel: Double
     /// The app has a Custom LLM configured, so the keyboard may offer voice rewrite.
     let rewriteAvailable: Bool
+    /// Remote processing is on and a Custom LLM endpoint is set, so the keyboard can say when Full Access blocks it.
+    let remoteProcessingEnabled: Bool
     let updatedAt: Date
 
     init(
@@ -855,6 +857,7 @@ struct KeyboardRuntimeStatus: Codable, Sendable, Equatable {
         canAcceptStartCommand: Bool? = nil,
         inputLevel: Double = 0,
         rewriteAvailable: Bool = false,
+        remoteProcessingEnabled: Bool = false,
         updatedAt: Date = .now
     ) {
         self.isActive = isActive
@@ -865,6 +868,7 @@ struct KeyboardRuntimeStatus: Codable, Sendable, Equatable {
         self.canAcceptStartCommand = canAcceptStartCommand ?? (isActive && supportsBackgroundStart)
         self.inputLevel = min(max(inputLevel, 0), 1)
         self.rewriteAvailable = rewriteAvailable
+        self.remoteProcessingEnabled = remoteProcessingEnabled
         self.updatedAt = updatedAt
     }
 
@@ -877,6 +881,7 @@ struct KeyboardRuntimeStatus: Codable, Sendable, Equatable {
         case canAcceptStartCommand
         case inputLevel
         case rewriteAvailable
+        case remoteProcessingEnabled
         case updatedAt
     }
 
@@ -890,6 +895,7 @@ struct KeyboardRuntimeStatus: Codable, Sendable, Equatable {
         canAcceptStartCommand = try container.decodeIfPresent(Bool.self, forKey: .canAcceptStartCommand) ?? (isActive && supportsBackgroundStart)
         inputLevel = try container.decodeIfPresent(Double.self, forKey: .inputLevel) ?? 0
         rewriteAvailable = try container.decodeIfPresent(Bool.self, forKey: .rewriteAvailable) ?? false
+        remoteProcessingEnabled = try container.decodeIfPresent(Bool.self, forKey: .remoteProcessingEnabled) ?? false
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
     }
 }

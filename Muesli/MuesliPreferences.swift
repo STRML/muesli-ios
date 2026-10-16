@@ -32,6 +32,7 @@ enum MuesliPreferences {
     static let chatGPTModelKey = "muesli.meetings.summary.chatGPT.model"
     static let customLLMBaseURLKey = "muesli.meetings.summary.customLLM.baseURL"
     static let customLLMModelKey = "muesli.meetings.summary.customLLM.model"
+    static let remoteProcessingEnabledKey = "muesli.transcription.remoteProcessing.enabled"
     static let meetingTemplateKey = "muesli.meetings.template"
     static let iCloudSyncEnabledKey = "muesli.sync.icloud.enabled"
     static let pinnedSectionsKey = "muesli.navigation.pinnedSections"
@@ -161,6 +162,20 @@ enum MuesliPreferences {
     static var customLLMModel: String {
         (UserDefaults.standard.string(forKey: customLLMModelKey) ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Opt-in, off by default. Reads the stored choice only; `isRemoteProcessingActive` also needs an endpoint.
+    static var remoteProcessingEnabled: Bool {
+        bool(for: remoteProcessingEnabledKey, defaultValue: false)
+    }
+
+    static var hasCustomLLMEndpoint: Bool {
+        CustomLLMEndpoint.transcriptionsURL(from: customLLMBaseURL) != nil
+    }
+
+    /// The setting counts only while a Custom LLM endpoint is set; a choice left over from a removed endpoint is ignored.
+    static var isRemoteProcessingActive: Bool {
+        remoteProcessingEnabled && hasCustomLLMEndpoint
     }
 
     /// Voice rewrite runs on the Custom LLM, so it is offered only when one is set up.

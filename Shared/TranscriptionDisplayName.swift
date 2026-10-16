@@ -17,6 +17,8 @@ enum TranscriptionDisplayName {
             "Whisper Medium"
         case "whisper-large-turbo":
             "Whisper Turbo"
+        case "remote-custom-llm":
+            "Remote (Custom LLM)"
         case "placeholder":
             "Placeholder"
         default:
