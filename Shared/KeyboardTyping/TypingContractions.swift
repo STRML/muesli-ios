@@ -23,10 +23,16 @@ enum TypingContractions {
         return table
     }()
 
-    /// The fixed spelling for `word`, following the case it was typed in, or nil.
-    static func correction(for word: String) -> String? {
+    /// The shortest word that is still fixed before a "." or ":".
+    private static let strictMinimumLength = 4
+
+    /// The fixed spelling for `word`, following the case it was typed in, or nil. `strict` is for a word that
+    /// may be the start of "i.e.", "im.com" or "june.app": only a longer contraction ("dont") is fixed then,
+    /// never "i", a short one or a day or month.
+    static func correction(for word: String, strict: Bool = false) -> String? {
         let lowered = word.lowercased()
         guard let fixed = table[lowered] else { return nil }
+        if strict, !(fixed.contains("'") && lowered.count >= strictMinimumLength) { return nil }
         let isLower = word == lowered
         let isCapitalized = word.first?.isUppercase == true && word.dropFirst() == lowered.dropFirst()
         guard isLower || isCapitalized else { return nil }

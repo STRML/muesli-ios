@@ -72,7 +72,7 @@ final class TypingAutocorrector: TypingWordCompletionHandling {
         guard !knownWords.contains(word.lowercased()),
               let language = resolvedLanguage(), TypingLanguageResolver.baseCode(of: language) == Self.correctedLanguage
         else { return nil }
-        if let fixed = TypingContractions.correction(for: word) {
+        if let fixed = TypingContractions.correction(for: word, strict: boundary.isStrict) {
             return plan(replacing: word, with: fixed, boundary: boundary)
         }
         guard let fixed = spellCorrection(for: word, language: language, event: event, boundary: boundary) else { return nil }

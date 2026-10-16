@@ -152,6 +152,16 @@ final class TypingAutocorrectorTests: XCTestCase {
         XCTAssertEqual(plan("im", .punctuation(","))?.insertText, "I'm")
     }
 
+    func testTheShortTableEntriesAreNotAppliedBeforeADotOrColon() {
+        for mark in [".", ":"] {
+            XCTAssertNil(plan("i", .punctuation(mark), before: "e.g. i"), "i.e. must stay")
+            XCTAssertNil(plan("im", .punctuation(mark)), "im.com must stay")
+            XCTAssertNil(plan("june", .punctuation(mark)), "june.app must stay")
+            XCTAssertEqual(plan("dont", .punctuation(mark))?.insertText, "don't", "a sentence can end in dont.")
+        }
+        XCTAssertEqual(plan("i")?.insertText, "I", "before a space it is fine")
+    }
+
     func testTheContractionTableIsEnglishOnly() {
         languages = ["fr-FR"]
         XCTAssertNil(plan("dont"), "\"dont\" is French for \"of which\"")

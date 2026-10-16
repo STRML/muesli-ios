@@ -61,4 +61,16 @@ final class TypingContractionsTests: XCTestCase {
         XCTAssertNil(TypingContractions.correction(for: "hello"))
         XCTAssertNil(TypingContractions.correction(for: ""))
     }
+
+    // Review round 1: before a "." or ":" the word may be the start of "i.e.", "im.com" or "june.app".
+    func testStrictBoundariesOnlyTakeLongerContractions() {
+        XCTAssertEqual(TypingContractions.correction(for: "dont", strict: true), "don't")
+        XCTAssertEqual(TypingContractions.correction(for: "doesnt", strict: true), "doesn't")
+        XCTAssertNil(TypingContractions.correction(for: "i", strict: true))
+        XCTAssertNil(TypingContractions.correction(for: "im", strict: true))
+        XCTAssertNil(TypingContractions.correction(for: "ive", strict: true))
+        XCTAssertNil(TypingContractions.correction(for: "june", strict: true))
+        XCTAssertNil(TypingContractions.correction(for: "april", strict: true))
+        XCTAssertEqual(TypingContractions.correction(for: "june", strict: false), "June")
+    }
 }
