@@ -4,10 +4,19 @@ import XCTest
 /// Matrix rows 3 and 13 as far as the Settings status row goes.
 final class ProbeOutcomeTests: XCTestCase {
     func testRow03MissingRouteStatusesReadAsNoTranscriptionRoute() {
-        for status in [404, 405, 401, 403] {
+        for status in [404, 405] {
             let outcome = RemoteProbeOutcome.classify(statusCode: status, latency: 0.1)
             XCTAssertEqual(outcome, .noRoute, "HTTP \(status)")
             XCTAssertEqual(outcome.statusRowText, "No transcription route")
+            XCTAssertFalse(outcome.isFast(threshold: 0.4))
+        }
+    }
+
+    func testRow03RefusedKeyReadsAsKeyRejectedNotAMissingRoute() {
+        for status in [401, 403] {
+            let outcome = RemoteProbeOutcome.classify(statusCode: status, latency: 0.1)
+            XCTAssertEqual(outcome, .keyRejected, "HTTP \(status)")
+            XCTAssertEqual(outcome.statusRowText, "API key rejected")
             XCTAssertFalse(outcome.isFast(threshold: 0.4))
         }
     }

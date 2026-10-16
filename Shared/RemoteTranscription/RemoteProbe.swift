@@ -4,14 +4,17 @@ enum RemoteProbeOutcome: Sendable, Equatable {
     /// The transcription route answered. `latency` is the round trip in seconds.
     case reachable(latency: TimeInterval)
     case noRoute
+    case keyRejected
     case unreachable
     case timedOut
 
     /// The probe is a form POST without a recording. A server that has the route answers it (a 400 or 422 for the
-    /// missing file counts); a missing route, or a refused key, reads as no route, as the Studio does for both.
+    /// missing file counts). The Studio checks the key before the route, so a 401 or 403 means a wrong key.
     static func classify(statusCode: Int, latency: TimeInterval) -> RemoteProbeOutcome {
         switch statusCode {
-        case 401, 403, 404, 405:
+        case 401, 403:
+            .keyRejected
+        case 404, 405:
             .noRoute
         case 200..<300, 400, 413, 415, 422:
             .reachable(latency: latency)
@@ -32,6 +35,8 @@ enum RemoteProbeOutcome: Sendable, Equatable {
             "Reachable, \(Int((latency * 1000).rounded())) ms"
         case .noRoute:
             "No transcription route"
+        case .keyRejected:
+            "API key rejected"
         case .unreachable, .timedOut:
             "Unreachable"
         }

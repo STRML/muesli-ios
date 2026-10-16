@@ -7,13 +7,20 @@ final class ClientTests: XCTestCase {
 
     // MARK: Probe
 
-    func testRow03ProbeReportsNoRouteForNotFoundMethodNotAllowedAndUnauthorized() async {
-        for status in [404, 405, 401] {
+    func testRow03ProbeReportsNoRouteForNotFoundAndMethodNotAllowed() async {
+        for status in [404, 405] {
             let server = MockServer()
             server.respondAlways(.status(status))
             let outcome = await server.client().probe(timeout: 1)
             XCTAssertEqual(outcome, .noRoute, "HTTP \(status)")
         }
+    }
+
+    func testRow03ProbeReportsKeyRejectedForUnauthorized() async {
+        let server = MockServer()
+        server.respondAlways(.status(401))
+        let outcome = await server.client().probe(timeout: 1)
+        XCTAssertEqual(outcome, .keyRejected)
     }
 
     func testProbeTreatsAnAnsweredBadRequestAsAReachableRoute() async {
