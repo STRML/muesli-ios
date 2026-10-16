@@ -25,7 +25,15 @@ jobs:
             xcrun simctl list devices available
             exit 1
           fi
+          xcrun simctl list devices available | grep "$SIMULATOR_UDID"
           echo "udid=$SIMULATOR_UDID" >> "$GITHUB_OUTPUT"
+      # Boot the device ourselves so xcodebuild reuses it and leaves it running.
+      # The Live Activity diagnostics below read the simulator's unified log,
+      # which needs the device still booted after the tests.
+      - name: Boot simulator
+        run: |
+          xcrun simctl boot '${{ steps.simulator.outputs.udid }}' || true
+          xcrun simctl bootstatus '${{ steps.simulator.outputs.udid }}' -b
       - name: Build for simulator
         run: |
           xcodebuild \
@@ -65,4 +73,27 @@ jobs:
         with:
           name: test-results
           path: TestResults.xcresult
+          retention-days: 7
+
+      # The Dynamic Island UI test depends on the system rendering the Live
+      # Activity extension. Keep the renderer's logs and any crash reports so a
+      # blank island can be traced past the screenshots.
+      - name: Collect Live Activity diagnostics
+        if: always() && steps.simulator.outputs.udid != ''
+        run: |
+          mkdir -p sim-diagnostics
+          UDID='${{ steps.simulator.outputs.udid }}'
+          xcrun simctl list devices | grep "$UDID" | tee sim-diagnostics/device-state.txt || true
+          xcrun simctl spawn "$UDID" log show --last 20m --style compact --info --debug \
+            --predicate 'process == "chronod" OR process == "liveactivitiesd" OR process BEGINSWITH "MuesliLiveActivity" OR process == "Muesli" OR subsystem BEGINSWITH "com.apple.activitykit" OR subsystem BEGINSWITH "com.apple.ActivityKit" OR subsystem BEGINSWITH "com.apple.chrono" OR (process == "SpringBoard" AND (category CONTAINS[c] "activit" OR category CONTAINS[c] "aperture" OR subsystem CONTAINS[c] "SystemAperture")) OR (process == "runningboardd" AND eventMessage CONTAINS "MuesliLiveActivity") OR eventMessage CONTAINS "MuesliLiveActivityExtension"' \
+            > sim-diagnostics/live-activity.log 2>&1 || true
+          wc -l sim-diagnostics/live-activity.log || true
+          cp -R ~/Library/Logs/DiagnosticReports sim-diagnostics/ 2>/dev/null || true
+          xcrun simctl shutdown "$UDID" || true
+      - name: Upload Live Activity diagnostics
+        if: always() && steps.simulator.outputs.udid != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: sim-diagnostics
+          path: sim-diagnostics
           retention-days: 7

@@ -71,18 +71,24 @@ final class MuesliSmokeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["islandPreview.ready"].waitForExistence(timeout: 15),
                       app.staticTexts["islandPreview.failure"].exists
                         ? app.staticTexts["islandPreview.failure"].label : "Island preview did not become ready")
+        let fixtureReady = Date()
         XCUIDevice.shared.press(.home)
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         try await Task.sleep(for: .seconds(6))
         captureActionButton(springboard, name: "Dynamic Island speech input")
-        springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.035)).press(forDuration: 1)
-        XCTAssertTrue(springboard.staticTexts["Listening"].waitForExistence(timeout: 15))
+        attachText(springboard.debugDescription, name: "SpringBoard before island press")
+        XCTAssertTrue(expandIsland(springboard, showing: springboard.staticTexts["Listening"], since: fixtureReady),
+                      "The expanded Live Activity never showed Listening")
         captureActionButton(springboard, name: "Dynamic Island expanded dictation")
         XCTAssertTrue(springboard.buttons["Stop keyboard dictation recording"].exists)
         try await Task.sleep(for: .seconds(6))
         captureActionButton(springboard, name: "Dynamic Island returned to quiet")
         springboard.buttons["Stop keyboard dictation recording"].tap()
-        XCTAssertTrue(springboard.staticTexts["Transcribing"].waitForExistence(timeout: 5))
+        // The Stop intent reaches the app through the system's
+        // BackgroundShortcutRunner. On CI that hop took 1.4-3.5 s in 18 runs and
+        // 6.8 s once, when the runner launched cold. The fixture holds
+        // Transcribing for 7 s after the intent lands, so 15 s still sees it.
+        XCTAssertTrue(springboard.staticTexts["Transcribing"].waitForExistence(timeout: 15))
         XCTAssertFalse(springboard.staticTexts["Listening"].exists)
         captureActionButton(springboard, name: "Dynamic Island processing after recording")
         XCTAssertFalse(springboard.buttons["Stop keyboard dictation recording"].exists)
@@ -93,6 +99,33 @@ final class MuesliSmokeUITests: XCTestCase {
         XCTAssertTrue(app.alerts["Copied to clipboard"].waitForExistence(timeout: 8))
         captureActionButton(app, name: "Dictation copied in foreground")
         app.alerts["Copied to clipboard"].buttons["OK"].tap()
+    }
+
+    private func attachText(_ text: String, name: String) {
+        let attachment = XCTAttachment(string: text)
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    /// Long-presses the Dynamic Island and waits for the expanded Live Activity to show `content`.
+    ///
+    /// On CI SpringBoard sometimes grows the island to its expanded shape but
+    /// never draws the extension's view: the island stays a blank pill and its
+    /// accessibility container has no children. Pressing again never recovers
+    /// it, so there is one attempt. A blank island attaches a screenshot and the
+    /// SpringBoard tree, and CI keeps the renderer's logs to trace it further.
+    private func expandIsland(_ springboard: XCUIApplication, showing content: XCUIElement, since fixtureReady: Date) -> Bool {
+        let elapsed = Int(Date().timeIntervalSince(fixtureReady))
+        let shown = XCTContext.runActivity(named: "Island expand, \(elapsed)s after the fixture was ready") { _ in
+            springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.035)).press(forDuration: 1)
+            return content.waitForExistence(timeout: 15)
+        }
+        if !shown {
+            captureActionButton(springboard, name: "Dynamic Island blank after expand")
+            attachText(springboard.debugDescription, name: "SpringBoard after island expand")
+        }
+        return shown
     }
 
     func testSettingsOpensActionButtonConfiguration() {
