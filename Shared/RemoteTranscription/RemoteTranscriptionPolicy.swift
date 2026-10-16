@@ -61,15 +61,22 @@ enum RemoteTranscriptionPolicy {
     static let asrModel = "qwen3-asr-1.7b"
     static let maxUploadBytes = 25 * 1024 * 1024
 
+    /// Why a request stays on the phone, in the order the user would expect the reasons to apply.
     static func eligibility(for context: RemoteRequestContext) -> RemoteEligibility {
-        .eligible
+        guard context.settingEnabled else { return .skip(.settingOff) }
+        guard context.endpointConfigured else { return .skip(.noEndpoint) }
+        guard !context.isPrivateContent else { return .skip(.privateContent) }
+        if case .keyboard(let hasFullAccess) = context.origin, !hasFullAccess {
+            return .skip(.keyboardNeedsFullAccess)
+        }
+        return .eligible
     }
 
     static func showsCheckbox(endpointConfigured: Bool) -> Bool {
-        true
+        endpointConfigured
     }
 
     static func keyboardBanner(remoteProcessingEnabled: Bool, hasFullAccess: Bool) -> String? {
-        nil
+        remoteProcessingEnabled && !hasFullAccess ? fullAccessBanner : nil
     }
 }

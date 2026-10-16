@@ -54,6 +54,7 @@ final class ClientTests: XCTestCase {
         let elapsed = seconds(ContinuousClock.now - start)
         XCTAssertEqual(outcome, .timedOut)
         XCTAssertLessThan(elapsed, 0.6)
+        try? await Task.sleep(for: .milliseconds(100)) // URLSession delivers stopLoading a beat after the cancel
         XCTAssertEqual(server.cancelled, 1, "the abandoned probe must be cancelled, not left running")
     }
 
