@@ -226,6 +226,42 @@ final class KeyboardControllerTests: XCTestCase {
         KeyboardHandoffState(requestID: requestID, phase: phase)
     }
 
+    /// Replace the App Group directory with a file so every shared-store call throws.
+    private func breakSharedStore() {
+        try? FileManager.default.removeItem(at: directory)
+        try? Data().write(to: directory)
+    }
+
+    // MARK: - Shared store errors
+
+    func testStoreErrorWithFullAccessOnPointsToTheAppNotToFullAccess() {
+        breakSharedStore()
+        controller.currentFullAccess = { true }
+
+        controller.insertLatestDictation()
+        XCTAssertEqual(controller.statusText, KeyboardController.unreachableAppMessage)
+
+        controller.startDictation()
+        XCTAssertEqual(controller.statusText, KeyboardController.unreachableAppMessage)
+
+        controller.prepareInitialPresentationState()
+        XCTAssertEqual(controller.statusText, KeyboardController.unreachableAppMessage)
+    }
+
+    func testStoreErrorWithFullAccessOffStillAsksForFullAccess() {
+        breakSharedStore()
+        controller.currentFullAccess = { false }
+
+        controller.insertLatestDictation()
+        XCTAssertEqual(controller.statusText, "Enable Full Access")
+
+        controller.startDictation()
+        XCTAssertEqual(controller.statusText, "Enable Full Access")
+
+        controller.prepareInitialPresentationState()
+        XCTAssertEqual(controller.statusText, "Waiting for Full Access")
+    }
+
     // MARK: - Waveform
 
     /// iOS destroys and rebuilds the keyboard constantly -- three times inside
