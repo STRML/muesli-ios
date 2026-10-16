@@ -104,29 +104,24 @@ final class MuesliSmokeUITests: XCTestCase {
         add(attachment)
     }
 
-    /// Long-presses the Dynamic Island until the expanded Live Activity shows `content`.
+    /// Long-presses the Dynamic Island and waits for the expanded Live Activity to show `content`.
     ///
-    /// On loaded CI simulators SpringBoard sometimes grows the island to its
-    /// expanded shape but never draws the extension's view: the island stays a
-    /// blank pill and its accessibility container has no children. Collapsing and
-    /// pressing again asks for a fresh render. The test still fails if no attempt
-    /// shows the content, and every attempt is logged with screenshots.
+    /// On CI SpringBoard sometimes grows the island to its expanded shape but
+    /// never draws the extension's view: the island stays a blank pill and its
+    /// accessibility container has no children. Pressing again never recovers
+    /// it, so there is one attempt. A blank island attaches a screenshot and the
+    /// SpringBoard tree, and CI keeps the renderer's logs to trace it further.
     private func expandIsland(_ springboard: XCUIApplication, showing content: XCUIElement, since fixtureReady: Date) -> Bool {
-        let attempts = 3
-        for attempt in 1...attempts {
-            let elapsed = Int(Date().timeIntervalSince(fixtureReady))
-            let shown = XCTContext.runActivity(named: "Island expand attempt \(attempt), \(elapsed)s after the fixture was ready") { _ in
-                springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.035)).press(forDuration: 1)
-                return content.waitForExistence(timeout: attempt == attempts ? 15 : 8)
-            }
-            if shown { return true }
-            captureActionButton(springboard, name: "Dynamic Island blank after attempt \(attempt)")
-            attachText(springboard.debugDescription, name: "SpringBoard after island attempt \(attempt)")
-            // Tap empty wallpaper to collapse the blank island before trying again.
-            springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6)).tap()
-            Thread.sleep(forTimeInterval: 2)
+        let elapsed = Int(Date().timeIntervalSince(fixtureReady))
+        let shown = XCTContext.runActivity(named: "Island expand, \(elapsed)s after the fixture was ready") { _ in
+            springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.035)).press(forDuration: 1)
+            return content.waitForExistence(timeout: 15)
         }
-        return false
+        if !shown {
+            captureActionButton(springboard, name: "Dynamic Island blank after expand")
+            attachText(springboard.debugDescription, name: "SpringBoard after island expand")
+        }
+        return shown
     }
 
     func testSettingsOpensActionButtonConfiguration() {
