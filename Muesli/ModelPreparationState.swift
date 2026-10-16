@@ -29,6 +29,12 @@ enum ModelPreparationAction: Equatable {
 }
 
 enum ModelPreparationPolicy {
+    /// Progress text for work done on the device (compiling or loading into memory) is
+    /// preparing; anything else reported during a model fetch is the download.
+    static func phase(forProgressDetail detail: String) -> ModelPreparationPhase {
+        ModelProgressText.isOnDeviceWork(detail) ? .preparing : .downloading
+    }
+
     static func action(isDownloaded: Bool) -> ModelPreparationAction {
         isDownloaded ? .warmDownloadedModel : .startBackgroundDownload
     }

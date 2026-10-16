@@ -252,7 +252,7 @@ private enum ModelCatalogState {
         case .downloading:
             "You can leave this screen while the download continues"
         case .preparing:
-            "The downloaded model is being compiled for this device"
+            "The model is already on this iPhone and is being compiled or loaded into memory"
         case .failed:
             "Check your connection, then use the retry option below"
         }

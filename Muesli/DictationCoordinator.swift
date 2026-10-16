@@ -4551,10 +4551,7 @@ final class DictationCoordinator {
         guard selectedTranscriptionModel == model else { return }
         let normalizedProgress = min(max(progress, 0), 1)
         let detail = status ?? "\(Int((normalizedProgress * 100).rounded()))% complete"
-        let phase: ModelPreparationPhase = detail.localizedCaseInsensitiveContains("compil")
-            || detail.localizedCaseInsensitiveContains("prepar")
-            ? .preparing
-            : .downloading
+        let phase = ModelPreparationPolicy.phase(forProgressDetail: detail)
 
         modelPreparation = ModelPreparationState(
             phase: phase,
