@@ -61,16 +61,23 @@ enum AppTelemetryParameterSanitizer {
     }
 }
 
+/// Telemetry is off unless the build explicitly turns it on and supplies its own TelemetryDeck app ID.
 enum AppTelemetryConfiguration {
     static func isEnabled(_ configuredValue: Any?) -> Bool {
         if let enabled = configuredValue as? Bool {
             return enabled
         }
-        guard let configured = configuredValue as? String else {
-            return configuredValue == nil
-        }
+        guard let configured = configuredValue as? String else { return false }
         let normalized = configured.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return ["true", "yes", "1"].contains(normalized)
+    }
+
+    /// The configured app ID, or nil when it is missing, unresolved (`$(...)`) or the `disabled` placeholder.
+    static func appID(_ configuredValue: Any?) -> String? {
+        guard let configured = configuredValue as? String else { return nil }
+        let trimmed = configured.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.hasPrefix("$("), trimmed.lowercased() != "disabled" else { return nil }
+        return trimmed
     }
 }
 
@@ -78,7 +85,6 @@ enum AppTelemetryConfiguration {
 enum AppTelemetry {
     private static let appIDInfoKey = "MuesliTelemetryDeckAppID"
     private static let telemetryEnabledInfoKey = "MuesliTelemetryEnabled"
-    private static let fallbackAppID = "A851C6BD-4F55-41ED-A6BC-DA43C850B069"
     private static var isInitialized = false
 
     static func configure() {
@@ -135,13 +141,11 @@ enum AppTelemetry {
     @discardableResult
     private static func initializeIfNeeded() -> Bool {
         if isInitialized { return true }
-        guard telemetryIsEnabled else { return false }
-
-        let configuredAppID = Bundle.main.object(forInfoDictionaryKey: appIDInfoKey) as? String
-        let trimmedAppID = configuredAppID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let appID = (!trimmedAppID.isEmpty && !trimmedAppID.hasPrefix("$("))
-            ? trimmedAppID
-            : fallbackAppID
+        guard telemetryIsEnabled,
+              let appID = AppTelemetryConfiguration.appID(
+                Bundle.main.object(forInfoDictionaryKey: appIDInfoKey)
+              )
+        else { return false }
 
         TelemetryDeck.initialize(config: .init(appID: appID))
         isInitialized = true
