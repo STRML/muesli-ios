@@ -235,4 +235,83 @@ final class KeyboardTypingModelTests: XCTestCase {
         print("MEASURE footprintMB base=\(base) afterFirstLookup=\(afterFirst) afterWarm=\(afterAll)")
         checker = nil
     }
+
+    // MARK: Autocorrect (phase 2), through the controller and the real UITextChecker
+
+    private func typeKeys(_ text: String) {
+        for character in text {
+            switch character {
+            case " ": controller.typing.perform(.space)
+            case "\n": controller.typing.perform(.returnKey)
+            default: controller.typing.perform(.character(String(character)))
+            }
+        }
+    }
+
+    // Matrix row M1: the real checker, wired through the controller, fixes a typo on space.
+    func testTypingATypoAndSpaceCorrectsItWithTheRealChecker() {
+        typeKeys("I think teh ")
+        XCTAssertEqual(before, "I think the ")
+    }
+
+    // M2: one backspace takes it back, and the same word is left alone afterwards.
+    func testBackspaceUndoesTheCorrectionAndTheWordIsNotCorrectedAgain() {
+        typeKeys("I think teh ")
+        controller.typing.perform(.backspace)
+        XCTAssertEqual(before, "I think teh ")
+        controller.typing.perform(.backspace)
+        typeKeys(" and teh ")
+        XCTAssertEqual(before, "I think teh and teh ")
+    }
+
+    // M3: Autocorrect off in Settings.
+    func testTheSettingOffInTheSharedStoreStopsAutocorrect() throws {
+        try store.saveKeyboardTypingSettings(KeyboardTypingSettings(autocorrect: false))
+        controller.loadTypingSettings()
+        typeKeys("I think teh ")
+        XCTAssertEqual(before, "I think teh ")
+        try store.saveKeyboardTypingSettings(KeyboardTypingSettings(autocorrect: true))
+        controller.loadTypingSettings()
+        typeKeys("and teh ")
+        XCTAssertEqual(before, "I think teh and the ")
+    }
+
+    // M4: nothing published, or the store unreadable (Full Access off): on.
+    func testWithNoPublishedSettingAutocorrectIsOn() {
+        controller.loadTypingSettings()
+        typeKeys("I think teh ")
+        XCTAssertEqual(before, "I think the ")
+    }
+
+    // M5: text Muesli inserted is never corrected; typing after it is.
+    func testDictatedTextIsNeverCorrectedButTypingAfterItIs() throws {
+        controller.insertDictatedText("I said recieve")
+        typeKeys(" ")
+        XCTAssertEqual(before, "I said recieve ")
+        typeKeys("teh ")
+        XCTAssertEqual(before, "I said recieve the ")
+    }
+
+    // M6: the lexicon from Full Access reaches the autocorrector (a text replacement).
+    func testTheLexiconReachesTheAutocorrector() {
+        controller.typing.setLexicon([TypingLexiconEntry(userInput: "omw", documentText: "On my way!")])
+        typeKeys("ok omw ")
+        XCTAssertEqual(before, "ok On my way! ")
+    }
+
+    // M7: email and URL fields.
+    func testAnEmailFieldIsNeverCorrected() {
+        let traits = FakeTraits()
+        traits.keyboardType = .emailAddress
+        controller.typing.hostDidChange(traits: traits)
+        typeKeys("teh ")
+        XCTAssertEqual(before, "teh ")
+    }
+
+    // M8: the strip shows the quoted original right after a correction.
+    func testTheStripOffersTheOriginalAfterACorrection() {
+        typeKeys("I think teh ")
+        XCTAssertEqual(controller.typing.state.suggestions.first?.kind, .original)
+        XCTAssertEqual(controller.typing.state.suggestions.first?.text, "teh")
+    }
 }

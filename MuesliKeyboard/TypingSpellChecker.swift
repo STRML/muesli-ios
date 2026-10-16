@@ -19,6 +19,10 @@ final class UITextCheckerAdapter: TypingSpellChecking {
         return checker.completions(forPartialWordRange: range, in: partial, language: language) ?? []
     }
 
+    func ignore(_ word: String) {
+        checker.ignoreWord(word)
+    }
+
     func guesses(forWord word: String, language: String) -> [String] {
         let range = NSRange(location: 0, length: (word as NSString).length)
         return checker.guesses(forWordRange: range, in: word, language: language) ?? []

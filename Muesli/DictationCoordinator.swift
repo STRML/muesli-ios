@@ -506,6 +506,7 @@ final class DictationCoordinator {
         }
         startSharedEventObservation()
         publishKeyboardModelCatalog()
+        publishKeyboardTypingSettings()
         processPendingKeyboardModelSelection()
         MeetingLiveActivityActionDispatcher.register { [weak self] sessionID in
             guard let self else { return .unavailable }
@@ -3945,6 +3946,19 @@ final class DictationCoordinator {
         default:
             return false
         }
+    }
+
+    func setKeyboardAutocorrectEnabled(_ enabled: Bool) {
+        UserDefaults.standard.set(enabled, forKey: MuesliPreferences.keyboardAutocorrectKey)
+        publishKeyboardTypingSettings()
+    }
+
+    /// Hands the keyboard its typing settings. Without Full Access the keyboard cannot read them and
+    /// autocorrect stays on, its default.
+    private func publishKeyboardTypingSettings() {
+        try? store.saveKeyboardTypingSettings(
+            KeyboardTypingSettings(autocorrect: MuesliPreferences.keyboardAutocorrectEnabled)
+        )
     }
 
     func setKeyboardSessionModeEnabled(_ enabled: Bool) {
@@ -7405,7 +7419,7 @@ final class DictationCoordinator {
                 case .modelSelectionRequested:
                     self.processPendingKeyboardModelSelection()
                 case .handoffStatusChanged, .runtimeStatusChanged, .liveTranscriptChanged,
-                     .modelCatalogChanged, .resultChanged, .ownershipChanged:
+                     .modelCatalogChanged, .resultChanged, .ownershipChanged, .typingSettingsChanged:
                     continue
                 }
             }

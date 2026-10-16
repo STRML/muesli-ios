@@ -30,6 +30,21 @@ final class MuesliPreferencesTests: XCTestCase {
         XCTAssertFalse(MuesliPreferences.keyboardSessionModeEnabled)
     }
 
+    // Matrix row S2: Autocorrect is on until the user turns it off.
+    func testKeyboardAutocorrectDefaultsOnAndKeepsAnExplicitOptOut() {
+        let defaults = UserDefaults.standard
+        let key = MuesliPreferences.keyboardAutocorrectKey
+        let original = defaults.object(forKey: key)
+        defer {
+            if let original { defaults.set(original, forKey: key) }
+            else { defaults.removeObject(forKey: key) }
+        }
+        defaults.removeObject(forKey: key)
+        XCTAssertTrue(MuesliPreferences.keyboardAutocorrectEnabled)
+        defaults.set(false, forKey: key)
+        XCTAssertFalse(MuesliPreferences.keyboardAutocorrectEnabled)
+    }
+
     func testLongVoiceNoteThresholdClampsToSupportedRange() {
         XCTAssertEqual(MuesliPreferences.clampedLongVoiceNoteThreshold(5), 30)
         XCTAssertEqual(MuesliPreferences.clampedLongVoiceNoteThreshold(60), 60)

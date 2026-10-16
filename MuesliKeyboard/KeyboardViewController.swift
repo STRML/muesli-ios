@@ -56,6 +56,7 @@ final class KeyboardViewController: UIInputViewController {
         typingDocument.beforeReader = { [weak self] in self?.textDocumentProxy.documentContextBeforeInput }
         typingDocument.afterReader = { [weak self] in self?.textDocumentProxy.documentContextAfterInput }
         typingDocument.identifierReader = { [weak self] in self?.textDocumentProxy.documentIdentifier }
+        typingDocument.selectionReader = { [weak self] in self?.textDocumentProxy.selectedText }
         controller.inputModeSwitcher = { [weak self] in
             self?.advanceToNextInputMode()
         }
@@ -109,6 +110,7 @@ final class KeyboardViewController: UIInputViewController {
         super.viewWillAppear(animated)
 
         refreshTypingTraits()
+        controller.loadTypingSettings()
         controller.typing.loadLexicon(from: self)
 
         isKeyboardPresented = true

@@ -330,7 +330,7 @@ final class KeyboardController {
             }
 
             guard textInserter != nil else { return }
-            insertText(result.text)
+            insertDictatedText(result.text)
             insertedRequestIDs.insert(result.requestID)
             try store.acknowledgeKeyboardDelivery(for: result.requestID)
             latestResultID = result.id
@@ -603,6 +603,8 @@ final class KeyboardController {
                     self.refreshLiveTranscript()
                 case .handoffStatusChanged, .resultChanged, .ownershipChanged:
                     self.refreshLatestDictation()
+                case .typingSettingsChanged:
+                    self.loadTypingSettings()
                 case .commandChanged, .modelSelectionRequested:
                     break
                 }
@@ -1371,7 +1373,7 @@ final class KeyboardController {
             return
         }
         textDeleter?(deleteCount)
-        insertText(text)
+        insertDictatedText(text)
         statusText = "Undone"
     }
 
@@ -1382,24 +1384,38 @@ final class KeyboardController {
     private func deliver(_ result: DictationResult) -> Bool {
         guard let rewrite = result.rewrite else {
             lastRewrite = nil
-            insertText(result.text)
+            insertDictatedText(result.text)
             return true
         }
         let current = textContextProvider?() ?? KeyboardTextContext()
         switch RewritePlanner.plan(context: rewrite, current: current, rewritten: result.text) {
         case .replaceSelection(let text):
-            insertText(text)
+            insertDictatedText(text)
             lastRewrite = RewriteUndo(original: rewrite.original, rewritten: text)
             return true
         case .replaceBeforeCursor(let deleteCount, let text):
             textDeleter?(deleteCount)
-            insertText(text)
+            insertDictatedText(text)
             lastRewrite = RewriteUndo(original: rewrite.original, rewritten: text)
             return true
         case .stale:
             KeyboardDiagnosticsLog.record("rewrite.skipped", ["reason": "fieldChanged"])
             return false
         }
+    }
+
+    /// Text Muesli writes itself (a transcript, a rewrite, an Undo edit): never autocorrected, and a pending
+    /// autocorrect undo is retired.
+    func insertDictatedText(_ text: String) {
+        insertText(text)
+        typing.engine.noteExternalInsertion()
+    }
+
+    /// Reads the typing settings the app published. Unreadable (Full Access off) or never published means the
+    /// default: autocorrect on.
+    func loadTypingSettings() {
+        let settings = (try? store.keyboardTypingSettings()) ?? nil
+        typing.autocorrectEnabled = (settings ?? .default).autocorrect
     }
 
     private func insertText(_ text: String) {

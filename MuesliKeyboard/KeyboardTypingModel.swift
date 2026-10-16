@@ -9,12 +9,14 @@ final class KeyboardTypingDocument: TypingDocument {
     var beforeReader: @MainActor () -> String? = { nil }
     var afterReader: @MainActor () -> String? = { nil }
     var identifierReader: @MainActor () -> UUID? = { nil }
+    var selectionReader: @MainActor () -> String? = { nil }
     var inserter: @MainActor (String) -> Void = { _ in }
     var backspacer: @MainActor () -> Void = {}
 
     var contextBefore: String? { beforeReader() }
     var contextAfter: String? { afterReader() }
     var documentIdentifier: UUID? { identifierReader() }
+    var selectedText: String? { selectionReader() }
     func insert(_ text: String) { inserter(text) }
     func deleteBackward() { backspacer() }
 }
@@ -28,6 +30,11 @@ private final class TypingLanguageSource {
     }
 }
 
+@MainActor
+private final class AutocorrectSwitch {
+    var isOn = true
+}
+
 /// What the Type page shows and does. A thin Observable shell over `TypingEngine`, which holds the logic.
 @MainActor
 @Observable
@@ -36,24 +43,41 @@ final class KeyboardTypingModel {
     /// Apple asks keyboards to show a globe only when `needsInputModeSwitchKey` says the system draws none; Sam
     /// asked for the key always, so this stays true. One place to change that.
     var showsGlobe = true
+    /// The Autocorrect switch in Settings, as the shared store last said. On until told otherwise.
+    var autocorrectEnabled: Bool {
+        get { autocorrectSwitch.isOn }
+        set { autocorrectSwitch.isOn = newValue }
+    }
 
     @ObservationIgnored let document = KeyboardTypingDocument()
     @ObservationIgnored private let builder: TypingSuggestionBuilder
+    @ObservationIgnored private let autocorrector: TypingAutocorrector
     @ObservationIgnored private(set) var engine: TypingEngine!
     @ObservationIgnored private var hasRequestedLexicon = false
     @ObservationIgnored private let languageSource = TypingLanguageSource()
+    @ObservationIgnored private let autocorrectSwitch = AutocorrectSwitch()
 
     init() {
         let languages = languageSource
+        let autocorrectSwitch = autocorrectSwitch
         builder = TypingSuggestionBuilder(
             makeChecker: { UITextCheckerAdapter() },
             languageCandidates: { languages.candidates }
         )
+        let builder = builder
         let engine = TypingEngine(
             document: document,
             suggestionSource: builder,
             now: { ProcessInfo.processInfo.systemUptime }
         )
+        autocorrector = TypingAutocorrector(
+            checker: { builder.currentChecker() },
+            languageCandidates: { languages.candidates },
+            traits: { [weak engine] in engine?.state.traits ?? TypingTraits() },
+            isEnabled: { autocorrectSwitch.isOn },
+            ignoreWord: { builder.ignore($0) }
+        )
+        engine.completionHandler = autocorrector
         engine.onChange = { [weak self] in self?.state = $0 }
         self.engine = engine
         state = engine.state
@@ -81,16 +105,23 @@ final class KeyboardTypingModel {
                 TypingLexiconEntry(userInput: $0.userInput, documentText: $0.documentText)
             }
             Task { @MainActor in
-                self?.builder.setLexicon(entries)
-                self?.engine.documentDidChange()
+                self?.setLexicon(entries)
             }
         }
+    }
+
+    /// The strip gets a capped copy; the autocorrector keeps every entry so no contact is ever "corrected".
+    func setLexicon(_ entries: [TypingLexiconEntry]) {
+        builder.setLexicon(entries)
+        autocorrector.setLexicon(entries)
+        engine.documentDidChange()
     }
 
     /// Drop the checker and lexicon when the keyboard goes away or memory is tight.
     func releaseMemory() {
         builder.documentDidChange()
         builder.setLexicon([])
+        autocorrector.setLexicon([])
         hasRequestedLexicon = false
     }
 

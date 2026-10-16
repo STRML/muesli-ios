@@ -8,6 +8,7 @@ enum CrossProcessEvent: String, CaseIterable, Sendable {
     case liveTranscriptChanged = "live-transcript.changed"
     case modelCatalogChanged = "model-catalog.changed"
     case modelSelectionRequested = "model-selection.requested"
+    case typingSettingsChanged = "typing-settings.changed"
     case resultChanged = "result.changed"
     case ownershipChanged = "ownership.changed"
 

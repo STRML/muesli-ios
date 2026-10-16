@@ -1571,6 +1571,22 @@ final class SharedStoreTests: XCTestCase {
         XCTAssertNil(try store.keyboardModelSelectionRequest())
     }
 
+    // Matrix row S1: the Autocorrect setting reaches the keyboard through the shared store.
+    func testKeyboardTypingSettingsRoundTripAndPostAnEvent() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("muesli-store-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let bus = StubEventBus()
+        let store = SharedStore(containerURL: directory, eventPoster: bus)
+
+        XCTAssertNil(try store.keyboardTypingSettings(), "nothing published yet")
+        try store.saveKeyboardTypingSettings(KeyboardTypingSettings(autocorrect: false))
+        XCTAssertEqual(try store.keyboardTypingSettings(), KeyboardTypingSettings(autocorrect: false))
+        XCTAssertTrue(bus.postedEvents.contains(.typingSettingsChanged))
+        try store.saveKeyboardTypingSettings(KeyboardTypingSettings(autocorrect: true))
+        XCTAssertEqual(try store.keyboardTypingSettings()?.autocorrect, true)
+    }
+
     func testSavingPendingRequestDoesNotOverwriteStatus() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("muesli-store-\(UUID().uuidString)", isDirectory: true)
