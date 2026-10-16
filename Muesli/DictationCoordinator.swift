@@ -5498,13 +5498,41 @@ final class DictationCoordinator {
                     isLongForm: (activeSession ?? session)?.isLongForm == true,
                     timeoutError: VoiceNoteRetryError.timeout
                 ) {
-                    let outcome = try await self.runKeyboardTranscriptionJob(
-                        audioURL: audioURL,
-                        request: request,
-                        startedFromKeyboard: startedFromKeyboard,
-                        source: (self.activeSession ?? session)?.source
-                    )
-                    guard case .completed(let transcription) = outcome else { return nil }
+                    // With streaming text to fall back to, the policy swallows this pass's failure; record why here.
+                    let fallsBackToStream = !realtimeText.isEmpty
+                    let outcome: OfflineTranscriptionJobOutcome<RemoteTranscriptionOrchestrator.Outcome>
+                    do {
+                        outcome = try await self.runKeyboardTranscriptionJob(
+                            audioURL: audioURL,
+                            request: request,
+                            startedFromKeyboard: startedFromKeyboard,
+                            source: (self.activeSession ?? session)?.source
+                        )
+                    } catch {
+                        if fallsBackToStream, !(error is CancellationError) {
+                            AppTelemetry.failure(
+                                "dictation_final_pass_failed",
+                                domain: .transcription,
+                                stage: "final_pass",
+                                error: error,
+                                parameters: ["engine": self.engine.identifier, "fallback": "streaming"]
+                            )
+                        }
+                        throw error
+                    }
+                    guard case .completed(let transcription) = outcome else {
+                        if fallsBackToStream {
+                            AppTelemetry.failure(
+                                "dictation_final_pass_failed",
+                                domain: .transcription,
+                                stage: "final_pass_timeout",
+                                error: VoiceNoteRetryError.timeout,
+                                isTimeout: true,
+                                parameters: ["engine": self.engine.identifier, "fallback": "streaming"]
+                            )
+                        }
+                        return nil
+                    }
                     return FinalTextPolicy.FinalPass(
                         text: self.postProcessTranscript(transcription.text),
                         isRemote: transcription.source == .remote
