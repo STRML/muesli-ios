@@ -105,6 +105,7 @@ final class KeyboardViewController: UIInputViewController {
         super.viewWillAppear(animated)
 
         isKeyboardPresented = true
+        refreshHostBundleID()
         hasEnteredAppearance = true
         hasActivatedKeyboardRuntime = false
         stableGeometryFrameCount = 0
@@ -133,6 +134,20 @@ final class KeyboardViewController: UIInputViewController {
               laidOutWidth > 0,
               abs(laidOutWidth - launchSnapshotWidth) > 1 else { return }
         refreshLaunchSnapshot()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        // The parent is attached by now on some iOS versions even if it was not in viewWillAppear.
+        refreshHostBundleID()
+    }
+
+    private func refreshHostBundleID() {
+        #if DEBUG
+        HostAppDiscovery.dumpRelatedMembers(of: self, label: "self")
+        if let parent { HostAppDiscovery.dumpRelatedMembers(of: parent, label: "parent") }
+        #endif
+        controller.hostBundleID = HostAppDiscovery.discover(from: self)
     }
 
     override func viewWillDisappear(_ animated: Bool) {

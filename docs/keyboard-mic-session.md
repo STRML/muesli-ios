@@ -3,7 +3,7 @@
 Keyboard dictation starts an app-owned microphone session when persistence is
 enabled (the default). The first activation opens Muesli; the user returns to the
 host app manually. Subsequent dictations use the running microphone without
-switching apps. Automatic app return is outside this change.
+switching apps. Automatic app return is outside this change, except for the opt-in spike below.
 
 ## Controls and preference
 
@@ -192,3 +192,16 @@ Partials come from Parakeet Realtime EOU 120M (`LivePreviewEnginePolicy`):
   the model, or removing EOU, releases the dedicated copy.
 - Its text is only ever the preview and the short-dictation fallback. A long voice note
   streamed by it still gets the selected model's pass, as before.
+
+## Return to the previous app (spike, default off)
+
+Settings > "Return to the previous app after starting". When on, and the keyboard could identify the host app,
+the launch URL carries `host=<bundle id>`. After the recording session is confirmed started
+(`startRecording` completion `.started`), the app looks the id up in `HostAppReturn.table` and calls
+`UIApplication.open` on that app's URL scheme. Unknown or malformed host, setting off, a URL without `host`, or a
+refused open all do nothing, which is the previous behaviour. Starting the recording never waits on it.
+
+The host id comes from private state of the input view controller (`HostAppDiscovery`), which is an App Store
+review risk (guideline 2.5.1). Each probe is logged as `host_probe` in the keyboard diagnostics. Table entries are
+marked `verified: false` until opened on a device. Safari has no scheme that opens it without navigating, so it is
+not in the table.

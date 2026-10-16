@@ -34,6 +34,8 @@ enum MuesliAppConstants {
     static let requestQueryItem = "request"
     static let actionQueryItem = "action"
     static let sourceQueryItem = "source"
+    /// Bundle id of the app the keyboard is typing into, so the app can send the user back after starting.
+    static let hostQueryItem = HostAppReturn.hostQueryItem
     static let startAction = "start"
     static let stopAction = "stop"
     static let cancelAction = "cancel"

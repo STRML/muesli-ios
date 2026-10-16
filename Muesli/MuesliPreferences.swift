@@ -7,6 +7,7 @@ enum MuesliPreferences {
     static let liveActivitiesForMeetingsKey = "muesli.liveActivities.meetings"
 
     static let keyboardSessionModeKey = "muesli.keyboardSession.enabled"
+    static let returnToHostAppKey = "muesli.keyboardSession.returnToPreviousApp"
     static let keyboardMicAutoOffMinutesKey = "muesli.keyboardSession.autoOffMinutes"
     static let retiredKeyboardSessionModeKey = "muesli.keyboardSession.keepReadyBetweenDictations"
 
@@ -69,6 +70,11 @@ enum MuesliPreferences {
 
     static var keyboardSessionModeEnabled: Bool {
         bool(for: keyboardSessionModeKey, defaultValue: true)
+    }
+
+    /// Off by default: after a keyboard-started recording is running, switch back to the app the user was in.
+    static var returnToHostAppEnabled: Bool {
+        bool(for: returnToHostAppKey, defaultValue: false)
     }
 
     static var fillerWordRemovalEnabled: Bool {

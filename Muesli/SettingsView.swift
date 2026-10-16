@@ -11,6 +11,7 @@ struct SettingsView: View {
     @AppStorage(MuesliPreferences.liveActivitiesForDictationsKey) private var liveActivitiesForDictations = true
     @AppStorage(MuesliPreferences.liveActivitiesForMeetingsKey) private var liveActivitiesForMeetings = true
     @AppStorage(MuesliPreferences.keyboardSessionModeKey) private var keyboardSessionMode = true
+    @AppStorage(MuesliPreferences.returnToHostAppKey) private var returnToHostApp = false
     @AppStorage(MuesliPreferences.keyboardMicAutoOffMinutesKey) private var keyboardMicAutoOffMinutes = KeyboardMicAutoOff.defaultMinutes
     @AppStorage(MuesliPreferences.recordingMicrophonePreferenceKey) private var microphonePreference = RecordingMicrophonePreference.automatic.rawValue
     @AppStorage(MuesliPreferences.keepDictationAudioRecordingsKey) private var keepDictationAudioRecordings = false
@@ -309,6 +310,13 @@ struct SettingsView: View {
                         }
                         .frame(minHeight: 44)
                     }
+                    Divider().overlay(MuesliTheme.surfaceBorder)
+                    SettingsToggleRow(
+                        icon: "arrow.uturn.backward",
+                        title: "Return to the previous app after starting",
+                        detail: "After the keyboard starts a recording, switch back to the app you were typing in. Works only for apps Muesli recognizes; otherwise swipe back as usual.",
+                        isOn: $returnToHostApp
+                    )
                     Divider().overlay(MuesliTheme.surfaceBorder)
                     SettingsKeyboardMicAutoOffRow(
                         minutes: keyboardMicAutoOffBinding,

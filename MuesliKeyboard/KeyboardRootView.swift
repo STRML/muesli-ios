@@ -208,7 +208,7 @@ struct KeyboardRootView: View {
 
     @ViewBuilder
     private var primaryPill: some View {
-        if controller.opensMuesliFromPrimaryButton, let launchURL = controller.launchURL {
+        if controller.opensMuesliFromPrimaryButton, let launchURL = controller.launchURLForCurrentHost {
             Link(destination: launchURL) { pillLabel }
                 .simultaneousGesture(TapGesture().onEnded {
                     controller.primaryLaunchAction()

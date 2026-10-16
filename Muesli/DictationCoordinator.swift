@@ -1504,7 +1504,30 @@ final class DictationCoordinator {
         if recoverKeyboardRequestIfNeeded(request) {
             return
         }
-        startRecording(for: request, source: "keyboard")
+        let hostBundleID = HostAppReturn.hostBundleID(in: url)
+        startRecording(for: request, source: "keyboard") { [weak self] outcome in
+            guard case .started = outcome else { return }
+            self?.returnToHostApp(hostBundleID: hostBundleID)
+        }
+    }
+
+    /// Spike: after the session is confirmed started, switch back to the app the keyboard was in. Fire and forget:
+    /// an unknown host, the setting being off, or a refused open all leave the user where they are today.
+    private func returnToHostApp(hostBundleID: String?) {
+        let url = HostAppReturn.returnURL(
+            forHost: hostBundleID,
+            enabled: MuesliPreferences.returnToHostAppEnabled,
+            ownBundleIDs: [MuesliAppConstants.bundleIdentifier]
+        )
+        KeyboardDiagnosticsLog.record("host_return", [
+            "host": hostBundleID ?? "nil",
+            "url_scheme": url?.scheme ?? "none",
+            "enabled": String(MuesliPreferences.returnToHostAppEnabled)
+        ])
+        guard let url else { return }
+        UIApplication.shared.open(url, options: [:]) { opened in
+            KeyboardDiagnosticsLog.record("host_return_result", ["opened": String(opened), "url_scheme": url.scheme ?? ""])
+        }
     }
 
     func recordCaptureLifecycle(_ event: String) {
@@ -1785,10 +1808,13 @@ final class DictationCoordinator {
 
     #if DEBUG
     private func handleDebugURL(_ url: URL) -> Bool {
-        guard url.scheme == MuesliAppConstants.urlScheme,
-              url.host == MuesliAppConstants.debugHost,
-              url.path == MuesliAppConstants.resetOnboardingPath
-        else { return false }
+        guard url.scheme == MuesliAppConstants.urlScheme, url.host == MuesliAppConstants.debugHost else { return false }
+        if url.path == "/return-host" {
+            // Exercises the return step alone, without a recording (the spike's simulator check).
+            returnToHostApp(hostBundleID: HostAppReturn.hostBundleID(in: url))
+            return true
+        }
+        guard url.path == MuesliAppConstants.resetOnboardingPath else { return false }
 
         resetOnboardingForTesting()
         return true
