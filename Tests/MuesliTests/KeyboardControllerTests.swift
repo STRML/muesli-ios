@@ -414,6 +414,81 @@ final class KeyboardControllerTests: XCTestCase {
         XCTAssertFalse(controller.showsActiveWaveform)
     }
 
+    // MARK: - Two-pass preview
+
+    private func streamPartials(_ partials: [String]) throws {
+        for partial in partials {
+            try store.saveKeyboardLiveTranscript(.init(requestID: requestID, text: partial, isFinal: false))
+            controller.prepareInitialPresentationState()
+        }
+    }
+
+    func testLivePartialsAreNeverInsertedAndOnlyTheFinalTextIsInsertedOnce() throws {
+        try store.claimRequest(.init(id: requestID))
+        try store.saveKeyboardRuntimeStatus(recordingStatus(level: 0.4))
+        try store.saveKeyboardHandoffState(handoff(.recordingStarted))
+        controller.prepareInitialPresentationState()
+        try streamPartials(["hello", "hello world", "hello world how are"])
+        XCTAssertEqual(controller.livePreview, .init(text: "hello world how are", phase: .listening))
+        XCTAssertNotNil(controller.recordingStartedAt)
+        XCTAssertTrue(insertedText.isEmpty, "a partial reached the host field")
+
+        try store.saveKeyboardHandoffState(handoff(.transcribingStarted))
+        controller.prepareInitialPresentationState()
+        XCTAssertEqual(controller.livePreview, .init(text: "hello world how are", phase: .finalizing))
+        XCTAssertTrue(insertedText.isEmpty)
+
+        // What deliverKeyboardTranscript writes: the final text as isFinal, then resultReady.
+        try store.saveKeyboardLiveTranscript(.init(requestID: requestID, text: "Hello world, how are you?", isFinal: true))
+        controller.prepareInitialPresentationState()
+        XCTAssertNotEqual(controller.livePreview?.text, "Hello world, how are you?", "the final text flashed as a preview")
+        try store.saveResult(.init(requestID: requestID, text: "Hello world, how are you?", engineIdentifier: "test"))
+        try store.saveKeyboardHandoffState(handoff(.resultReady))
+        controller.prepareInitialPresentationState()
+        controller.prepareInitialPresentationState()
+        XCTAssertEqual(insertedText, ["Hello world, how are you?"])
+        XCTAssertNil(controller.livePreview)
+    }
+
+    func testCancellingClearsThePreviewAndInsertsNothing() throws {
+        try store.claimRequest(.init(id: requestID))
+        try store.saveKeyboardRuntimeStatus(recordingStatus(level: 0.4))
+        try store.saveKeyboardHandoffState(handoff(.recordingStarted))
+        controller.prepareInitialPresentationState()
+        try streamPartials(["do not keep this"])
+        XCTAssertNotNil(controller.livePreview)
+        controller.cancelActiveDictation()
+        defer { controller.stopObservingSharedState() }
+        try store.clearPendingCommand()
+        try store.saveKeyboardHandoffState(handoff(.cancelled))
+        controller.prepareInitialPresentationState()
+        XCTAssertNil(controller.livePreview)
+        XCTAssertTrue(insertedText.isEmpty)
+    }
+
+    // Keyboard hidden at completion: the app copies instead (copyRequired). The preview clears, nothing is inserted.
+    func testClipboardFallbackClearsThePreviewWithoutInserting() throws {
+        try store.claimRequest(.init(id: requestID))
+        try store.saveKeyboardRuntimeStatus(recordingStatus(level: 0.4))
+        try store.saveKeyboardHandoffState(handoff(.recordingStarted))
+        controller.prepareInitialPresentationState()
+        try streamPartials(["copied instead"])
+        try store.saveResult(.init(requestID: requestID, text: "Copied instead.", engineIdentifier: "test"))
+        try store.saveKeyboardHandoffState(handoff(.copyRequired))
+        controller.prepareInitialPresentationState()
+        XCTAssertNil(controller.livePreview)
+        XCTAssertTrue(insertedText.isEmpty)
+    }
+
+    // Full Access off: the App Group is unreachable, so there is no preview and nothing to insert.
+    func testWithoutSharedStoreAccessThereIsNoPreview() throws {
+        breakSharedStore()
+        controller.currentFullAccess = { false }
+        controller.prepareInitialPresentationState()
+        XCTAssertNil(controller.livePreview)
+        XCTAssertTrue(insertedText.isEmpty)
+    }
+
     // MARK: - Insertion
 
     func testCopyRequiredResultDoesNotInsertIntoANewKeyboardField() throws {

@@ -5387,7 +5387,19 @@ final class DictationCoordinator {
                     }
                     audioURL = retainedAudioURL
                     if usesRealtimeStreaming {
-                        realtimeText = postProcessTranscript(try await engine.finishRealtimeSession())
+                        // The stream is a preview and a fallback; losing it must not cost the final pass.
+                        do {
+                            realtimeText = postProcessTranscript(try await engine.finishRealtimeSession())
+                        } catch {
+                            AppTelemetry.failure(
+                                "realtime_dictation_finish_failed",
+                                domain: .transcription,
+                                stage: "streaming_finish",
+                                error: error,
+                                parameters: ["surface": "dictation"]
+                            )
+                            realtimeText = postProcessTranscript(liveDictationTranscript)
+                        }
                     }
                 } else {
                     audioURL = try recorder.stop()
@@ -5476,24 +5488,31 @@ final class DictationCoordinator {
                     )
                 }
 
-                let text: String
-                var transcriptEngineIdentifier = engine.identifier
-                if realtimeText.isEmpty {
-                    let outcome = try await runKeyboardTranscriptionJob(
+                // Two passes: the streaming text was only a preview. The full-clip pass (on-device beside the
+                // remote endpoint) is inserted; the stream is the fallback when that pass fails or comes back empty.
+                let decision = try await FinalTextPolicy.resolve(
+                    streamingText: realtimeText,
+                    isLongForm: (activeSession ?? session)?.isLongForm == true,
+                    timeoutError: VoiceNoteRetryError.timeout
+                ) {
+                    let outcome = try await self.runKeyboardTranscriptionJob(
                         audioURL: audioURL,
                         request: request,
                         startedFromKeyboard: startedFromKeyboard,
-                        source: (activeSession ?? session)?.source
+                        source: (self.activeSession ?? session)?.source
                     )
-                    guard case .completed(let transcription) = outcome else {
-                        throw VoiceNoteRetryError.timeout
-                    }
-                    if transcription.source == .remote {
-                        transcriptEngineIdentifier = RemoteTranscriptionService.engineIdentifier
-                    }
-                    text = postProcessTranscript(transcription.text)
-                } else {
-                    text = realtimeText
+                    guard case .completed(let transcription) = outcome else { return nil }
+                    return FinalTextPolicy.FinalPass(
+                        text: self.postProcessTranscript(transcription.text),
+                        isRemote: transcription.source == .remote
+                    )
+                }
+                let text = decision.text
+                let transcriptEngineIdentifier = decision.source == .finalPass(isRemote: true)
+                    ? RemoteTranscriptionService.engineIdentifier
+                    : engine.identifier
+                if decision.source == .streaming {
+                    KeyboardDiagnosticsLog.record("dictation.finalText", ["source": "streaming"])
                 }
                 if let currentSession = activeSession ?? session {
                     guard let lifecycleRunnerID,

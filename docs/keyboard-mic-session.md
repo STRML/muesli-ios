@@ -161,3 +161,22 @@ Startup uses the normal recorder path; saved experimental preferences are no lon
 Failed recorder startup discards only that attempt's audio files. The session
 checkpoint manifest must survive retries so Stop can finalize the successful
 attempt. Full recording cancellation still removes the checkpoint directory.
+
+## Two-pass dictation
+
+When the streaming model produces partials, the keyboard shows them in a one-line
+preview in the status line under the controls: gray, truncated from the left so the
+newest words stay visible, with the recording dot and elapsed time. The preview is
+never written to the host field.
+
+On release the full-clip pass always runs (`runKeyboardTranscriptionJob`: on-device
+beside the remote endpoint inside its budget), and only its text is inserted, once.
+The preview dims with a shimmer meanwhile and clears when the result lands.
+`FinalTextPolicy` falls back to the streaming text when that pass fails, times out
+or comes back empty. When both are empty nothing is inserted. Cancellation never
+falls back. A long voice note keeps its streaming text without a second pass, and
+notepad bursts keep their own path.
+
+Partials exist only when the selected model streams (Parakeet Realtime EOU) and the
+capture uses the checkpointing recorder. Persistent keyboard mic segments
+(`KeyboardSessionKeeper`) do not stream yet, so they show no preview.
