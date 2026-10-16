@@ -54,6 +54,12 @@ final class KeyboardController {
     }
     private(set) var recordingStartedAt: Date?
     var launchURL: URL?
+    /// Bundle id of the app this keyboard is typing into, when the host could be identified. Set by the view controller.
+    var hostBundleID: String?
+    /// The launch URL as the Link should open it: carries the host id when known.
+    var launchURLForCurrentHost: URL? {
+        launchURL.map { HostAppReturn.appendingHost(hostBundleID, to: $0) }
+    }
     var textInserter: (@MainActor (String) -> Void)?
     var textDeleter: (@MainActor (Int) -> Void)?
     /// What the host field holds around the cursor, read when Quill is tapped and again before a rewrite is applied.
