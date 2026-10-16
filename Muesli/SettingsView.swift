@@ -18,7 +18,7 @@ struct SettingsView: View {
     @AppStorage(MuesliPreferences.longVoiceNoteThresholdSecondsKey) private var longVoiceNoteThresholdSeconds = 60
     @AppStorage(MuesliPreferences.keepMeetingAudioRecordingsKey) private var keepMeetingAudioRecordings = false
     @AppStorage(MuesliPreferences.meetingSummariesEnabledKey) private var meetingSummariesEnabled = false
-    @AppStorage(MuesliPreferences.meetingSummaryBackendKey) private var meetingSummaryBackend = MeetingSummaryBackend.openRouter.rawValue
+    @AppStorage(MuesliPreferences.meetingSummaryBackendKey) private var meetingSummaryBackend = MeetingSummaryBackend.defaultBackend.rawValue
     @AppStorage(MuesliPreferences.openRouterModelKey) private var openRouterModel = MeetingSummaryBackend.defaultOpenRouterModel
     @AppStorage(MuesliPreferences.chatGPTModelKey) private var chatGPTModel = MeetingSummaryBackend.defaultChatGPTModel
     @AppStorage(MuesliPreferences.customLLMBaseURLKey) private var customLLMBaseURL = ""
@@ -665,6 +665,11 @@ struct SettingsView: View {
                 .pickerStyle(.segmented)
                 .disabled(!meetingSummariesEnabled)
 
+                Text(selectedSummaryBackend.dataDestinationNote)
+                    .font(MuesliTheme.caption())
+                    .foregroundStyle(MuesliTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
                 if selectedSummaryBackend == .openRouter {
                     SettingsTextFieldRow(
                         icon: "key",
@@ -683,7 +688,7 @@ struct SettingsView: View {
                     )
                     .disabled(!meetingSummariesEnabled)
                 } else if selectedSummaryBackend == .customLLM {
-                    Text("Any OpenAI-compatible server, for example your own over Tailscale. Notes and titles are sent only to this address. Quill uses the same server.")
+                    Text("Any OpenAI-compatible server, for example your own over Tailscale. Quill uses the same server.")
                         .font(MuesliTheme.caption())
                         .foregroundStyle(MuesliTheme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -823,7 +828,7 @@ struct SettingsView: View {
     }
 
     private var selectedSummaryBackend: MeetingSummaryBackend {
-        MeetingSummaryBackend(rawValue: meetingSummaryBackend) ?? .openRouter
+        MeetingSummaryBackend(rawValue: meetingSummaryBackend) ?? .defaultBackend
     }
 
     private func refreshSummarySettings() {

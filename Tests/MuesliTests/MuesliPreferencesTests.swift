@@ -78,6 +78,46 @@ final class MuesliPreferencesTests: XCTestCase {
         XCTAssertFalse(MuesliPreferences.liveActivitiesForMeetingsEnabled)
     }
 
+    func testNewInstallsDefaultToCustomLLMAndASavedBackendStillWins() {
+        let defaults = UserDefaults.standard
+        let key = MuesliPreferences.meetingSummaryBackendKey
+        let originalValue = defaults.object(forKey: key)
+        defer {
+            if let originalValue {
+                defaults.set(originalValue, forKey: key)
+            } else {
+                defaults.removeObject(forKey: key)
+            }
+        }
+
+        defaults.removeObject(forKey: key)
+        XCTAssertEqual(MuesliPreferences.meetingSummaryBackend, .customLLM)
+
+        defaults.set("not-a-backend", forKey: key)
+        XCTAssertEqual(MuesliPreferences.meetingSummaryBackend, .customLLM)
+
+        defaults.set(MeetingSummaryBackend.openRouter.rawValue, forKey: key)
+        XCTAssertEqual(MuesliPreferences.meetingSummaryBackend, .openRouter)
+
+        defaults.set(MeetingSummaryBackend.chatGPT.rawValue, forKey: key)
+        XCTAssertEqual(MuesliPreferences.meetingSummaryBackend, .chatGPT)
+    }
+
+    func testEveryCloudSummaryBackendSaysWhereTranscriptsGo() {
+        XCTAssertEqual(
+            MeetingSummaryBackend.openRouter.dataDestinationNote,
+            "Meeting transcripts and your notes are sent to OpenRouter and the model provider you pick."
+        )
+        XCTAssertEqual(
+            MeetingSummaryBackend.chatGPT.dataDestinationNote,
+            "Meeting transcripts and your notes are sent to OpenAI through your ChatGPT account."
+        )
+        XCTAssertEqual(
+            MeetingSummaryBackend.customLLM.dataDestinationNote,
+            "Meeting transcripts and your notes are sent only to this address."
+        )
+    }
+
     func testOpenRouterModelReturnsCustomStoredValue() {
         let defaults = UserDefaults.standard
         let originalValue = defaults.object(forKey: MuesliPreferences.openRouterModelKey)

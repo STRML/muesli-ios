@@ -816,7 +816,7 @@ struct OnboardingView: View {
                 Text("Meeting Summaries")
                     .font(MuesliTheme.title1())
                     .foregroundStyle(MuesliTheme.textPrimary)
-                Text("Connect ChatGPT, OpenRouter or your own server now so meeting recordings can become structured notes after local transcription and diarization.")
+                Text("Connect ChatGPT, OpenRouter or your own server now so meeting recordings can become structured notes after local transcription and diarization. Summaries send meeting text off the phone, to the provider you pick.")
                     .font(MuesliTheme.body())
                     .foregroundStyle(MuesliTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -845,6 +845,11 @@ struct OnboardingView: View {
                     }
                     .pickerStyle(.segmented)
                     .disabled(!meetingSummariesEnabled)
+
+                    Text(summaryBackend.dataDestinationNote)
+                        .font(MuesliTheme.caption())
+                        .foregroundStyle(MuesliTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
 
                     switch summaryBackend {
                     case .chatGPT:
@@ -956,7 +961,7 @@ struct OnboardingView: View {
 
     private var customLLMSummarySetup: some View {
         VStack(alignment: .leading, spacing: MuesliTheme.spacing12) {
-            Text("Any OpenAI-compatible server, for example your own over Tailscale. Notes and titles are sent only to this address.")
+            Text("Any OpenAI-compatible server, for example your own over Tailscale.")
                 .font(MuesliTheme.caption())
                 .foregroundStyle(MuesliTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
