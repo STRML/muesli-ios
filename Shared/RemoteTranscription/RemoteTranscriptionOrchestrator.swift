@@ -13,6 +13,9 @@ struct RemoteTranscriptionOrchestrator: Sendable {
     typealias Prewarm = @Sendable () async -> Void
     typealias Log = @Sendable (String) -> Void
     typealias Invalidate = @Sendable () async -> Void
+    /// Waits this many seconds, throwing if cancelled. Every wait the orchestrator schedules goes through here, so a
+    /// test can record the delays and release them by hand instead of racing the wall clock.
+    typealias Sleep = @Sendable (TimeInterval) async throws -> Void
 
     enum Source: Sendable, Equatable { case onDevice, remote }
 
@@ -35,6 +38,7 @@ struct RemoteTranscriptionOrchestrator: Sendable {
     let prewarm: Prewarm
     let log: Log
     let invalidateProbe: Invalidate
+    let sleep: Sleep
 
     init(
         timing: RemoteTranscriptionTiming = .standard,
@@ -42,7 +46,8 @@ struct RemoteTranscriptionOrchestrator: Sendable {
         upload: @escaping Upload,
         prewarm: @escaping Prewarm = {},
         log: @escaping Log = { _ in },
-        invalidateProbe: @escaping Invalidate = {}
+        invalidateProbe: @escaping Invalidate = {},
+        sleep: @escaping Sleep = { try await Task.sleep(for: .seconds($0)) }
     ) {
         self.timing = timing
         self.probe = probe
@@ -50,6 +55,7 @@ struct RemoteTranscriptionOrchestrator: Sendable {
         self.prewarm = prewarm
         self.log = log
         self.invalidateProbe = invalidateProbe
+        self.sleep = sleep
     }
 
     /// Call when recording starts, so the probe has an answer by the time it ends. Sends nothing for a request that
@@ -69,10 +75,10 @@ struct RemoteTranscriptionOrchestrator: Sendable {
         }
 
         let (stream, events) = AsyncStream<Event>.makeStream()
-        let deadline = ContinuousClock.now + .seconds(timing.resultBudget)
+        let budget = timing.resultBudget
         let grace = timing.unresolvedProbeGrace
         let threshold = timing.probeThreshold
-        let (probe, upload, log, invalidateProbe) = (self.probe, self.upload, self.log, self.invalidateProbe)
+        let (probe, upload, log, invalidateProbe, sleep) = (self.probe, self.upload, self.log, self.invalidateProbe, self.sleep)
 
         let localTask = Task {
             do { events.yield(.local(.success(try await local()))) } catch { events.yield(.local(.failure(error))) }
@@ -101,7 +107,7 @@ struct RemoteTranscriptionOrchestrator: Sendable {
             }
         }
         let deadlineTask = Task {
-            try? await Task.sleep(until: deadline, clock: .continuous)
+            try? await sleep(budget)
             if !Task.isCancelled { events.yield(.deadline) }
         }
         var graceTask: Task<Void, Never>?
@@ -132,7 +138,7 @@ struct RemoteTranscriptionOrchestrator: Sendable {
                 localResult = result
                 if !remoteIsOver, !probeIsResolved {
                     graceTask = Task {
-                        try? await Task.sleep(for: .seconds(grace))
+                        try? await sleep(grace)
                         if !Task.isCancelled { events.yield(.graceExpired) }
                     }
                 }
