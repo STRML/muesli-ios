@@ -173,9 +173,14 @@ enum MuesliPreferences {
         CustomLLMEndpoint.transcriptionsURL(from: customLLMBaseURL) != nil
     }
 
-    /// The setting counts only while a Custom LLM endpoint is set; a choice left over from a removed endpoint is ignored.
+    /// The setting counts only while a Custom LLM endpoint is set and Custom LLM is the summary backend, where its
+    /// checkbox lives; a choice left over from a removed endpoint or another backend is ignored.
     static var isRemoteProcessingActive: Bool {
-        remoteProcessingEnabled && hasCustomLLMEndpoint
+        RemoteTranscriptionPolicy.isSettingActive(
+            stored: remoteProcessingEnabled,
+            endpointConfigured: hasCustomLLMEndpoint,
+            summaryBackendIsCustomLLM: meetingSummaryBackend == .customLLM
+        )
     }
 
     /// Voice rewrite runs on the Custom LLM, so it is offered only when one is set up.

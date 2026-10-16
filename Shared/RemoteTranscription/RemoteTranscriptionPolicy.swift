@@ -85,6 +85,12 @@ enum RemoteTranscriptionPolicy {
         endpointConfigured
     }
 
+    /// The stored choice counts only while its checkbox can be seen: Settings shows it under the Custom LLM summary
+    /// backend, so switching to another backend must stop uploads rather than hide a setting that keeps sending audio.
+    static func isSettingActive(stored: Bool, endpointConfigured: Bool, summaryBackendIsCustomLLM: Bool) -> Bool {
+        stored && endpointConfigured && summaryBackendIsCustomLLM
+    }
+
     static func keyboardBanner(remoteProcessingEnabled: Bool, hasFullAccess: Bool) -> String? {
         remoteProcessingEnabled && !hasFullAccess ? fullAccessBanner : nil
     }

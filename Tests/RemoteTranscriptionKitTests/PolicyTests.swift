@@ -26,6 +26,13 @@ final class PolicyTests: XCTestCase {
         XCTAssertEqual(RemoteTranscriptionPolicy.eligibility(for: context(enabled: true, endpoint: false)), .skip(.noEndpoint))
     }
 
+    func testRow15SwitchingAwayFromCustomLLMStopsUploadsTheHiddenCheckboxWouldKeepSending() {
+        XCTAssertTrue(RemoteTranscriptionPolicy.isSettingActive(stored: true, endpointConfigured: true, summaryBackendIsCustomLLM: true))
+        XCTAssertFalse(RemoteTranscriptionPolicy.isSettingActive(stored: true, endpointConfigured: true, summaryBackendIsCustomLLM: false))
+        XCTAssertFalse(RemoteTranscriptionPolicy.isSettingActive(stored: true, endpointConfigured: false, summaryBackendIsCustomLLM: true))
+        XCTAssertFalse(RemoteTranscriptionPolicy.isSettingActive(stored: false, endpointConfigured: true, summaryBackendIsCustomLLM: true))
+    }
+
     func testRow02CheckboxIsShownOnlyWhenAnEndpointIsSet() {
         XCTAssertTrue(RemoteTranscriptionPolicy.showsCheckbox(endpointConfigured: true))
         XCTAssertFalse(RemoteTranscriptionPolicy.showsCheckbox(endpointConfigured: false))

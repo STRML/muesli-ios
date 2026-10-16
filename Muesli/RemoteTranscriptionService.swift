@@ -46,7 +46,7 @@ actor RemoteTranscriptionService {
 
     private static func context(origin: RemoteDictationOrigin, isPrivateContent: Bool) -> RemoteRequestContext {
         RemoteRequestContext(
-            settingEnabled: MuesliPreferences.remoteProcessingEnabled,
+            settingEnabled: MuesliPreferences.isRemoteProcessingActive,
             endpointConfigured: MuesliPreferences.hasCustomLLMEndpoint,
             origin: origin,
             // The phone has no private meetings or folders yet; the flag exists so they can never be sent.
