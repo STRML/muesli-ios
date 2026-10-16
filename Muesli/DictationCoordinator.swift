@@ -53,6 +53,12 @@ final class DictationCoordinator {
     /// The engine streaming the current dictation: the selected model when it streams, else the preview engine.
     private var realtimeDictationEngine: FluidAudioTranscriptionEngine?
     private var realtimeDictationStreamIsFromFinalModel = true
+    /// Stamps each stream so callbacks and the start path of an abandoned one can tell they are stale.
+    private var realtimeStreamGeneration = StreamGeneration()
+    /// True once the current stream's engine session is open; false while its model is still loading.
+    private var isRealtimeDictationSessionReady = false
+    /// The latest stream task, so the next one starts only after the previous one has finished with the engine.
+    private var lastRealtimeDictationTask: Task<Bool, Never>?
     /// Parakeet Realtime EOU beside a non-streaming selected model, so keyboard dictation shows live words.
     private let livePreviewEngine = FluidAudioTranscriptionEngine()
     private var livePreviewResidency = LivePreviewResidency()
@@ -4710,14 +4716,18 @@ final class DictationCoordinator {
         realtimeDictationBufferPipe = pipe
         realtimeDictationEngine = streamEngine
         realtimeDictationStreamIsFromFinalModel = choice == .finalModel
-        realtimeDictationProcessingTask = Task { [weak self, streamEngine, pipe] in
+        let token = realtimeStreamGeneration.advance()
+        let predecessor = lastRealtimeDictationTask
+        let task = Task { [weak self, streamEngine, pipe] in
+            _ = await predecessor?.value
+            guard self?.isCurrentRealtimeStream(token) == true else { return false }
             do {
                 try await streamEngine.startRealtimeSession(
                     partialTranscript: { [weak self] partial in
-                        Task { @MainActor in self?.updateRealtimeDictationPartial(partial) }
+                        Task { @MainActor in self?.updateRealtimeDictationPartial(partial, token: token) }
                     },
                     endOfUtterance: { [weak self] utterance in
-                        Task { @MainActor in self?.commitRealtimeDictationUtterance(utterance) }
+                        Task { @MainActor in self?.commitRealtimeDictationUtterance(utterance, token: token) }
                     }
                 )
             } catch {
@@ -4734,11 +4744,17 @@ final class DictationCoordinator {
                 for await _ in pipe.stream {}
                 return false
             }
+            guard self?.isCurrentRealtimeStream(token) == true else {
+                // Abandoned while the model loaded: close the session we just opened before the next stream uses it.
+                _ = try? await streamEngine.finishRealtimeSession()
+                return false
+            }
+            self?.isRealtimeDictationSessionReady = true
             for await audioBuffer in pipe.stream {
                 do {
                     try await streamEngine.processRealtimeAudioBuffer(audioBuffer.buffer)
                 } catch is CancellationError {
-                    return true
+                    break
                 } catch {
                     AppTelemetry.failure(
                         "realtime_dictation_buffer_failed",
@@ -4749,8 +4765,14 @@ final class DictationCoordinator {
                     )
                 }
             }
+            if self?.isCurrentRealtimeStream(token) != true {
+                _ = try? await streamEngine.finishRealtimeSession()
+                return false
+            }
             return true
         }
+        realtimeDictationProcessingTask = task
+        lastRealtimeDictationTask = task
         return pipe
     }
 
@@ -4765,7 +4787,19 @@ final class DictationCoordinator {
             return ("", isFromFinalModel)
         }
         pipe.finish()
-        let didStart = await task.value
+        let didStart: Bool
+        if isFromFinalModel {
+            didStart = await task.value
+        } else {
+            // The preview is optional: never wait on its model load, and only briefly on its queued audio.
+            guard isRealtimeDictationSessionReady,
+                  let drained = await BoundedWait.value(of: task, within: .seconds(1))
+            else {
+                abandonRealtimeDictationStream()
+                return ("", isFromFinalModel)
+            }
+            didStart = drained
+        }
         resetRealtimeDictationStreamState()
         defer { finishLivePreviewResidency(for: streamEngine) }
         guard didStart else { return ("", isFromFinalModel) }
@@ -4787,7 +4821,8 @@ final class DictationCoordinator {
         }
     }
 
-    /// Cancel and startup-failure teardown: drop the stream without finishing it.
+    /// Cancel and startup-failure teardown: drop the stream without finishing it. The stream task closes its own
+    /// engine session once it sees the stream is stale, and the next stream waits for it.
     private func abandonRealtimeDictationStream() {
         let streamEngine = realtimeDictationEngine
         realtimeDictationBufferPipe?.finish()
@@ -4796,7 +4831,13 @@ final class DictationCoordinator {
         if let streamEngine { finishLivePreviewResidency(for: streamEngine) }
     }
 
+    private func isCurrentRealtimeStream(_ token: Int) -> Bool {
+        realtimeStreamGeneration.isCurrent(token)
+    }
+
     private func resetRealtimeDictationStreamState() {
+        realtimeStreamGeneration.invalidate()
+        isRealtimeDictationSessionReady = false
         realtimeDictationBufferPipe = nil
         realtimeDictationProcessingTask = nil
         realtimeDictationEngine = nil
@@ -4863,7 +4904,8 @@ final class DictationCoordinator {
         publishKeyboardModelCatalog()
     }
 
-    private func updateRealtimeDictationPartial(_ partial: String) {
+    private func updateRealtimeDictationPartial(_ partial: String, token: Int) {
+        guard isCurrentRealtimeStream(token) else { return }
         let partial = partial.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !partial.isEmpty else { return }
 
@@ -4876,7 +4918,8 @@ final class DictationCoordinator {
         saveKeyboardLiveTranscript(text: liveDictationTranscript, isFinal: false)
     }
 
-    private func commitRealtimeDictationUtterance(_ utterance: String) {
+    private func commitRealtimeDictationUtterance(_ utterance: String, token: Int) {
+        guard isCurrentRealtimeStream(token) else { return }
         let utterance = utterance.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !utterance.isEmpty else { return }
 
