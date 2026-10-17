@@ -11,7 +11,7 @@ struct KeyboardPrimaryActionControl<Label: View>: View {
     @ViewBuilder let label: () -> Label
 
     var body: some View {
-        if controller.recordKeyMode == .openMuesli, let launchURL = controller.launchURL {
+        if controller.recordKeyMode == .openMuesli, let launchURL = controller.effectiveLaunchURL {
             Link(destination: launchURL) { label() }
                 .simultaneousGesture(TapGesture().onEnded {
                     guard !isTapSuppressed() else { return }
@@ -50,6 +50,12 @@ struct KeyboardDictationStatusView: View {
     private var content: some View {
         if let edit = controller.activeRewrite, controller.dictationPhase != .transcribing {
             editTarget(edit.original)
+        } else if controller.readiness.offersEscape, let escape = controller.readinessPresentation.caption,
+                  let url = controller.openAppURL {
+            // The state has outlasted its bound: say so, and make the words the way out.
+            Link(destination: url) { caption(escape) }
+                .accessibilityLabel(escape)
+                .accessibilityIdentifier("keyboard.stalledEscape")
         } else if let preview = controller.livePreview {
             KeyboardLivePreviewStrip(preview: preview, recordingStartedAt: controller.recordingStartedAt)
         } else {
@@ -106,6 +112,81 @@ struct KeyboardDictationStatusView: View {
             controller.activeRewrite != nil ? "Applying your edit" : "Writing your text"
         default:
             "Starting"
+        }
+    }
+}
+
+/// Where dictation is not ready, the status slot says why and what happens next: loading with its progress and
+/// elapsed time, "Open Muesli to start", a failed model. It is the Record key's twin: tapping it does what the
+/// key does, so a thumb that learned one finds the other.
+struct KeyboardReadinessBadge: View {
+    let controller: KeyboardController
+
+    var body: some View {
+        let presentation = controller.readinessPresentation
+        KeyboardPrimaryActionControl(controller: controller) {
+            HStack(spacing: 7) {
+                leading(presentation)
+                Text(presentation.caption ?? "")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(captionTint(presentation.tone))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.85)
+                    .multilineTextAlignment(.leading)
+            }
+            .padding(.horizontal, 12)
+            .frame(minHeight: 28)
+            .frame(maxWidth: .infinity)
+            .background(MuesliTheme.textPrimary.opacity(0.07), in: Capsule())
+            .contentShape(Capsule())
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(presentation.accessibilityLabel)
+        .accessibilityHint(presentation.accessibilityHint ?? "")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier("keyboard.readiness")
+    }
+
+    @ViewBuilder
+    private func leading(_ presentation: KeyboardReadinessPresentation) -> some View {
+        if presentation.showsSpinner {
+            ProgressView().controlSize(.small)
+        } else {
+            Image(systemName: symbol(for: presentation.tone))
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(captionTint(presentation.tone))
+        }
+    }
+
+    private func symbol(for tone: KeyboardReadinessPresentation.Tone) -> String {
+        switch tone {
+        case .error: "exclamationmark.triangle.fill"
+        case .attention: "arrow.up.forward.app"
+        case .busy, .normal: "clock"
+        }
+    }
+
+    private func captionTint(_ tone: KeyboardReadinessPresentation.Tone) -> Color {
+        switch tone {
+        case .error: MuesliTheme.destructive
+        case .attention: MuesliTheme.textPrimary
+        case .busy, .normal: MuesliTheme.textSecondary
+        }
+    }
+}
+
+/// The face of the Record key and the pill: a spinner while the model loads, otherwise the readiness symbol.
+struct KeyboardReadinessSymbol: View {
+    let controller: KeyboardController
+    var size: CGFloat = 19
+
+    var body: some View {
+        let presentation = controller.readinessPresentation
+        if presentation.showsSpinner {
+            ProgressView().tint(.white)
+        } else {
+            Image(systemName: controller.primaryButtonIcon)
+                .font(.system(size: size, weight: .semibold))
         }
     }
 }

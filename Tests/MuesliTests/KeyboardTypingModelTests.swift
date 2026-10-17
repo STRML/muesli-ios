@@ -37,7 +37,7 @@ final class KeyboardTypingModelTests: XCTestCase {
         directory = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("kb-typing-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let bus = StubEventBus()
-        store = SharedStore(containerURL: directory, eventPoster: bus)
+        store = LiveAppFixture.store(directory: directory, bus: bus)
         controller = KeyboardController(store: store, eventBus: bus)
         inserted = []
         deletes = 0

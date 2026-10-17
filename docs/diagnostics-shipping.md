@@ -30,6 +30,7 @@ Only these event names are uploaded. An event recorded under any other name is d
 | Area | Events |
 |---|---|
 | Keyboard | `ack.retry`, `ack.timedOut`, `handoff.observed`, `insert.performed`, `insert.skipped`, `intent.start`, `intent.stop`, `intent.captureEntered`, `intent.captureExited`, `keyboard.appeared`, `keyboard.disappeared`, `keyboard.autoOff`, `keyboard.persistencePreferenceChanged`, `level.freshness`, `model.select`, `rewrite.skipped`, `live_typing.unsupported`, `live_typing.detached`, `live_typing.yielded`, `live_typing.final_withheld` |
+| Readiness | `keyboard.readiness` (the state the keyboard shows, once per change), `request.abandoned` (a request ended because the app that owned it was gone; `reason` is `app_restarted` or `owner_lost`), `intent.prepare` (Record sent the user to Muesli to get ready), `prepare.started`, `prepare.finished`, `model.loadInterrupted` (a model load that never finished before the app went away) |
 | Audio | `audioSession.activated`, `audioSession.activateRequested`, `audioSession.configureRequested`, `audioSession.deactivated`, `audioSession.deactivateRequested`, `audioSession.deactivationFailed`, `audioSession.failed`, `audioSession.inputConfigured`, `audioSession.interruption`, `audioSession.interruptionHandling`, `audioSession.mediaServicesReset`, `audioSession.routeChanged`, `audioSession.routeHandling`, `keyboardMic.activityFailed`, `keyboardMic.ioConfiguration`, `keyboardMic.retryWithOutput`, `keyboardMic.started`, `keyboardMic.startFailed`, `keyboardMic.startStep`, `recorder.engineStarted`, `recorder.ioConfiguration`, `recorder.prepareCompleted`, `recorder.prepareRequested`, `recorder_start_failed` |
 | Recording and dictation | `recording.audioEstablished`, `recording.engineAttempt`, `recording.inputReady`, `recording.interruptedStop`, `recording.recovery`, `recording.recoveryRejected`, `recording.started`, `recording.startFailed`, `recording.startRequested`, `recording.startRetry`, `dictation.delivery`, `dictation.finalText`, `preview.persistFailed`, `startup.exited`, `startup.permissionRequested`, `startup.permissionResolved` |
 | Models, Live Activity, lifecycle | `liveActivity.failed`, `liveActivity.skipped`, `liveActivity.started`, `livePreview.memoryWarning`, `model.prewarm.backingOff`, `whisper.loaded`, `scene.active`, `scene.inactive`, `scene.background` |
@@ -44,7 +45,7 @@ than the limit never match.
 
 | Shape | Keys |
 |---|---|
-| UUID | `capture_request`, `intent_invocation`, `history_id` |
+| UUID | `capture_request`, `intent_invocation`, `history_id`, `boot` |
 | UUID or 8 hex characters | `request` |
 | UUID, 8 hex characters, or `none` | `active`, `active_request`, `session`, `mic_generation` |
 | integer (sent as a JSON integer) | `type`, `attempt`, `elapsed_ms`, `duration_ms`, `samples`, `bytes`, `characters`, `code`, `options`, `options_before`, `channels`, `app_state`, `audio_ms`, `heartbeat_age_ms`, `bg_remaining_ms`, `leading_ms`, `trailing_ms`, `phrase_len` |
@@ -52,7 +53,7 @@ than the limit never match.
 | true, false, yes or no (sent as a JSON bool) | `should_resume`, `enabled`, `startup`, `recording`, `protected_data`, `persistent`, `loaded`, `input_enabled`, `output_enabled`, `input_available`, `other_audio`, `file_written`, `empty`, `fresh`, `inserted`, `matchesActive`, `canUseRuntimeStart` |
 | decimal number | `sample_rate`, `input_sample_rate` |
 | seconds as text (`0.45`, `1.2s`, `none`, `never`; sent as a string, never a JSON float) | `total_s`, `wall_s`, `encoder_load_s`, `encoder_specialization_s`, `decoder_load_s`, `decoder_specialization_s`, `age`, `appSeenAt` |
-| one short code word (letters, digits, `_ . : -`, up to 48) | `model`, `variant`, `source`, `trigger`, `kind`, `error`, `stage`, `step`, `caller`, `file`, `category`, `category_before`, `mode`, `mode_before`, `preference`, `phase`, `localPhase`, `appPhase` |
+| one short code word (letters, digits, `_ . : -`, up to 48) | `model`, `variant`, `source`, `trigger`, `kind`, `error`, `stage`, `step`, `caller`, `file`, `category`, `category_before`, `mode`, `mode_before`, `preference`, `phase`, `localPhase`, `appPhase`, `readiness`, `action`, `model_state`, `trip_outcome` |
 | code words, joined with `+` on the wire | `input_ports`, `output_ports` |
 | error domain (`NSURLErrorDomain`) | `domain` |
 | closed list: `saved failed cancelled superseded abandoned missingAudio noRecoverableRecording` | `outcome` |

@@ -20,10 +20,28 @@ final class KeyboardSnapshotTests: XCTestCase {
         case editListening
         case editTranscribing
         case undoAvailable
+        /// A recording the app owns that has sent no audio for 10 s: the stuck picture from a real phone.
+        case lostConnection
+    }
+
+    /// What the app has published, for the readiness scenes. `ready` is a running app with a loaded model.
+    private enum AppRecord {
+        case ready
+        case none
+        case model(ReadinessModelState)
+        /// Loading for this many seconds as of the moment the scene renders, so the screenshot says what it means.
+        case loading(seconds: TimeInterval, progress: Double?)
+        /// The app stopped beating a minute ago.
+        case stale(ReadinessModelState)
+        /// The app last ran as another build.
+        case otherBuild
     }
 
     private struct Scene {
         let name: String
+        /// The app's record. Only the readiness scenes change it.
+        var record: AppRecord = .ready
+        var fullAccess = true
         let setup: Setup
         let rewriteAvailable: Bool
         /// Streaming words for the live preview strip.
@@ -43,12 +61,34 @@ final class KeyboardSnapshotTests: XCTestCase {
 
     private let editText = "Next Amazon order, I want to get a desk mat, a rack for my Mac minis, and a holder for my pen holders."
 
+    private func publishApp(_ record: AppRecord, to store: SharedStore) {
+        let now = Date()
+        switch record {
+        case .none:
+            break
+        case .ready:
+            LiveAppFixture.publish(to: store)
+        case .model(let model):
+            LiveAppFixture.publish(to: store, model: model)
+        case .loading(let seconds, let progress):
+            LiveAppFixture.publish(to: store, model: .loading(since: now.addingTimeInterval(-seconds), progress: progress))
+        case .stale(let model):
+            LiveAppFixture.publish(to: store, model: model, at: now.addingTimeInterval(-60))
+        case .otherBuild:
+            let other = ReadinessBuildStamp(appVersion: "0.0.1", appBuild: "1", osVersion: ReadinessBuildStamp.current.osVersion)
+            let identity = AppBootIdentity(id: UUID(), startedAt: now.addingTimeInterval(-3_600), stamp: other)
+            try? store.saveAppReadiness(AppReadinessRecord(boot: identity, heartbeatAt: now.addingTimeInterval(-3_600), model: .ready, mic: .off), notify: false)
+        }
+    }
+
     private func makeController(_ scene: Scene) throws -> KeyboardController {
         let temp = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
         let bus = StubEventBus()
-        let store = SharedStore(containerURL: temp, eventPoster: bus)
+        let store = SharedStore(containerURL: temp, eventPoster: bus, bootID: LiveAppFixture.boot)
+        publishApp(scene.record, to: store)
         let controller = KeyboardController(store: store, eventBus: bus)
+        controller.currentFullAccess = { scene.fullAccess }
         var field = KeyboardTextContext(selectedText: nil, textBeforeCursor: editText)
         controller.textContextProvider = { field }
         controller.textInserter = { _ in }
@@ -85,6 +125,12 @@ final class KeyboardSnapshotTests: XCTestCase {
             try publish(recording ? .recording : .transcribing, requestID: request.id)
             try store.saveKeyboardHandoffState(.init(
                 requestID: request.id, phase: recording ? .recordingStarted : .transcribingStarted))
+            controller.prepareInitialPresentationState()
+        case .lostConnection:
+            let request = DictationRequest()
+            try store.claimRequest(request)
+            try store.saveKeyboardHandoffState(.init(
+                requestID: request.id, phase: .recordingStarted, updatedAt: Date().addingTimeInterval(-10)))
             controller.prepareInitialPresentationState()
         case .undoAvailable:
             try publish(.idle, requestID: nil)
@@ -179,6 +225,26 @@ final class KeyboardSnapshotTests: XCTestCase {
             Scene(name: "type-landscape", setup: .ready, rewriteAvailable: true, surface: .type, before: "See you at the offi",
                   width: 852),
             Scene(name: "dictate-landscape", setup: .ready, rewriteAvailable: true, width: 852),
+            Scene(name: "readiness-lost-connection", setup: .lostConnection, rewriteAvailable: true),
+            Scene(name: "type-readiness-lost-connection", setup: .lostConnection, rewriteAvailable: true, surface: .type),
+            // Readiness: what the keyboard says when dictation is not ready, on both pages.
+            Scene(name: "readiness-loading", record: .loading(seconds: 40, progress: 0.4),
+                  setup: .ready, rewriteAvailable: true),
+            Scene(name: "type-readiness-loading", record: .loading(seconds: 40, progress: nil),
+                  setup: .ready, rewriteAvailable: true, surface: .type),
+            Scene(name: "type-readiness-loading-long", record: .loading(seconds: 185, progress: nil),
+                  setup: .ready, rewriteAvailable: true, surface: .type),
+            Scene(name: "readiness-downloading", record: .model(.downloading(progress: 0.42)),
+                  setup: .ready, rewriteAvailable: true),
+            Scene(name: "readiness-needs-app", record: .stale(.ready), setup: .ready, rewriteAvailable: true),
+            Scene(name: "type-readiness-needs-app", record: .stale(.ready), setup: .ready, rewriteAvailable: true, surface: .type),
+            Scene(name: "readiness-updated", record: .otherBuild, setup: .ready, rewriteAvailable: true),
+            Scene(name: "type-readiness-updated", record: .otherBuild, setup: .ready, rewriteAvailable: true, surface: .type),
+            Scene(name: "readiness-never-opened", record: .none, setup: .ready, rewriteAvailable: true),
+            Scene(name: "readiness-failed", record: .model(.failed(.loadFailed)), setup: .ready, rewriteAvailable: true),
+            Scene(name: "type-readiness-failed", record: .model(.failed(.loadFailed)), setup: .ready, rewriteAvailable: true, surface: .type),
+            Scene(name: "readiness-full-access-off", record: .none, fullAccess: false, setup: .ready, rewriteAvailable: true),
+            Scene(name: "type-readiness-full-access-off", record: .none, fullAccess: false, setup: .ready, rewriteAvailable: true, surface: .type),
         ]
         for scene in scenes {
             for (suffix, style) in [("light", UIUserInterfaceStyle.light), ("dark", .dark)] {
