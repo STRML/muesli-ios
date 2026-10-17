@@ -45,6 +45,20 @@ final class MuesliPreferencesTests: XCTestCase {
         XCTAssertFalse(MuesliPreferences.keyboardAutocorrectEnabled)
     }
 
+    func testKeyboardLiveTypingDefaultsOnAndKeepsAnExplicitOptOut() {
+        let defaults = UserDefaults.standard
+        let key = MuesliPreferences.keyboardLiveTypingKey
+        let original = defaults.object(forKey: key)
+        defer {
+            if let original { defaults.set(original, forKey: key) }
+            else { defaults.removeObject(forKey: key) }
+        }
+        defaults.removeObject(forKey: key)
+        XCTAssertTrue(MuesliPreferences.keyboardLiveTypingEnabled)
+        defaults.set(false, forKey: key)
+        XCTAssertFalse(MuesliPreferences.keyboardLiveTypingEnabled)
+    }
+
     func testLongVoiceNoteThresholdClampsToSupportedRange() {
         XCTAssertEqual(MuesliPreferences.clampedLongVoiceNoteThreshold(5), 30)
         XCTAssertEqual(MuesliPreferences.clampedLongVoiceNoteThreshold(60), 60)

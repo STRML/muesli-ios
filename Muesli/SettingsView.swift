@@ -12,6 +12,7 @@ struct SettingsView: View {
     @AppStorage(MuesliPreferences.liveActivitiesForMeetingsKey) private var liveActivitiesForMeetings = true
     @AppStorage(MuesliPreferences.keyboardSessionModeKey) private var keyboardSessionMode = true
     @AppStorage(MuesliPreferences.keyboardAutocorrectKey) private var keyboardAutocorrect = true
+    @AppStorage(MuesliPreferences.keyboardLiveTypingKey) private var keyboardLiveTyping = true
     @AppStorage(MuesliPreferences.keyboardMicAutoOffMinutesKey) private var keyboardMicAutoOffMinutes = KeyboardMicAutoOff.defaultMinutes
     @AppStorage(MuesliPreferences.recordingMicrophonePreferenceKey) private var microphonePreference = RecordingMicrophonePreference.automatic.rawValue
     @AppStorage(MuesliPreferences.keepDictationAudioRecordingsKey) private var keepDictationAudioRecordings = false
@@ -306,6 +307,13 @@ struct SettingsView: View {
                     )
                     Divider().overlay(MuesliTheme.surfaceBorder)
                     SettingsToggleRow(
+                        icon: "text.cursor",
+                        title: "Type live into the field",
+                        detail: "Your words appear in the text field as you speak and are replaced by the final text when you stop. Off: they show only in the keyboard's strip and the text is inserted once. Needs Allow Full Access to follow this switch; without it, live typing stays on.",
+                        isOn: keyboardLiveTypingBinding
+                    )
+                    Divider().overlay(MuesliTheme.surfaceBorder)
+                    SettingsToggleRow(
                         icon: "keyboard.badge.ellipsis",
                         title: "Turn mic off after each dictation",
                         detail: keyboardSessionModeDetail,
@@ -359,6 +367,13 @@ struct SettingsView: View {
         Binding(get: { keyboardAutocorrect }, set: { enabled in
             keyboardAutocorrect = enabled
             coordinator.setKeyboardAutocorrectEnabled(enabled)
+        })
+    }
+
+    private var keyboardLiveTypingBinding: Binding<Bool> {
+        Binding(get: { keyboardLiveTyping }, set: { enabled in
+            keyboardLiveTyping = enabled
+            coordinator.setKeyboardLiveTypingEnabled(enabled)
         })
     }
 
