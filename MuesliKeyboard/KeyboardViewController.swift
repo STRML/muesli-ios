@@ -55,7 +55,10 @@ final class KeyboardViewController: UIInputViewController {
         let typingDocument = controller.typing.document
         typingDocument.beforeReader = { [weak self] in self?.textDocumentProxy.documentContextBeforeInput }
         typingDocument.afterReader = { [weak self] in self?.textDocumentProxy.documentContextAfterInput }
-        typingDocument.identifierReader = { [weak self] in self?.textDocumentProxy.documentIdentifier }
+        // Not `textDocumentProxy.documentIdentifier`: that getter traps while the host has no document yet.
+        typingDocument.identifierReader = { [weak self] in
+            self.flatMap { TypingDocumentIdentity.read(from: $0.textDocumentProxy as AnyObject) }
+        }
         typingDocument.selectionReader = { [weak self] in self?.textDocumentProxy.selectedText }
         controller.inputModeSwitcher = { [weak self] in
             self?.advanceToNextInputMode()

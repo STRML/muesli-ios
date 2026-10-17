@@ -100,7 +100,9 @@ final class KeyboardTypingModel {
     func loadLexicon(from controller: UIInputViewController) {
         guard !hasRequestedLexicon else { return }
         hasRequestedLexicon = true
-        controller.requestSupplementaryLexicon { [weak self] lexicon in
+        // UIKit does not say which queue calls this back. `@Sendable` keeps the closure from inheriting this
+        // type's main-actor isolation, which Swift 6 would enforce at runtime with a trap on any other queue.
+        controller.requestSupplementaryLexicon { @Sendable [weak self] lexicon in
             let entries = lexicon.entries.map {
                 TypingLexiconEntry(userInput: $0.userInput, documentText: $0.documentText)
             }

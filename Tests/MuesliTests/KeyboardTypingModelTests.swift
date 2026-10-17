@@ -13,6 +13,11 @@ private final class FakeTraits: NSObject, UITextInputTraits {
     var isSecureTextEntry = false
 }
 
+/// A proxy with no document yet. `NoDocumentYetProxy` in TypingDocumentIdentityTests, repeated here as private.
+private final class NoDocumentYetProxy: NSObject {
+    @objc(documentIdentifier) var identifier: NSUUID? { nil }
+}
+
 /// The keyboard-target half of the typing work: the controller wiring, the UIKit trait mapping and the real
 /// `UITextChecker`. The pure logic is covered by KeyboardTypingKitTests on the Mac.
 @MainActor
@@ -65,6 +70,20 @@ final class KeyboardTypingModelTests: XCTestCase {
             supportsBackgroundStart: true, inputLevel: 0.5))
         try store.saveKeyboardHandoffState(.init(requestID: request.id, phase: .recordingStarted))
         controller.prepareInitialPresentationState()
+    }
+
+    // MARK: Startup
+
+    /// The startup crash of builds 19 and 20: applying the saved handoff state at launch changes the dictation
+    /// phase, which refreshes the typing engine, which read the proxy's document identifier before the host had a
+    /// document. The real read is `TypingDocumentIdentity.read`; this drives that path with a proxy that has none.
+    func testApplyingAHandoffStateAtStartupWithNoDocumentYetDoesNotTrap() throws {
+        let proxy = NoDocumentYetProxy()
+        controller.typing.document.identifierReader = { TypingDocumentIdentity.read(from: proxy) }
+        try startListening()
+        XCTAssertEqual(controller.dictationPhase, .recording)
+        controller.typing.hostDidChange(traits: FakeTraits())
+        XCTAssertNil(controller.typing.document.documentIdentifier)
     }
 
     // MARK: Pages and dictation
