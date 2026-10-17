@@ -41,6 +41,8 @@ enum DiagnosticsVocabulary {
         "handoff.saved", "stop.received", "stop.ignored", "recording.stopped", "transcription.started",
         "transcription.finished", "transcription.failed", "result.persisted", "delivery.outcome",
         "dictation.cancelled", "dictation.exit", "backgroundTask", "app.memoryWarning", "app.thermalState",
+        // Silence guard (Shared/DictationPolicy/ClipSilenceGuard.swift): counts only, never the phrase.
+        "transcribe.trimmed", "transcribe.tail_dropped", "transcribe.skipped_silent",
     ]
 
     static let keyRules: [String: DiagnosticsValueRule] = {
@@ -51,7 +53,7 @@ enum DiagnosticsVocabulary {
         add(.requestID, "request")
         add(.optionalID, "active", "active_request", "session", "mic_generation")
         add(.int, "type", "attempt", "elapsed_ms", "duration_ms", "samples", "bytes", "characters", "code",
-            "options", "options_before", "channels", "app_state", "audio_ms", "heartbeat_age_ms", "bg_remaining_ms")
+            "options", "options_before", "channels", "app_state", "audio_ms", "heartbeat_age_ms", "bg_remaining_ms", "leading_ms", "trailing_ms", "phrase_len")
         add(.codeOrInt, "reason")
         add(.flag, "should_resume", "enabled", "startup", "recording", "protected_data", "persistent", "loaded",
             "input_enabled", "output_enabled", "input_available", "other_audio", "file_written", "empty", "fresh",
