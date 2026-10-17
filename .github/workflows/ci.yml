@@ -95,7 +95,7 @@ jobs:
           xcodebuild -version
           echo "xcode=$(xcodebuild -version | tr '\n ' '--')" >> "$GITHUB_OUTPUT"
       # DerivedData holds the resolved Swift packages and their build products.
-      # Only main (and this PR while it is being proven) writes it, so a pull
+      # Only pushes to main write it, so a pull
       # request can read the cache but never poison what main reads.
       - name: Restore DerivedData
         id: cache
@@ -146,7 +146,7 @@ jobs:
           compression-level: 0
           retention-days: 1
       - name: Save DerivedData
-        if: github.event_name == 'push' || github.head_ref == 'ci/faster-pipeline'
+        if: github.event_name == 'push'
         uses: actions/cache/save@v4
         with:
           path: |
