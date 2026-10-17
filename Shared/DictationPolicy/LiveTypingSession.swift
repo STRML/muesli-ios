@@ -115,6 +115,8 @@ struct LiveTypingSession: Sendable {
     var mirroredText: String { committed + marked }
     var isProbing: Bool { phase == .probingAppearance || phase == .probingReplace }
     var writesToHost: Bool { phase == .live || isProbing }
+    /// Whether a new partial can still change the field (or start the probe).
+    var acceptsPartials: Bool { phase == .awaitingFirstPartial || writesToHost }
 
     // MARK: Streaming words
 

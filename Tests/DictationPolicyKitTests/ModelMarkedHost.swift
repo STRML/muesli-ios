@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(DictationPolicyKit)
 @testable import DictationPolicyKit
+#else
+@testable import Muesli
+#endif
 
 /// A host text field as the live-typing session sees it, with the ways real hosts differ.
 ///
@@ -100,17 +104,26 @@ final class ModelMarkedHost {
         if behavior != .ignoresMarked { markedLength = 0 }
     }
 
-    /// `insertText` on a host: it replaces a selection, and commits any marked range first.
+    /// `insertText` on a host replaces a selection, and also the marked range: measured on a real `UITextView`
+    /// (iOS 27 simulator), typing over marked words leaves only the typed text.
     func insert(_ text: String) {
         log.append("insert(\(text))")
+        if !selection.isEmpty {
+            before = String(before.dropLast(selection.count))
+            selection = ""
+        }
+        before = String(before.dropLast(markedLength)) + text
         markedLength = 0
-        if !selection.isEmpty { selection = "" }
-        before += text
     }
 
+    /// `deleteBackward` over marked words removes the whole marked range, as a real `UITextView` does.
     func deleteBackward() {
         log.append("deleteBackward")
-        markedLength = 0
+        if markedLength > 0 {
+            before = String(before.dropLast(markedLength))
+            markedLength = 0
+            return
+        }
         guard !before.isEmpty else { return }
         before.removeLast()
     }

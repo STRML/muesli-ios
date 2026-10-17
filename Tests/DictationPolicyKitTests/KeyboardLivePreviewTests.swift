@@ -1,7 +1,7 @@
 import XCTest
 @testable import DictationPolicyKit
 
-/// What the keyboard's preview strip shows. The strip is display only; insertion is covered in KeyboardControllerTests.
+/// What the keyboard's preview strip shows. The strip is display only; insertion is covered in KeyboardControllerTests and live typing in KeyboardLiveTypingTests.
 final class KeyboardLivePreviewTests: XCTestCase {
     func testRecordingWithPartialsShowsTheListeningStrip() {
         let preview = KeyboardLivePreview.make(

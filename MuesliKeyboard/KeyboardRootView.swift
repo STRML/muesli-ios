@@ -630,7 +630,8 @@ private struct MuesliKeyboardKeySurfaceModifier: ViewModifier {
 }
 
 /// One line of what the streaming model has heard, newest words kept visible by truncating from the left. Gray and
-/// display only; the final text is inserted once, after the final pass, and this strip then clears.
+/// display only. The final text lands after the final pass, either replacing the words typed live into the field
+/// or inserted once when live typing is off or the host cannot take it, and this strip then clears.
 struct KeyboardLivePreviewStrip: View {
     let preview: KeyboardLivePreview
     let recordingStartedAt: Date?

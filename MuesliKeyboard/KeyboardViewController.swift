@@ -46,6 +46,8 @@ final class KeyboardViewController: UIInputViewController {
                 self?.textDocumentProxy.deleteBackward()
             }
         }
+        // Dictated words are typed into the field as marked text while you speak; see KeyboardLiveTyper.
+        controller.liveTypingHost = ProxyLiveTypingHost { [weak self] in self?.textDocumentProxy }
         controller.textContextProvider = { [weak self] in
             KeyboardTextContext(
                 selectedText: self?.textDocumentProxy.selectedText,
@@ -150,11 +152,13 @@ final class KeyboardViewController: UIInputViewController {
     override func textDidChange(_ textInput: UITextInput?) {
         super.textDidChange(textInput)
         refreshTypingTraits()
+        controller.liveTypingHostDidChange()
     }
 
     override func selectionDidChange(_ textInput: UITextInput?) {
         super.selectionDidChange(textInput)
         refreshTypingTraits()
+        controller.liveTypingHostDidChange()
     }
 
     override func didReceiveMemoryWarning() {
