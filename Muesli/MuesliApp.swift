@@ -58,7 +58,10 @@ struct MuesliApp: App {
                 }
                 .onChange(of: scenePhase) { _, phase in
                     coordinator.recordCaptureLifecycle("scene.\(phase)")
-                    if phase == .background { DiagnosticsShipper.shared.sceneDidEnterBackground() }
+                    if phase == .background {
+                        DiagnosticsShipper.shared.sceneDidEnterBackground()
+                        coordinator.prepareTripDidEnterBackground()
+                    }
                     if phase == .active {
                         coordinator.copyPendingDictationIfActive()
                         #if DEBUG && targetEnvironment(simulator)

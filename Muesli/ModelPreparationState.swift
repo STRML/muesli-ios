@@ -8,6 +8,19 @@ enum ModelPreparationPhase: Equatable {
     case failed
 }
 
+extension ModelPreparationPhase {
+    /// The same phase in the package that decides what the keyboard is told.
+    var kind: PreparationPhaseKind {
+        switch self {
+        case .idle: .idle
+        case .downloading: .downloading
+        case .preparing: .preparing
+        case .ready: .ready
+        case .failed: .failed
+        }
+    }
+}
+
 struct ModelPreparationState: Equatable {
     var phase: ModelPreparationPhase = .idle
     var progress: Double?
