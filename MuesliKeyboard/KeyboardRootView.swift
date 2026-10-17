@@ -664,7 +664,7 @@ struct KeyboardLivePreviewStrip: View {
         .padding(.horizontal, 12)
         .frame(height: 28)
         .frame(maxWidth: .infinity)
-        .background(Color.white.opacity(0.05), in: Capsule())
+        .background(MuesliTheme.textPrimary.opacity(0.07), in: Capsule())
         .animation(.easeOut(duration: 0.2), value: isFinalizing)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(isFinalizing ? "Finishing your text" : "Hearing: \(preview.text)")

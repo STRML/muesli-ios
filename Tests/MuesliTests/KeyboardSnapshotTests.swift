@@ -2,6 +2,10 @@ import XCTest
 import SwiftUI
 @testable import Muesli
 
+private final class FieldBuffer: @unchecked Sendable {
+    var text = ""
+}
+
 /// A dev tool, not a regression test: renders the keyboard panel in each state to PNGs so the layout can be
 /// reviewed without a phone. Skipped unless `MUESLI_KEYBOARD_SNAPSHOT_DIR` (or the file
 /// `/tmp/muesli-keyboard-snapshot-dir`) names a directory.
@@ -27,6 +31,9 @@ final class KeyboardSnapshotTests: XCTestCase {
         /// The Dictate page unless a scene asks for the Type page.
         var surface: TypingSurface = .dictate
         var before: String?
+        /// Typed key by key into a fake field, so the strip shows what typing leaves behind (Autocorrect optional).
+        var typed: String?
+        var autocorrect = true
         var traits = TypingTraits()
         var page: TypingPage = .letters
         var lockCaps = false
@@ -97,10 +104,23 @@ final class KeyboardSnapshotTests: XCTestCase {
         if let before = scene.before { controller.typing.document.beforeReader = { before } }
         controller.typing.setDocumentLanguage("en-US")
         controller.typing.engine.apply(traits: scene.traits)
+        controller.typing.autocorrectEnabled = scene.autocorrect
         controller.typing.engine.switchPage(scene.page)
         if scene.lockCaps {
             controller.typing.perform(.shift)
             controller.typing.perform(.shift)
+        }
+        if let typed = scene.typed {
+            let field = FieldBuffer()
+            controller.textInserter = { field.text += $0 }
+            controller.textDeleter = { field.text = String(field.text.dropLast($0)) }
+            controller.typing.document.beforeReader = { field.text.isEmpty ? nil : field.text }
+            for character in typed {
+                switch character {
+                case " ": controller.typing.perform(.space)
+                default: controller.typing.perform(.character(String(character)))
+                }
+            }
         }
         return controller
     }
@@ -135,6 +155,12 @@ final class KeyboardSnapshotTests: XCTestCase {
                   before: "I think teh"),
             Scene(name: "type-after-space", setup: .ready, rewriteAvailable: true, surface: .type,
                   before: "Sounds good. "),
+            Scene(name: "type-after-space-typo", setup: .ready, rewriteAvailable: true, surface: .type,
+                  typed: "I think teh ", autocorrect: false),
+            Scene(name: "type-after-space-correct", setup: .ready, rewriteAvailable: true, surface: .type,
+                  typed: "Hey is just gets stuck "),
+            Scene(name: "type-after-autocorrect", setup: .ready, rewriteAvailable: true, surface: .type,
+                  typed: "I think teh "),
             Scene(name: "type-caps-lock", setup: .ready, rewriteAvailable: false, surface: .type,
                   before: "hello ", lockCaps: true),
             Scene(name: "type-numbers", setup: .ready, rewriteAvailable: true, surface: .type, page: .numbers),

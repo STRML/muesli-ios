@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// The typing page: the strip on top (suggestions, or the dictation status while one runs, with the panel key and
-/// Quill at its ends) and four rows of keys. Everything it shows about dictation is read from the controller.
+/// The typing page: the strip on top (suggestions, or the dictation status while one runs, with Cancel while one
+/// runs and Quill at its ends) and four rows of keys. Holding the Record key for three seconds opens the Dictate
+/// page, the way back to the old keyboard. Everything it shows about dictation is read from the controller.
 struct KeyboardTypePage: View {
     /// The keys' tap areas run to the screen edge; their painted faces are inset by `KeyboardTypeKey.faceInset`.
     static let sideBleed: CGFloat = 5
@@ -24,40 +25,29 @@ struct KeyboardTypePage: View {
 
     private var strip: some View {
         HStack(spacing: 6) {
-            leadingSlot
-                .frame(width: 40, height: CGFloat(TypingMetrics.stripHeight))
+            if isActive {
+                cancelSlot
+                    .frame(width: 40, height: CGFloat(TypingMetrics.stripHeight))
+            }
             stripContent
                 .frame(maxWidth: .infinity)
                 .frame(height: CGFloat(TypingMetrics.stripHeight))
-                .clipped()
             trailingSlot
                 .frame(width: 40, height: CGFloat(TypingMetrics.stripHeight))
         }
     }
 
-    /// Cancel while a dictation runs (the slot Cancel has on the Dictate page), otherwise the way to that page.
-    @ViewBuilder
-    private var leadingSlot: some View {
-        if isActive {
-            Button(action: controller.cancelActiveDictation) {
-                stripGlyph(Image(systemName: "xmark").font(.system(size: 16, weight: .semibold)), tint: MuesliTheme.textPrimary)
-            }
-            .buttonStyle(KeyboardPressStyle())
-            .opacity(controller.canCancelActiveDictation ? 1 : 0.4)
-            .disabled(!controller.canCancelActiveDictation)
-            .accessibilityLabel("Cancel recording")
-            .accessibilityIdentifier("keyboard.cancel")
-        } else {
-            Button {
-                controller.selectedSurface = .dictate
-            } label: {
-                stripGlyph(Image(systemName: "slider.horizontal.3").font(.system(size: 16, weight: .semibold)), tint: MuesliTheme.textPrimary)
-            }
-            .buttonStyle(KeyboardPressStyle())
-            .accessibilityLabel("Dictation panel")
-            .accessibilityHint("Model, status and dictation helpers")
-            .accessibilityIdentifier("keyboard.dictatePanel")
+    /// Cancel, in the slot it has on the Dictate page. Only while a dictation runs; otherwise the strip starts at
+    /// the left edge.
+    private var cancelSlot: some View {
+        Button(action: controller.cancelActiveDictation) {
+            stripGlyph(Image(systemName: "xmark").font(.system(size: 16, weight: .semibold)), tint: MuesliTheme.textPrimary)
         }
+        .buttonStyle(KeyboardPressStyle())
+        .opacity(controller.canCancelActiveDictation ? 1 : 0.4)
+        .disabled(!controller.canCancelActiveDictation)
+        .accessibilityLabel("Cancel recording")
+        .accessibilityIdentifier("keyboard.cancel")
     }
 
     /// Quill. While a dictation runs it only reports the mode, as it does on the Dictate page.
@@ -107,9 +97,9 @@ struct KeyboardTypePage: View {
         case .dictationStatus:
             KeyboardDictationStatusView(controller: controller)
         case .undoEdit:
-            KeyboardUndoEditButton(controller: controller)
+            KeyboardUndoEditButton(controller: controller).clipped()
         case .suggestions(let suggestions):
-            KeyboardSuggestionStrip(suggestions: suggestions) { typing.accept($0) }
+            KeyboardSuggestionStrip(suggestions: suggestions) { typing.accept($0) }.clipped()
         case .empty:
             Color.clear
         }
@@ -238,6 +228,55 @@ private struct TypingKeyPressStyle: ButtonStyle {
     }
 }
 
+/// The Record key: the primary action on a tap, and on a three-second hold the way back to the Dictate page. The
+/// hold does not start a recording: the page switch removes the key from under the finger, so no tap follows, and
+/// the tap handlers also check that a hold has not already acted.
+private struct TypingRecordKeyControl<Label: View>: View {
+    let controller: KeyboardController
+    @ViewBuilder let label: () -> Label
+
+    @State private var hold = TypingRecordHold()
+    @State private var holdTimer: Task<Void, Never>?
+
+    var body: some View {
+        KeyboardPrimaryActionControl(controller: controller, isTapSuppressed: { hold.hasFired }, label: label)
+            // A hold is only offered while no dictation runs: then a tap on this key means stop.
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in pressChanged(value.location) }
+                    .onEnded { _ in pressEnded() }
+            )
+            .onDisappear { holdTimer?.cancel() }
+    }
+
+    private func pressChanged(_ location: CGPoint) {
+        guard !controller.showsActiveWaveform else { return }
+        if !hold.isPressed {
+            hold.begin(at: ProcessInfo.processInfo.systemUptime, x: location.x, y: location.y)
+            holdTimer = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(TypingRecordHold.duration))
+                guard !Task.isCancelled else { return }
+                holdElapsed()
+            }
+        } else {
+            hold.move(x: location.x, y: location.y)
+        }
+    }
+
+    private func holdElapsed() {
+        guard hold.timerFired(at: ProcessInfo.processInfo.systemUptime) else { return }
+        MuesliHaptics.dictationStop()
+        controller.selectedSurface = .dictate
+    }
+
+    private func pressEnded() {
+        holdTimer?.cancel()
+        holdTimer = nil
+        // The tap handlers run on release, after this; they see `hasFired` before it is cleared.
+        DispatchQueue.main.async { _ = hold.end() }
+    }
+}
+
 private struct KeyboardTypeKey: View {
     static let faceInset: CGFloat = 3
 
@@ -251,7 +290,7 @@ private struct KeyboardTypeKey: View {
         case .spacer:
             Color.clear
         case .record:
-            KeyboardPrimaryActionControl(controller: controller) { face(recordFace, fill: MuesliTheme.accent) }
+            TypingRecordKeyControl(controller: controller) { face(recordFace, fill: MuesliTheme.accent) }
                 .accessibilityLabel(recordLabel)
                 .accessibilityIdentifier("keyboard.record")
         case .backspace:
