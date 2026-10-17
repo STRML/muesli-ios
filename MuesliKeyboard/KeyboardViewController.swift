@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 
 final class KeyboardViewController: UIInputViewController {
-    private let controller = KeyboardController()
+    private let controller = KeyboardController(surfaceDefaults: .standard)
     private var hostingController: UIHostingController<KeyboardRootView>?
     private let launchSnapshotView = UIImageView()
     private var keyboardHeightConstraint: NSLayoutConstraint?
@@ -65,6 +65,11 @@ final class KeyboardViewController: UIInputViewController {
         controller.inputModeSwitcher = { [weak self] in
             self?.advanceToNextInputMode()
         }
+        controller.needsInputModeSwitchKey = { [weak self] in self?.needsInputModeSwitchKey ?? false }
+        controller.inputModeListPresenter = { [weak self] view, event in
+            guard let event else { return }
+            self?.handleInputModeList(from: view, with: event)
+        }
         controller.keyboardDismisser = { [weak self] in
             self?.dismissKeyboard()
         }
@@ -107,6 +112,9 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         appearanceGuard.beginAppearance()
+        // The layout is chosen here, before the launch snapshot is drawn, and nowhere else: a change in Settings
+        // shows the next time the keyboard opens. Without Full Access this read fails and the keyboard is Full.
+        controller.loadTypingSettings(appliesLayout: true)
         controller.isLaunchSettled = false
         controller.prepareInitialPresentationState()
         refreshLaunchSnapshot()
@@ -115,7 +123,6 @@ final class KeyboardViewController: UIInputViewController {
         super.viewWillAppear(animated)
 
         refreshTypingTraits()
-        controller.loadTypingSettings()
         controller.typing.loadLexicon(from: self)
 
         isKeyboardPresented = true
