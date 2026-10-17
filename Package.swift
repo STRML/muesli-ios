@@ -10,9 +10,6 @@ let package = Package(
     platforms: [.macOS(.v14), .iOS(.v17)],
     products: [
         .library(name: "RemoteTranscriptionKit", targets: ["RemoteTranscriptionKit"]),
-        // Exported for Tests/TailHarness, a separate package that runs the real WhisperKit model on a Mac.
-        .library(name: "DictationPolicyKit", targets: ["DictationPolicyKit"]),
-        .library(name: "ClipFixtureKit", targets: ["ClipFixtureKit"]),
     ],
     targets: [
         .target(

@@ -97,7 +97,12 @@ enum HallucinatedTailFilter {
     ) -> Result {
         let unchanged = Result(text: text, dropped: [])
         guard profile.frameCount > 0, isEnglishOrUnknown(language) else { return unchanged }
-        let spans = SilenceTrimmer.speechSpans(in: profile)
+        let spans: [Range<Int>]
+        switch SilenceTrimmer.analyse(profile) {
+        case .indeterminate: return unchanged   // cannot prove the audio is silent, so nothing is dropped
+        case .silent: spans = []
+        case .speech(let found): spans = found
+        }
         let timing = WordTiming(segments: segments, text: text)
 
         var current = text

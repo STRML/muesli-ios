@@ -244,6 +244,12 @@ final class HallucinatedTailFilterTests: XCTestCase {
                        "an empty profile proves nothing, so nothing is dropped")
     }
 
+    func testAClipTheDetectorCannotJudgeIsNeverFiltered() {
+        let steady = TestAudio.profile(Synth.roomTone(3, rmsDB: -38))
+        XCTAssertEqual(apply("Done. Thank you.", profile: steady).text, "Done. Thank you.",
+                       "quiet speech over a fan looks like this; no proof of silence, nothing dropped")
+    }
+
     func testRunningTheFilterTwiceChangesNothingMore() {
         let profile = profile(tail: Synth.silence(3))
         let once = apply("Done. Thank you.", profile: profile)

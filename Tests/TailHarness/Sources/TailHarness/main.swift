@@ -1,4 +1,5 @@
 import ClipFixtureKit
+@testable import DictationPolicyKit
 import Foundation
 @preconcurrency import WhisperKit
 
@@ -89,6 +90,15 @@ func generate(into directory: URL) throws {
             }
         }
     }
+    for speech in SayFixtures.foreign {
+        let clip = SayFixtures.normalised(try SayFixtures.speech(speech.text, voice: speech.voice, in: directory))
+        for tail in [TailKind.none, .silence(seconds: 2), .silence(seconds: 4)] {
+            let id = "foreign-\(speech.id)__\(tail)"
+            let url = directory.appendingPathComponent("\(id).wav")
+            try WavFile.write(WavFile.Clip(samples: clip.samples + tail.samples()), to: url)
+            manifest.append(Fixture(id: id, speechID: "foreign-\(speech.id)", reference: speech.text, tail: "foreign-\(tail)", path: url.lastPathComponent))
+        }
+    }
     // Pure silence and pure room tone: nothing was said, so any text is a hallucination.
     for (name, samples) in [
         ("only-silence-3s", Synth.silence(3)),
@@ -176,7 +186,7 @@ func run() async throws {
                     seconds: Date().timeIntervalSince(started)
                 )
                 try handle.write(contentsOf: JSONEncoder().encode(row) + Data("\n".utf8))
-                print("\(setting)/\(prep) \(fixture.id): extra=\(row.tailExtraWords) \"\(row.output)\"")
+                print("\(setting)/\(prep) \(fixture.id): extra=\(row.tailExtraWords)->\(row.filteredExtraWords) \"\(row.filtered)\"")
             }
         }
     }
@@ -192,11 +202,49 @@ struct Transcribed {
     var skipped: Bool
 }
 
+final class EventBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var items: [(String, [String: String])] = []
+    func add(_ event: String, _ detail: [String: String]) { lock.lock(); items.append((event, detail)); lock.unlock() }
+    var all: [(String, [String: String])] { lock.lock(); defer { lock.unlock() }; return items }
+}
+
+final class TextBox: @unchecked Sendable {
+    var raw = ""
+    var language = ""
+}
+
+/// prep: none = the app before this change; trim = silence trimmed only; filter = post-filter only (untrimmed
+/// audio); guard = trim + filter, exactly what ships.
 func transcribe(kit: WhisperKit, url: URL, options: DecodingOptions?, prep: String) async throws -> Transcribed {
-    let results = try await kit.transcribe(audioPath: url.path, decodeOptions: options)
-    let text = results.map(\.text).joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
-    let language = results.first?.language ?? ""
-    return Transcribed(raw: text, filtered: text, language: language, dropped: "", leadingMS: 0, trailingMS: 0, skipped: false)
+    let seen = TextBox()
+    func hear(_ file: URL) async throws -> ClipSilenceGuard.EngineOutput {
+        let results = try await kit.transcribe(audioPath: file.path, decodeOptions: options)
+        let text = results.map(\.text).joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        let language = results.first?.language ?? ""
+        seen.raw = text
+        seen.language = language
+        let segments = results.flatMap(\.segments).map {
+            HallucinatedTailFilter.Segment(text: $0.text, start: TimeInterval($0.start), end: TimeInterval($0.end))
+        }
+        return .init(text: text, language: language, segments: segments)
+    }
+    if prep == "none" {
+        let output = try await hear(url)
+        return Transcribed(raw: output.text, filtered: output.text, language: seen.language, dropped: "", leadingMS: 0, trailingMS: 0, skipped: false)
+    }
+    var guardOptions = ClipSilenceGuard.Options.standard
+    guardOptions.trim = prep == "trim" || prep == "guard"
+    guardOptions.filter = prep == "filter" || prep == "guard"
+    let events = EventBox()
+    let outcome = try await ClipSilenceGuard.run(audioURL: url, options: guardOptions, log: { events.add($0, $1) }, transcribe: { try await hear($0) })
+    let trimmed = events.all.first { $0.0 == "transcribe.trimmed" }?.1
+    let dropped = events.all.filter { $0.0 == "transcribe.tail_dropped" }.map { $0.1["reason"] ?? "" }.joined(separator: ",")
+    return Transcribed(
+        raw: seen.raw, filtered: outcome.text, language: seen.language, dropped: dropped,
+        leadingMS: Int(trimmed?["leading_ms"] ?? "") ?? 0, trailingMS: Int(trimmed?["trailing_ms"] ?? "") ?? 0,
+        skipped: outcome.skippedAsSilent
+    )
 }
 
 func report(_ paths: [String]) throws {
@@ -209,14 +257,14 @@ func report(_ paths: [String]) throws {
     for key in groups.keys.sorted() {
         print("\n## \(key)")
         let byTail = Dictionary(grouping: groups[key]!) { $0.tail }
-        print("| tail | clips | trailing extra words (raw) | after filter | exact | silent-only text |")
+        print("| tail | clips | model added trailing words | final text added trailing words | final text exact | final text on a clip with no speech |")
         print("|---|---|---|---|---|---|")
         for tail in byTail.keys.sorted() {
             let list = byTail[tail]!
             let raw = list.filter { $0.tailExtraWords > 0 }.count
             let filtered = list.filter { $0.filteredExtraWords > 0 }.count
-            let exact = list.filter(\.exact).count
-            let silentOnlyText = list.filter { $0.reference.isEmpty && !words($0.output).isEmpty }.count
+            let exact = list.filter { words($0.reference) == words($0.filtered) }.count
+            let silentOnlyText = list.filter { $0.reference.isEmpty && !words($0.filtered).isEmpty }.count
             print("| \(tail) | \(list.count) | \(raw) | \(filtered) | \(exact) | \(silentOnlyText) |")
         }
         let extras = groups[key]!.filter { $0.tailExtraWords > 0 }.map { "\($0.output.suffix(40))" }

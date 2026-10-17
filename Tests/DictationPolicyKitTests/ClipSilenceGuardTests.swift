@@ -110,7 +110,7 @@ final class ClipSilenceGuardTests: XCTestCase {
     func testAClipOfOnlySilenceIsNeverTranscribedAndReturnsNothing() async throws {
         let directory = try TestAudio.temporaryDirectory(self)
         let recorder = Recorder()
-        for samples in [Synth.silence(3), Synth.roomTone(3, rmsDB: -50), Synth.roomTone(3, rmsDB: -40)] {
+        for samples in [Synth.silence(3), Synth.roomTone(3, rmsDB: -60), Synth.roomTone(3, rmsDB: -50)] {
             let original = try write(samples, in: directory)
             let outcome = try await run(original, recorder: recorder) { _ in .init(text: "Thank you.") }
             XCTAssertEqual(outcome.text, "")
@@ -118,6 +118,21 @@ final class ClipSilenceGuardTests: XCTestCase {
         }
         XCTAssertTrue(recorder.urls.isEmpty, "the engine heard nothing")
         XCTAssertEqual(recorder.names().filter { $0 == "transcribe.skipped_silent" }.count, 3)
+    }
+
+    func testRealSpeechQuietOverRoomToneIsHandedToTheEngine() async throws {
+        let directory = try TestAudio.temporaryDirectory(self)
+        let said = SayFixtures.normalised(
+            WavFile.Clip(samples: try TestAudio.sayClip("Please send the report by Friday afternoon", in: directory)),
+            loudestFrameDB: -32
+        ).samples
+        let noisy = zip(said, Synth.roomTone(Double(said.count) / 16_000, rmsDB: -40)).map { $0 + $1 }
+        let original = try write(noisy, in: directory)
+        let recorder = Recorder()
+        let outcome = try await run(original, recorder: recorder) { _ in .init(text: "Please send the report.") }
+        XCTAssertFalse(outcome.skippedAsSilent)
+        XCTAssertEqual(outcome.text, "Please send the report.")
+        XCTAssertEqual(recorder.urls.count, 1)
     }
 
     // MARK: the post-filter

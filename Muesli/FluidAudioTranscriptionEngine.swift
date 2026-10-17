@@ -85,10 +85,46 @@ actor FluidAudioTranscriptionEngine: TranscriptionEngine {
         return result.text
     }
 
+    /// Every file transcription on the phone ends up here: the keyboard's final pass, in-app dictation, long voice
+    /// notes, meeting chunks and the onboarding test. `ClipSilenceGuard` cuts the silence around the speech before the
+    /// model hears it (Whisper invents "Thank you." for a silent tail) and drops a known invented phrase that still
+    /// gets through.
     func transcribeDetailed(
         audioURL: URL,
         progress: (@Sendable (TranscriptionProgressUpdate) -> Void)? = nil
     ) async throws -> DetailedTranscriptionResult {
+        let transcribed = ResultBox()
+        let outcome = try await ClipSilenceGuard.run(
+            audioURL: audioURL,
+            log: { KeyboardDiagnosticsLog.record($0, $1.merging(["route": "on_device"]) { $1 }) }
+        ) { [self] guardedURL in
+            let result = try await transcribeUnguarded(audioURL: guardedURL, progress: progress)
+            transcribed.value = result
+            return .init(text: result.text, language: result.language, segments: result.segments)
+        }
+        let originalDuration = Self.duration(of: audioURL)
+        guard let result = transcribed.value, !outcome.skippedAsSilent else {
+            progress?(.init(fractionCompleted: 1, message: "Transcription complete"))
+            return DetailedTranscriptionResult(text: "", duration: originalDuration ?? 0, tokens: [])
+        }
+        return DetailedTranscriptionResult(
+            text: outcome.text,
+            duration: originalDuration ?? result.duration,
+            tokens: result.tokens.map {
+                TimedTranscriptToken(
+                    token: $0.token,
+                    startTime: $0.startTime + outcome.leadingOffset,
+                    endTime: $0.endTime + outcome.leadingOffset,
+                    confidence: $0.confidence
+                )
+            }
+        )
+    }
+
+    private func transcribeUnguarded(
+        audioURL: URL,
+        progress: (@Sendable (TranscriptionProgressUpdate) -> Void)?
+    ) async throws -> UnguardedTranscription {
         if selectedModel.family == .whisper {
             return try await transcribeWithWhisperKit(audioURL: audioURL, progress: progress)
         }
@@ -122,7 +158,7 @@ actor FluidAudioTranscriptionEngine: TranscriptionEngine {
         var decoderState = TdtDecoderState.make(decoderLayers: await manager.decoderLayerCount)
         let result = try await manager.transcribe(audioURL, decoderState: &decoderState)
         progress?(.init(fractionCompleted: 1, message: "Transcription complete"))
-        return DetailedTranscriptionResult(
+        return UnguardedTranscription(
             text: result.text.trimmingCharacters(in: .whitespacesAndNewlines),
             duration: result.duration,
             tokens: (result.tokenTimings ?? []).map {
@@ -379,27 +415,26 @@ actor FluidAudioTranscriptionEngine: TranscriptionEngine {
     private func transcribeWithWhisperKit(
         audioURL: URL,
         progress: (@Sendable (TranscriptionProgressUpdate) -> Void)?
-    ) async throws -> DetailedTranscriptionResult {
+    ) async throws -> UnguardedTranscription {
         let runtime = try await loadedWhisperRuntime { fraction, message in
             progress?(.init(fractionCompleted: fraction, message: message))
         }
         progress?(.init(fractionCompleted: 0, message: "Transcribing with WhisperKit"))
-        let text = try await runtime.transcribe(audioURL: audioURL)
-        let duration: TimeInterval
-        if let audioFile = try? AVAudioFile(forReading: audioURL),
-           audioFile.fileFormat.sampleRate > 0 {
-            duration = Double(audioFile.length) / audioFile.fileFormat.sampleRate
-        } else {
-            duration = 0
-        }
+        let transcription = try await runtime.transcribe(audioURL: audioURL)
         progress?(.init(fractionCompleted: 1, message: "Transcription complete"))
-        return DetailedTranscriptionResult(text: text, duration: duration, tokens: [])
+        return UnguardedTranscription(
+            text: transcription.text,
+            duration: Self.duration(of: audioURL) ?? 0,
+            tokens: [],
+            language: transcription.language,
+            segments: transcription.segments
+        )
     }
 
     private func transcribeWithStreamingManager(
         audioURL: URL,
         progress: (@Sendable (TranscriptionProgressUpdate) -> Void)? = nil
-    ) async throws -> DetailedTranscriptionResult {
+    ) async throws -> UnguardedTranscription {
         let manager = try await loadedStreamingManager { fraction, status in
             progress?(.init(fractionCompleted: fraction, message: status))
         }
@@ -434,7 +469,7 @@ actor FluidAudioTranscriptionEngine: TranscriptionEngine {
 
         let text = try await manager.finish()
         progress?(.init(fractionCompleted: 1, message: "Transcription complete"))
-        return DetailedTranscriptionResult(
+        return UnguardedTranscription(
             text: text.trimmingCharacters(in: .whitespacesAndNewlines),
             duration: duration,
             tokens: []
@@ -482,6 +517,13 @@ actor FluidAudioTranscriptionEngine: TranscriptionEngine {
         }
     }
 
+    private nonisolated static func duration(of audioURL: URL) -> TimeInterval? {
+        guard let audioFile = try? AVAudioFile(forReading: audioURL), audioFile.fileFormat.sampleRate > 0 else {
+            return nil
+        }
+        return Double(audioFile.length) / audioFile.fileFormat.sampleRate
+    }
+
     private nonisolated static func shouldObserveOfflineProgress(for audioURL: URL) -> Bool {
         guard let audioFile = try? AVAudioFile(forReading: audioURL),
               audioFile.fileFormat.sampleRate > 0 else {
@@ -527,6 +569,25 @@ private actor FluidAudioDiarizationRuntime {
         try await manager.prepareModels()
         self.manager = manager
         return manager
+    }
+}
+
+/// What one engine run produced for the file it was handed, before the silence guard has judged the text.
+private struct UnguardedTranscription: Sendable {
+    let text: String
+    let duration: TimeInterval
+    let tokens: [TimedTranscriptToken]
+    var language: String?
+    var segments: [HallucinatedTailFilter.Segment] = []
+}
+
+/// Carries the engine's full result out of the guard's closure, which can return only the text and its timing.
+private final class ResultBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: UnguardedTranscription?
+    var value: UnguardedTranscription? {
+        get { lock.withLock { stored } }
+        set { lock.withLock { stored = newValue } }
     }
 }
 

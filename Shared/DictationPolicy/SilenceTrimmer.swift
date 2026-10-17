@@ -27,9 +27,12 @@ enum SilenceTrimmer {
         var minTrimSeconds: Double = 0.2
         /// Clips shorter than this are never trimmed; they are too short to tell speech from noise safely.
         var minClipSeconds: Double = 0.5
-        /// A clip whose loud and quiet frames differ by less than this, and which is quiet overall, is a hum or room
-        /// tone: it has no syllables.
+        /// A clip whose loud and quiet frames differ by less than this has no syllables: it is a hum, room tone, or
+        /// speech so close to the noise that the two cannot be told apart.
         var steadyRangeDB: Float = 6
+        /// A steady clip whose loudest frames are below this is room tone with nobody speaking: silent. Louder, it
+        /// could be quiet speech over a fan, so the detector does not judge it (see `Analysis.indeterminate`).
+        var steadySilentCeilingDB: Float = -42
         var steadyCeilingDB: Float = -30
         /// The loud reference is the level of this many of the clip's loudest frames (fewer in a very short clip).
         var loudReferenceSeconds: Double = 0.3
@@ -46,13 +49,28 @@ enum SilenceTrimmer {
         var isNoOp: Bool { keepStartFrame == 0 && keepEndFrame == totalFrames }
     }
 
+    /// What the detector can say about a clip. Losing a real dictation is far worse than a stray "Thank you.", so
+    /// anything it cannot prove empty is `indeterminate` and treated as speech everywhere.
+    enum Analysis: Sendable, Equatable {
+        /// Provably nothing said: quieter than any speech, or only quiet steady noise.
+        case silent
+        /// Steady and not quiet enough to rule out speech (quiet speech over a fan, a loud hum). Nothing is cut,
+        /// nothing is skipped and nothing is filtered.
+        case indeterminate
+        /// Where the speech is, in frames, in order.
+        case speech([Range<Int>])
+    }
+
     static func plan(for profile: ClipEnergyProfile, config: Config = .standard) -> Plan {
         let total = profile.frameCount
-        let spans = speechSpans(in: profile, config: config)
-        guard let first = spans.first, let last = spans.last else {
-            return Plan(hasSpeech: false, keepStartFrame: 0, keepEndFrame: total, totalFrames: total)
-        }
         let untouched = Plan(hasSpeech: true, keepStartFrame: 0, keepEndFrame: total, totalFrames: total)
+        let spans: [Range<Int>]
+        switch analyse(profile, config: config) {
+        case .silent: return Plan(hasSpeech: false, keepStartFrame: 0, keepEndFrame: total, totalFrames: total)
+        case .indeterminate: return untouched
+        case .speech(let found): spans = found
+        }
+        guard let first = spans.first, let last = spans.last else { return untouched }
         guard profile.duration >= config.minClipSeconds else { return untouched }
 
         let pad = frames(config.padSeconds)
@@ -64,9 +82,17 @@ enum SilenceTrimmer {
         return Plan(hasSpeech: true, keepStartFrame: start, keepEndFrame: end, totalFrames: total)
     }
 
-    /// The stretches of the clip that hold speech, in frames, in order and non-overlapping. Empty when there is none.
-    static func speechSpans(in profile: ClipEnergyProfile, config: Config = .standard) -> [Range<Int>] {
-        guard let gate = gate(for: profile, config: config) else { return [] }
+    static func analyse(_ profile: ClipEnergyProfile, config: Config = .standard) -> Analysis {
+        switch gate(for: profile, config: config) {
+        case .silent: return .silent
+        case .indeterminate: return .indeterminate
+        case .level(let level):
+            let spans = speechSpans(in: profile, gate: level, config: config)
+            return spans.isEmpty ? .silent : .speech(spans)
+        }
+    }
+
+    private static func speechSpans(in profile: ClipEnergyProfile, gate: Float, config: Config) -> [Range<Int>] {
         let minFrames = max(1, frames(config.minSpeechSeconds))
         let bridge = max(1, frames(config.bridgeSeconds))
         let levels = profile.frameDB
@@ -90,16 +116,20 @@ enum SilenceTrimmer {
         return spans
     }
 
-    /// The level a frame must reach to count as speech, or nil when the clip has none.
-    private static func gate(for profile: ClipEnergyProfile, config: Config) -> Float? {
-        guard !profile.frameDB.isEmpty else { return nil }
+    private enum Gate { case silent, indeterminate, level(Float) }
+
+    /// The level a frame must reach to count as speech.
+    private static func gate(for profile: ClipEnergyProfile, config: Config) -> Gate {
+        guard !profile.frameDB.isEmpty else { return .silent }
         let histogram = LevelHistogram(profile.frameDB)
         let rank = min(max(1, profile.frameCount / 10), max(1, frames(config.loudReferenceSeconds)))
         let loud = histogram.level(fromTop: rank)
-        guard loud >= config.absoluteFloorDB else { return nil }
+        guard loud >= config.absoluteFloorDB else { return .silent }
         let quiet = histogram.level(fromBottomFraction: 0.1)
-        if loud - quiet < config.steadyRangeDB, loud < config.steadyCeilingDB { return nil }
-        return max(config.absoluteFloorDB, loud - config.belowLoudDB)
+        if loud - quiet < config.steadyRangeDB, loud < config.steadyCeilingDB {
+            return loud < config.steadySilentCeilingDB ? .silent : .indeterminate
+        }
+        return .level(max(config.absoluteFloorDB, loud - config.belowLoudDB))
     }
 
     private static func frames(_ seconds: Double) -> Int {

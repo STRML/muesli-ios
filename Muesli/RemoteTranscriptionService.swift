@@ -54,6 +54,17 @@ actor RemoteTranscriptionService {
         )
     }
 
+    /// The endpoint hears the same trimmed copy the on-device model does, and its text goes through the same
+    /// hallucinated-tail filter: Qwen3-ASR and Granite are not immune to inventing a sign-off over silence. Guarding
+    /// the upload, not the whole race, keeps each side to one analysis and one `transcribe.trimmed` event.
+    private static func guardedUpload(_ client: RemoteTranscriptionClient, audioURL: URL) async throws -> String {
+        let outcome = try await ClipSilenceGuard.run(
+            audioURL: audioURL,
+            log: { KeyboardDiagnosticsLog.record($0, $1.merging(["route": "remote"]) { $1 }) }
+        ) { .init(text: try await client.transcribe(audioURL: $0)) }
+        return outcome.text
+    }
+
     private func orchestrator() -> RemoteTranscriptionOrchestrator? {
         guard let endpoint = CustomLLMEndpoint.transcriptionsURL(from: MuesliPreferences.customLLMBaseURL) else {
             cached = nil
@@ -69,7 +80,7 @@ actor RemoteTranscriptionService {
         let orchestrator = RemoteTranscriptionOrchestrator(
             timing: timing,
             probe: { await probeCache.outcome() },
-            upload: { try await client.transcribe(audioURL: $0) },
+            upload: { try await Self.guardedUpload(client, audioURL: $0) },
             prewarm: { await probeCache.prewarm() },
             log: { Self.logger.notice("\($0, privacy: .public)") },
             invalidateProbe: { await probeCache.invalidate() }

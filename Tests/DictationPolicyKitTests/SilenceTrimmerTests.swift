@@ -64,10 +64,28 @@ final class SilenceTrimmerTests: XCTestCase {
         XCTAssertFalse(plan(Synth.silence(3)).hasSpeech)
     }
 
-    func testAClipOfOnlyRoomToneHasNoSpeech() {
-        for level in [-60.0, -50.0, -40.0] {
+    func testAClipOfOnlyVeryQuietRoomToneHasNoSpeech() {
+        for level in [-60.0, -50.0, -45.0] {
             XCTAssertFalse(plan(Synth.roomTone(3, rmsDB: level)).hasSpeech, "room tone at \(level) dBFS")
         }
+    }
+
+    // MARK: quiet speech over noise is never called silent
+
+    func testQuietSpeechOverRoomToneIsNeverSkipped() {
+        for (speechDB, noiseDB) in [(-34.0, -38.0), (-32.0, -36.0), (-30.0, -34.0), (-36.0, -42.0)] {
+            let mixed = zip(Synth.voicedBurst(2.5, rmsDB: speechDB), Synth.roomTone(2.5, rmsDB: noiseDB)).map { $0 + $1 }
+            let plan = plan(mixed)
+            XCTAssertTrue(plan.hasSpeech, "speech at \(speechDB) over noise at \(noiseDB) dBFS")
+            XCTAssertEqual(plan.keepStartFrame, 0, "when the detector cannot tell, it keeps everything")
+            XCTAssertEqual(plan.keepEndFrame, plan.totalFrames)
+        }
+    }
+
+    func testASteadyNoiseFloorTheDetectorCannotJudgeIsHandedOverWhole() {
+        let plan = plan(Synth.roomTone(3, rmsDB: -40))
+        XCTAssertTrue(plan.hasSpeech, "-40 dBFS could be a whisper over a fan: not skipped")
+        XCTAssertTrue(plan.isNoOp)
     }
 
     func testAnEmptyClipHasNoSpeech() {
@@ -118,9 +136,11 @@ final class SilenceTrimmerTests: XCTestCase {
         XCTAssertEqual(plan.trailingTrimSeconds, 2 - 0.25, accuracy: 0.05)
     }
 
-    func testASteadyHumIsNotSpeech() {
+    func testAQuietSteadyHumIsHandedOverWhole() {
         let hum = (0..<(3 * TestAudio.rate)).map { Float(sin(2 * Double.pi * 60 * Double($0) / 16_000)) * 0.02 }
-        XCTAssertFalse(plan(hum).hasSpeech, "a 60 Hz hum at about -37 dBFS has no syllables")
+        let plan = plan(hum)
+        XCTAssertTrue(plan.hasSpeech, "a 60 Hz hum at about -37 dBFS has no syllables, but it is not provably empty")
+        XCTAssertTrue(plan.isNoOp)
     }
 
     // MARK: cost on long clips

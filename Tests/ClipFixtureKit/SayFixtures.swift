@@ -18,6 +18,8 @@ public enum SayFixtures {
         ("p6-status", "The build is green and the release can go out today"),
         ("p7-question", "Can you check whether the invoice was paid"),
         ("p8-note", "Note to self, look into the battery drain on the new phone"),
+        // Ends in a "thank you" the speaker really says: the guard must never remove it.
+        ("p9-signoff", "Please send the report by Friday. Thank you."),
     ]
 
     public static let paragraphs: [(id: String, text: String)] = [
@@ -40,6 +42,13 @@ public enum SayFixtures {
 
     /// Three accents that ship with every Mac, so the numbers are not one voice's quirk.
     public static let voices = ["Samantha", "Daniel", "Karen"]
+
+    /// Non-English speech, to see what language WhisperKit reports and that the English phrase list stays out of it.
+    public static let foreign: [(id: String, voice: String, text: String)] = [
+        ("es", "Paulina", "Por favor envía el informe antes del viernes por la tarde"),
+        ("de", "Anna", "Bitte schicken Sie den Bericht bis Freitagnachmittag"),
+        ("fr", "Thomas", "Merci d'envoyer le rapport avant vendredi après-midi"),
+    ]
 
     public static let thankYou: (id: String, text: String) = ("ty", "Thank you")
 

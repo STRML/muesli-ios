@@ -71,15 +71,29 @@ actor WhisperKitTranscriptionRuntime {
         ])
     }
 
-    func transcribe(audioURL: URL) async throws -> String {
+    /// What WhisperKit heard in one file, with the language it decoded in and the segment timing the silence guard
+    /// needs to tell a phrase the speaker said from one the model invented over silence.
+    struct Transcription: Sendable {
+        let text: String
+        let language: String
+        let segments: [HallucinatedTailFilter.Segment]
+    }
+
+    func transcribe(audioURL: URL) async throws -> Transcription {
         guard let whisperKit else {
             throw WhisperKitRuntimeError.notLoaded
         }
         let results = try await whisperKit.transcribe(audioPath: audioURL.path)
-        return results
-            .map(\.text)
-            .joined(separator: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return Transcription(
+            text: results
+                .map(\.text)
+                .joined(separator: " ")
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+            language: results.first?.language ?? "en",
+            segments: results.flatMap(\.segments).map {
+                HallucinatedTailFilter.Segment(text: $0.text, start: TimeInterval($0.start), end: TimeInterval($0.end))
+            }
+        )
     }
 
     func unload() async {
