@@ -41,7 +41,8 @@ struct TypingKey: Sendable, Equatable, Identifiable {
 enum TypingLayout {
     static let rowWeight = 10.0
 
-    private static let letterRows = ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
+    /// The letter keys, top row first. The one source for the key positions autocorrect measures distance by.
+    static let letterRows = ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
     private static let numberRows = ["1234567890", "-/:;()$&@\"", ""]
     private static let symbolRows = ["[]{}#%^*+=", "_\\|~<>\u{20AC}\u{00A3}\u{00A5}\u{2022}", ""]
     private static let punctuationRow = [".", ",", "?", "!", "'"]

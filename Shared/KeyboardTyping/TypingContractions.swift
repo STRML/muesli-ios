@@ -13,7 +13,11 @@ enum TypingContractions {
             "im": "I'm", "ive": "I've", "youre": "you're", "youve": "you've", "youll": "you'll",
             "theyre": "they're", "theyve": "they've", "theyll": "they'll", "weve": "we've",
             "thats": "that's", "whats": "what's", "theres": "there's", "heres": "here's", "whos": "who's",
-            "couldve": "could've", "shouldve": "should've", "wouldve": "would've",
+            "couldve": "could've", "shouldve": "should've", "wouldve": "would've", "mightve": "might've",
+            "mustve": "must've", "hows": "how's", "wheres": "where's",
+            "itll": "it'll", "thatll": "that'll", "whatll": "what'll", "theyd": "they'd", "youd": "you'd",
+            "whod": "who'd", "aint": "ain't", "mustnt": "mustn't", "neednt": "needn't", "yall": "y'all",
+            "oclock": "o'clock",
             "i": "I",
         ]
         let days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
@@ -23,6 +27,10 @@ enum TypingContractions {
         return table
     }()
 
+    /// A lowercase "i" in front of an apostrophe is the pronoun, whatever follows ("i'm", "i'll"). An apostrophe
+    /// cannot start a host name, so these are fixed before a "." too.
+    private static let pronounContractions: Set<String> = ["i'm", "i'll", "i've", "i'd"]
+
     /// The shortest word that is still fixed before a "." or ":".
     private static let strictMinimumLength = 4
 
@@ -30,6 +38,7 @@ enum TypingContractions {
     /// may be the start of "i.e.", "im.com" or "june.app": only a longer contraction ("dont") is fixed then,
     /// never "i", a short one or a day or month.
     static func correction(for word: String, strict: Bool = false) -> String? {
+        if pronounContractions.contains(word) { return "I" + word.dropFirst() }
         let lowered = word.lowercased()
         guard let fixed = table[lowered] else { return nil }
         if strict, !(fixed.contains("'") && lowered.count >= strictMinimumLength) { return nil }

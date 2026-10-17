@@ -172,8 +172,11 @@ targets:
     platform: iOS
     sources:
       - path: Tests/MuesliTests
-      # The autocorrect evaluation corpus is plain data shared with the host tests (KeyboardTypingKitTests).
-      - path: Tests/KeyboardTypingKitTests/AutocorrectCorpus.swift
+      # The autocorrect evaluation corpus (word list, typo generator, runner) is shared with the host tests
+      # (KeyboardTypingKitTests); here it runs against the real UITextChecker.
+      - path: Tests/KeyboardTypingKitTests/Corpus
+        excludes:
+          - "README.md"
       # The model of a host field that the live typing host tests share with the package tests.
       - path: Tests/DictationPolicyKitTests/ModelMarkedHost.swift
       - path: Shared
