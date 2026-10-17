@@ -219,3 +219,109 @@ func makeAudioFile(bytes: Int = 4096, ext: String = "m4a", fill: UInt8 = 0x41, t
     test.addTeardownBlock { try? FileManager.default.removeItem(at: url) }
     return url
 }
+
+/// A sleeper for the orchestrator's `sleep` seam. Every wait it is asked for is recorded and parked until the test
+/// releases it by its delay, so what the orchestrator schedules and what it waits out is asserted exactly, with no
+/// dependence on how loaded the machine is. A cancelled wait throws, as `Task.sleep` does.
+final class ManualSleeper: @unchecked Sendable {
+    private struct Waiter {
+        let id: Int
+        let delay: TimeInterval
+        let continuation: CheckedContinuation<Void, any Error>
+    }
+
+    private let lock = NSLock()
+    private var nextID = 0
+    private var waiters: [Waiter] = []
+    private var cancelledEarly: Set<Int> = []
+    private var requestedDelays: [TimeInterval] = []
+    private var releasedDelays: [TimeInterval] = []
+
+    /// Every delay asked for, in request order.
+    var requested: [TimeInterval] { lock.lock(); defer { lock.unlock() }; return requestedDelays }
+    /// Every delay the test let elapse, in release order.
+    var released: [TimeInterval] { lock.lock(); defer { lock.unlock() }; return releasedDelays }
+    /// Delays parked right now.
+    var pending: [TimeInterval] { lock.lock(); defer { lock.unlock() }; return waiters.map(\.delay) }
+
+    @Sendable func sleep(_ delay: TimeInterval) async throws {
+        let id: Int = {
+            lock.lock(); defer { lock.unlock() }
+            nextID += 1
+            requestedDelays.append(delay)
+            return nextID
+        }()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+                lock.lock()
+                if cancelledEarly.remove(id) != nil {
+                    lock.unlock()
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
+                waiters.append(Waiter(id: id, delay: delay, continuation: continuation))
+                lock.unlock()
+            }
+        } onCancel: {
+            lock.lock()
+            guard let index = waiters.firstIndex(where: { $0.id == id }) else {
+                cancelledEarly.insert(id)
+                lock.unlock()
+                return
+            }
+            let waiter = waiters.remove(at: index)
+            lock.unlock()
+            waiter.continuation.resume(throwing: CancellationError())
+        }
+    }
+
+    /// Lets every parked wait of this delay elapse.
+    func release(_ delay: TimeInterval) {
+        lock.lock()
+        let due = waiters.filter { $0.delay == delay }
+        waiters.removeAll { $0.delay == delay }
+        if !due.isEmpty { releasedDelays.append(delay) }
+        lock.unlock()
+        due.forEach { $0.continuation.resume() }
+    }
+
+    /// Suspends until a wait of this delay is parked. Spins on `Task.yield`, so it follows the scheduler, not a timer.
+    func waitUntilPending(_ delay: TimeInterval, file: StaticString = #filePath, line: UInt = #line) async {
+        await eventually("a \(delay)s wait to be scheduled", file: file, line: line) { pending.contains(delay) }
+    }
+}
+
+/// Yields until `condition` holds. The 30 s cap only turns a hang into a failure; a passing run never gets near it,
+/// and nothing in a passing run depends on how long it took.
+func eventually(
+    _ what: String,
+    file: StaticString = #filePath,
+    line: UInt = #line,
+    _ condition: @Sendable () -> Bool
+) async {
+    let giveUp = ContinuousClock.now + .seconds(30)
+    while !condition() {
+        if ContinuousClock.now > giveUp {
+            XCTFail("timed out waiting for \(what)", file: file, line: line)
+            return
+        }
+        await Task.yield()
+    }
+}
+
+/// Holds an async stub until the test opens it.
+final class Gate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var isOpen = false
+    private var parked: [CheckedContinuation<Void, Never>] = []
+    func open() {
+        lock.lock(); isOpen = true; let toResume = parked; parked = []; lock.unlock()
+        toResume.forEach { $0.resume() }
+    }
+    func wait() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            lock.lock()
+            if isOpen { lock.unlock(); continuation.resume() } else { parked.append(continuation); lock.unlock() }
+        }
+    }
+}

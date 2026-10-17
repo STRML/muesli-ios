@@ -80,6 +80,7 @@ final class DictationCoordinator {
     @ObservationIgnored private var startupLiveActivityCleanupTask: Task<Void, Never>?
     private var modelPreparationTask: Task<Void, Never>?
     private var modelPrewarmTask: Task<Void, Never>?
+    @ObservationIgnored private let modelPrewarmHistory = ModelPrewarmHistoryStore()
     private var meteringTask: Task<Void, Never>?
     @ObservationIgnored private var liveActivityMeterTask: Task<Void, Never>?
     @ObservationIgnored private var liveActivityMeterGeneration = UUID()
@@ -150,7 +151,29 @@ final class DictationCoordinator {
         #if DEBUG
         guard !Self.shouldSkipModelPrewarmForTesting() else { return false }
         #endif
-        return hasCompletedOnboarding && !isSelectedModelDownloadSuppressed
+        guard hasCompletedOnboarding, !isSelectedModelDownloadSuppressed else { return false }
+        // The splash only waits for work that is happening or about to. When opening the app no longer warms the
+        // model, there is nothing to wait for.
+        if isModelPrewarmInProgress || modelPreparation.isPreparing { return true }
+        switch prewarmDecision(for: .launchScreen, loadInFlight: false) {
+        case .load, .download: return true
+        case .skip: return false
+        }
+    }
+
+    private func prewarmDecision(
+        for trigger: ModelPrewarmPolicy.Trigger,
+        loadInFlight: Bool
+    ) -> ModelPrewarmPolicy.Decision {
+        let model = selectedTranscriptionModel
+        return ModelPrewarmPolicy.decide(
+            trigger: trigger,
+            isDownloaded: model.isDownloaded,
+            isLoaded: modelPreparation.isReady,
+            loadInFlight: loadInFlight,
+            history: modelPrewarmHistory.history(for: model.rawValue),
+            now: Date()
+        )
     }
     private var isKeyboardHotMicEngineReady: Bool {
         isKeyboardSessionArmed && keyboardSessionKeeper.canAcceptStartCommand
@@ -201,6 +224,8 @@ final class DictationCoordinator {
             preparationTask?.cancel()
             modelPrewarmTask?.cancel()
             modelPrewarmTask = nil
+            modelPrewarmHistory.reset(modelID: oldValue.rawValue)
+            modelPrewarmHistory.reset(modelID: selectedTranscriptionModel.rawValue)
             modelPreparation = ModelPreparationState(
                 status: "\(selectedTranscriptionModel.shortName) is not downloaded",
                 detail: selectedTranscriptionModel.detail
@@ -538,7 +563,7 @@ final class DictationCoordinator {
                 detail: "Recovered from interrupted session"
             )
         }
-        prewarmModelIfNeeded(reason: "launch")
+        prewarmModelIfNeeded(.launch)
         Task { await keyboardMicActivity.removeOrphanedActivities() }
         // A saved preference is not a request to activate the microphone at launch.
     }
@@ -4007,7 +4032,7 @@ final class DictationCoordinator {
               !isRecording, !hasMeetingRecordingInProgress else { return }
         let sessionID = beginKeyboardMicSession()
         guard !isKeyboardSessionArmed else {
-            prewarmModelIfNeeded(reason: "keyboard_session")
+            prewarmModelIfNeeded(.keyboardSession)
             if !isRecording, !hasMeetingRecordingInProgress, activeRequest == nil {
                 _ = await ensureKeyboardSessionKeeperRunning(publishReady: true)
             }
@@ -4035,7 +4060,7 @@ final class DictationCoordinator {
             keyboardSessionRetryTask?.cancel()
             keyboardSessionRetryTask = nil
             keyboardSessionRetryAttempt = 0
-            prewarmModelIfNeeded(reason: "keyboard_session")
+            prewarmModelIfNeeded(.keyboardSession)
             transitionKeyboardSession(.startSucceeded)
             saveKeyboardRuntimeStatus(
                 isActive: true,
@@ -4232,6 +4257,8 @@ final class DictationCoordinator {
             modelPrewarmTask = nil
             await engine.unloadModel(model)
         }
+        // Removed files are a fresh start: the next download is the first load again.
+        modelPrewarmHistory.reset(modelID: model.rawValue)
 
         if model == .parakeetRealtimeEou120m {
             releaseDedicatedLivePreviewEngine()
@@ -4303,14 +4330,17 @@ final class DictationCoordinator {
                     }
                     return
                 }
+                let loadStart = SuspendingClock.now
                 try await engine.prepare { progress, status in
                     Task { @MainActor in
                         coordinator.applyModelPreparationProgress(progress, status: status, model: model)
                     }
                 }
+                let loadSeconds = (SuspendingClock.now - loadStart).totalSeconds
 
                 await MainActor.run {
                     guard coordinator.selectedTranscriptionModel == model else { return }
+                    coordinator.modelPrewarmHistory.recordLoad(modelID: model.rawValue, seconds: loadSeconds, now: Date())
                     coordinator.modelPreparationTask = nil
                     coordinator.modelPreparation = ModelPreparationState(
                         phase: .ready,
@@ -4349,7 +4379,7 @@ final class DictationCoordinator {
         }
     }
 
-    func prewarmModelIfNeeded(reason: String) {
+    func prewarmModelIfNeeded(_ trigger: ModelPrewarmPolicy.Trigger) {
         #if DEBUG
         guard !Self.shouldSkipModelPrewarmForTesting() else { return }
         #endif
@@ -4360,9 +4390,18 @@ final class DictationCoordinator {
         guard !isRecording, !hasMeetingRecordingInProgress else { return }
 
         let model = selectedTranscriptionModel
-        guard ModelPreparationPolicy.action(isDownloaded: model.isDownloaded) == .warmDownloadedModel else {
+        let reason = trigger.rawValue
+        switch prewarmDecision(for: trigger, loadInFlight: false) {
+        case .skip(let skipReason):
+            if skipReason == .backingOff {
+                KeyboardDiagnosticsLog.record("model.prewarm.backingOff", ["trigger": reason, "model": model.rawValue])
+            }
+            return
+        case .download:
             prepareSelectedModel(reason: "prewarm_\(reason)")
             return
+        case .load:
+            break
         }
         modelPreparation = ModelPreparationState(
             phase: .preparing,
@@ -4392,15 +4431,20 @@ final class DictationCoordinator {
                     "model_prewarm_started",
                     parameters: ["engine": model.engineIdentifier, "reason": reason]
                 )
+                // SuspendingClock stops while the app is suspended, so a load that straddles a backgrounding is not
+                // mistaken for a slow one.
+                let loadStart = SuspendingClock.now
                 try await engine.prepare { progress, status in
                     Task { @MainActor in
                         coordinator.applyModelPreparationProgress(progress, status: status, model: model)
                     }
                 }
+                let loadSeconds = (SuspendingClock.now - loadStart).totalSeconds
 
                 await MainActor.run {
                     guard coordinator.selectedTranscriptionModel == model else { return }
                     coordinator.modelPrewarmTask = nil
+                    coordinator.modelPrewarmHistory.recordLoad(modelID: model.rawValue, seconds: loadSeconds, now: Date())
                     coordinator.modelPreparation = ModelPreparationState(
                         phase: .ready,
                         progress: 1,
@@ -4422,6 +4466,7 @@ final class DictationCoordinator {
                 await MainActor.run {
                     guard coordinator.selectedTranscriptionModel == model else { return }
                     coordinator.modelPrewarmTask = nil
+                    coordinator.modelPrewarmHistory.recordFailure(modelID: model.rawValue, now: Date())
                     coordinator.modelPreparation = ModelPreparationState(
                         phase: .failed,
                         progress: nil,
@@ -4554,7 +4599,7 @@ final class DictationCoordinator {
                 "use_case": selectedUseCase.rawValue
             ]
         )
-        prewarmModelIfNeeded(reason: "onboarding_completed")
+        prewarmModelIfNeeded(.onboardingCompleted)
     }
 
     private func applyModelPreparationProgress(
@@ -4592,14 +4637,17 @@ final class DictationCoordinator {
         modelPreparationTask = Task { [engine, model] in
             do {
                 await engine.selectModel(model)
+                let loadStart = SuspendingClock.now
                 try await engine.prepare { progress, status in
                     Task { @MainActor in
                         coordinator.applyModelPreparationProgress(progress, status: status, model: model)
                     }
                 }
+                let loadSeconds = (SuspendingClock.now - loadStart).totalSeconds
 
                 await MainActor.run {
                     guard coordinator.selectedTranscriptionModel == model else { return }
+                    coordinator.modelPrewarmHistory.recordLoad(modelID: model.rawValue, seconds: loadSeconds, now: Date())
                     coordinator.modelPreparationTask = nil
                     coordinator.modelPreparation = ModelPreparationState(
                         phase: .ready,
@@ -5019,6 +5067,8 @@ final class DictationCoordinator {
         if !startsAsNotepad {
             prewarmRemoteProcessing(startedFromKeyboard: isKeyboardHandoffActive, source: source)
         }
+        // Opening the app no longer loads the model, so the load starts here and overlaps the speech.
+        prewarmModelIfNeeded(.recordingStart)
         recordingStartupInProgress = true
         activeRequest = request
         let usesPersistentKeyboardSession = (source == "keyboard" && MuesliPreferences.keyboardSessionModeEnabled)
@@ -6129,7 +6179,7 @@ final class DictationCoordinator {
                 throw CancellationError()
             }
             startMeetingMetering()
-            prewarmModelIfNeeded(reason: "meeting_recording")
+            prewarmModelIfNeeded(.meetingRecording)
             refreshHistory()
             AppTelemetry.signal("meeting_recording_started")
             Task {
