@@ -3,6 +3,7 @@ import Foundation
 @preconcurrency import FluidAudio
 import Observation
 import UIKit
+import UserNotifications
 
 struct NotepadBurstCompletion: Equatable, Identifiable {
     let id: UUID
@@ -44,6 +45,15 @@ final class DictationCoordinator {
 
     private let store: SharedStore
     private let eventBus: any CrossProcessEventStreaming
+    /// This process launch. Every request the app works on is stamped with it, and the heartbeat proves it is alive.
+    @ObservationIgnored private let boot: AppBootIdentity
+    @ObservationIgnored private let readinessPublisher: AppReadinessPublisher
+    /// When the current model load began, and why the last one failed, for the readiness record.
+    @ObservationIgnored private var modelLoadStartedAt: Date?
+    @ObservationIgnored private var modelFailure: ReadinessModelFailure?
+    /// The readiness trip the keyboard sent the user on, while it lasts. Drives the Preparing screen.
+    private(set) var prepareTrip: PrepareTrip?
+    @ObservationIgnored private var notificationsAllowedForPrepare = false
     private let voiceNoteCheckpointStore: VoiceNoteCheckpointStore
     private let engine = FluidAudioTranscriptionEngine()
     private let recorder = AudioRecorder()
@@ -174,6 +184,7 @@ final class DictationCoordinator {
             isLoaded: modelPreparation.isReady,
             loadInFlight: loadInFlight,
             history: modelPrewarmHistory.history(for: model.rawValue),
+            stamp: boot.stamp.loadKey,
             now: Date()
         )
     }
@@ -244,7 +255,9 @@ final class DictationCoordinator {
             }
         }
     }
-    var modelPreparation = ModelPreparationState()
+    var modelPreparation = ModelPreparationState() {
+        didSet { modelPreparationDidChange(from: oldValue) }
+    }
     var isRemovingTranscriptionModel = false
     var canRemoveDownloadedModels: Bool {
         !isRemovingTranscriptionModel
@@ -414,9 +427,12 @@ final class DictationCoordinator {
             fixtureStore = SharedStore(containerURL: directory, eventPoster: eventBus)
         }
         #endif
-        let store = fixtureStore ?? SharedStore(eventPoster: eventBus)
+        let boot = AppBootIdentity.startNow()
+        let store = (fixtureStore ?? SharedStore(eventPoster: eventBus)).owned(by: boot.id)
         self.store = store
         self.eventBus = eventBus
+        self.boot = boot
+        readinessPublisher = AppReadinessPublisher(store: store, boot: boot)
         voiceNoteCheckpointStore = VoiceNoteCheckpointStore(store: store)
         ModelBackgroundDownloadService.shared.delegate = self
 
@@ -531,6 +547,10 @@ final class DictationCoordinator {
                 self?.handleVoiceNoteWriterFailure(failure)
             }
         }
+        // This boot is published before anything else runs, so the keyboard never reads an older boot's record as
+        // live, and the reconcile below judges requests against a record that already names this process.
+        readinessPublisher.start(model: currentReadinessModelState(), mic: currentReadinessMicState())
+        reconcileAbandonedRequests(reason: "launch")
         startSharedEventObservation()
         publishKeyboardModelCatalog()
         publishKeyboardTypingSettings()
@@ -558,12 +578,19 @@ final class DictationCoordinator {
         refreshAudioInputRoute()
         if !isConfiguringForUITesting {
             refreshHistory()
-            recoverLongVoiceNotesIfNeeded()
+            recoverLongVoiceNotesIfNeeded(includeKeyboardOrphans: true)
         }
         startupLiveActivityCleanupTask = Task {
             await liveActivityController.endAllActivities(
                 detail: "Recovered from interrupted session"
             )
+        }
+        // A load the last boot never finished is a strike, so a launch loop backs off instead of retrying forever.
+        if modelPrewarmHistory.recoverInterruptedLoad(
+            modelID: selectedTranscriptionModel.rawValue, currentBoot: boot.id, now: Date()
+        ) {
+            KeyboardDiagnosticsLog.record("model.loadInterrupted", ["model": selectedTranscriptionModel.rawValue])
+            publishReadiness()
         }
         prewarmModelIfNeeded(.launch)
         Task { await keyboardMicActivity.removeOrphanedActivities(liveSessionID: nil) }
@@ -571,6 +598,7 @@ final class DictationCoordinator {
     }
 
     deinit {
+        readinessPublisher.stop()
         sharedEventObservationTask?.cancel()
         longVoiceNoteRecoveryTask?.cancel()
         if let audioRouteObserver {
@@ -614,6 +642,7 @@ final class DictationCoordinator {
         let sessionID = keyboardMicSession.id
         keyboardSessionState = KeyboardSessionReducer.reduce(keyboardSessionState, event: event)
         publishKeyboardModelCatalog()
+        publishReadiness()
         if let sessionID, KeyboardMicActivityPolicy.endsActivity(after: event) {
             Task { await keyboardMicActivity.end(sessionID: sessionID) }
         }
@@ -1213,11 +1242,11 @@ final class DictationCoordinator {
         stopRecording(requestID: requestID)
     }
 
-    func recoverLongVoiceNotesIfNeeded() {
+    func recoverLongVoiceNotesIfNeeded(includeKeyboardOrphans: Bool = false) {
         guard longVoiceNoteRecoveryTask == nil else { return }
         longVoiceNoteRecoveryTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            await recoverLongVoiceNotesOnLaunch()
+            await recoverLongVoiceNotesOnLaunch(includeKeyboardOrphans: includeKeyboardOrphans)
             longVoiceNoteRecoveryTask = nil
         }
     }
@@ -1237,7 +1266,10 @@ final class DictationCoordinator {
         settingsNavigationRequestID = UUID()
     }
 
-    private func recoverLongVoiceNotesOnLaunch() async {
+    /// `includeKeyboardOrphans` is true only at launch, when no dictation of this boot can be in progress: any
+    /// keyboard dictation still recording or transcribing then belongs to a boot that is gone, and its audio is
+    /// kept for retry instead of being lost.
+    private func recoverLongVoiceNotesOnLaunch(includeKeyboardOrphans: Bool = false) async {
         let inventoryResult = VoiceNoteRecoveryInventory.load {
             try store.recordingSessions()
         }
@@ -1274,14 +1306,17 @@ final class DictationCoordinator {
             }
             let isCheckpointArmedRecording = original.phase == .recording
                 && original.longFormThresholdSeconds != nil
-            guard original.isLongForm || isCheckpointArmedRecording else { continue }
+            let isOrphanedKeyboardDictation = includeKeyboardOrphans
+                && original.kind == .keyboardDictation
+                && [.recording, .transcriptionQueued, .transcribing].contains(original.phase)
+            guard original.isLongForm || isCheckpointArmedRecording || isOrphanedKeyboardDictation else { continue }
             guard [.recording, .transcriptionQueued, .transcribing, .failed].contains(original.phase),
                   voiceNoteLifecycleRunner?.sessionID != original.id,
                   original.phase != .failed || original.longFormRecoveryValidatedAt == nil
             else { continue }
 
             var session = original
-            if isCheckpointArmedRecording {
+            if isCheckpointArmedRecording || isOrphanedKeyboardDictation {
                 session.isLongForm = true
                 session.longFormActivatedAt = session.longFormActivatedAt ?? .now
             }
@@ -1458,6 +1493,15 @@ final class DictationCoordinator {
            let requestID = UUID(uuidString: url.lastPathComponent) {
             pendingDictationCopyRequestID = requestID
             copyPendingDictationIfActive()
+            return
+        }
+        if url.scheme == MuesliAppConstants.urlScheme, url.host == MuesliAppConstants.prepareHost {
+            beginPrepareTrip()
+            return
+        }
+        // "Open Muesli" from a stalled keyboard needs nothing but the app in front.
+        if url.scheme == MuesliAppConstants.urlScheme, url.host == MuesliAppConstants.openHost {
+            reconcileAbandonedRequests(reason: "open")
             return
         }
         #if DEBUG
@@ -4320,6 +4364,9 @@ final class DictationCoordinator {
         guard !modelPreparation.isPreparing, !modelPreparation.isReady else { return }
 
         let model = selectedTranscriptionModel
+        // Everything but the automatic warm-up is somebody asking: onboarding, a Retry, a new selection, the
+        // keyboard's prepare trip. A load like that is never refused by the automatic wait, and a success clears it.
+        let userInitiated = !reason.hasPrefix("prewarm_")
         modelPreparationTask?.cancel()
         modelPreparation = ModelPreparationState(
             phase: .downloading,
@@ -4349,6 +4396,7 @@ final class DictationCoordinator {
                     return
                 }
                 let loadStart = SuspendingClock.now
+                await MainActor.run { coordinator.loadWillStart(model) }
                 try await engine.prepare { progress, status in
                     Task { @MainActor in
                         coordinator.applyModelPreparationProgress(progress, status: status, model: model)
@@ -4358,7 +4406,7 @@ final class DictationCoordinator {
 
                 await MainActor.run {
                     guard coordinator.selectedTranscriptionModel == model else { return }
-                    coordinator.modelPrewarmHistory.recordLoad(modelID: model.rawValue, seconds: loadSeconds, now: Date())
+                    coordinator.loadDidFinish(model, seconds: loadSeconds, userInitiated: userInitiated)
                     coordinator.modelPreparationTask = nil
                     coordinator.modelPreparation = ModelPreparationState(
                         phase: .ready,
@@ -4371,12 +4419,14 @@ final class DictationCoordinator {
                 }
             } catch is CancellationError {
                 await MainActor.run {
+                    coordinator.loadDidEnd(model)
                     if coordinator.selectedTranscriptionModel == model {
                         coordinator.modelPreparationTask = nil
                     }
                 }
             } catch {
                 await MainActor.run {
+                    coordinator.loadDidEnd(model)
                     guard coordinator.selectedTranscriptionModel == model else { return }
                     coordinator.modelPreparationTask = nil
                     coordinator.modelPreparation = ModelPreparationState(
@@ -4394,6 +4444,229 @@ final class DictationCoordinator {
                     )
                 }
             }
+        }
+    }
+
+    // MARK: Readiness
+
+    private func loadWillStart(_ model: LocalTranscriptionModel) {
+        modelPrewarmHistory.markLoadStarted(modelID: model.rawValue, boot: boot.id, now: Date(), stamp: boot.stamp.loadKey)
+    }
+
+    private func loadDidFinish(_ model: LocalTranscriptionModel, seconds: TimeInterval, userInitiated: Bool) {
+        modelPrewarmHistory.recordLoad(
+            modelID: model.rawValue, seconds: seconds, now: Date(), stamp: boot.stamp.loadKey, userInitiated: userInitiated
+        )
+    }
+
+    private func loadDidEnd(_ model: LocalTranscriptionModel) {
+        modelPrewarmHistory.markLoadFinished(modelID: model.rawValue)
+    }
+
+    private func modelPreparationDidChange(from old: ModelPreparationState) {
+        if modelPreparation.phase != old.phase {
+            switch modelPreparation.phase {
+            case .preparing:
+                modelLoadStartedAt = Date()
+                modelFailure = nil
+            case .downloading:
+                modelFailure = nil
+            case .failed:
+                modelFailure = old.phase == .downloading ? .downloadFailed : .loadFailed
+            case .idle, .ready:
+                break
+            }
+        }
+        publishReadiness()
+        advancePrepareTrip()
+    }
+
+    /// What the speech model is doing, as the keyboard should hear it.
+    func currentReadinessModelState() -> ReadinessModelState {
+        let model = selectedTranscriptionModel
+        let phase = modelPreparation.phase.kind
+        // Only an idle model needs the disk and the history; a model in motion is described by its progress.
+        let isIdle = phase == .idle
+        return ModelReadinessResolver.resolve(
+            phase: phase,
+            progress: modelPreparation.progress,
+            loadStartedAt: modelLoadStartedAt,
+            failure: modelFailure,
+            isDownloaded: isIdle ? model.isDownloaded : true,
+            history: isIdle ? modelPrewarmHistory.history(for: model.rawValue) : ModelPrewarmHistory(modelID: model.rawValue),
+            stamp: boot.stamp.loadKey,
+            now: Date()
+        )
+    }
+
+    /// The mic session as the keyboard needs it: ready means a start command will be taken.
+    private func currentReadinessMicState() -> ReadinessMicState {
+        if isRecording { return .recording }
+        // Ready needs a registered mic session as well as a running engine: the engine alone is not a session
+        // the keyboard can start into.
+        if isKeyboardMicOn, isKeyboardHotMicEngineReady { return .ready }
+        if keyboardSessionState.phase == .arming { return .starting }
+        return .off
+    }
+
+    private func publishReadiness() {
+        readinessPublisher.update(model: currentReadinessModelState(), mic: currentReadinessMicState())
+    }
+
+    /// Ends any request whose owner is not this boot, before the keyboard can read it as live. A keyboard that
+    /// asked a moment ago and an app that is still launching are not abandoned: the start is young, and the
+    /// URL that launched this boot is about to adopt it. Recoverable audio is not touched here: it is kept for
+    /// retry by `recoverLongVoiceNotesOnLaunch`, whatever happens to the handoff row.
+    func reconcileAbandonedRequests(reason: String) {
+        if let status = try? store.keyboardRuntimeStatus(),
+           status.activeRequestID != nil || status.phase != .idle {
+            // The last boot's runtime status named a request. This boot has not published one.
+            if reason == "launch" { try? store.clearKeyboardRuntimeStatus() }
+        }
+        guard let state = try? store.keyboardHandoffState(), let requestID = state.requestID else { return }
+        let liveness = AppLiveness(liveBootID: boot.id, recordedBootID: boot.id, heartbeatAge: 0)
+        let verdict = RequestOwnershipPolicy.evaluate(
+            phase: state.phase.kind, owner: state.ownerBootID, updatedAt: state.updatedAt, liveness: liveness, now: Date()
+        )
+        // A request this boot owns but holds nothing for (no request in memory, no recorder starting) is a zombie:
+        // it can only be left over from a lifecycle that ended without saying so. Only judged when the user is
+        // here, never mid-start.
+        let isUserHere = reason == "open" || reason == "prepare"
+        let ownerless = isUserHere && state.ownerBootID == boot.id && activeRequest?.id != requestID
+            && !recordingStartupInProgress && !isRecording
+            && [.recordingStarted, .stopAcknowledged, .audioSaved, .transcribingStarted].contains(state.phase)
+        // This boot is the live app, so a keyboard start older than its bound that nobody adopted reads as "stalled".
+        // At launch and on a visit, this boot is the one that would have adopted it, and it did not.
+        let unadoptedAndOld: Bool = {
+            guard case .stalled = verdict else { return false }
+            return state.ownerBootID == nil && [.startRequested, .stopRequested, .cancelRequested].contains(state.phase)
+        }()
+        let why: AbandonReason
+        if case let .abandoned(found) = verdict {
+            why = found
+        } else if unadoptedAndOld {
+            why = .ownerLost
+        } else if ownerless {
+            why = .ownerLost
+        } else {
+            return
+        }
+        guard (try? store.abandonRequest(requestID, expectedOwner: state.ownerBootID, reason: why)) == true else { return }
+        var detail = [
+            "request": String(requestID.uuidString.prefix(8).lowercased()),
+            "reason": why.rawValue,
+            "phase": state.phase.rawValue,
+            "trigger": reason,
+        ]
+        if let owner = state.ownerBootID { detail["boot"] = owner.uuidString }
+        KeyboardDiagnosticsLog.record("request.abandoned", detail)
+    }
+
+    // MARK: The prepare trip
+
+    /// The keyboard sent the user here because dictation is not ready. Load the model now, as a user's request
+    /// (the automatic wait does not apply), and keep the process alive while it loads.
+    func beginPrepareTrip() {
+        guard hasCompletedOnboarding else { return }
+        reconcileAbandonedRequests(reason: "prepare")
+        prepareTrip = PrepareTrip(id: UUID(), startedAt: Date())
+        KeyboardDiagnosticsLog.record("prepare.started", ["model_state": currentReadinessModelState().code])
+        refreshNotificationPermission()
+        startUserRequestedModelLoad()
+        // Arming the mic session first is what lets iOS keep the app running if the user swipes back while the
+        // model compiles; without it the load stops with the app and the keyboard shows Open Muesli again.
+        if MuesliPreferences.keyboardSessionModeEnabled {
+            Task { await startKeyboardSessionMode() }
+        }
+        advancePrepareTrip()
+    }
+
+    private func startUserRequestedModelLoad() {
+        #if DEBUG
+        guard !Self.shouldSkipModelPrewarmForTesting() else { return }
+        #endif
+        guard !isSelectedModelDownloadSuppressed else { return }
+        let inFlight = modelPrewarmTask != nil || modelPreparationTask != nil || modelPreparation.isPreparing
+        switch prewarmDecision(for: .userRequested, loadInFlight: inFlight) {
+        case .skip:
+            return
+        case .download, .load:
+            prepareSelectedModel(reason: "keyboard_prepare")
+        }
+    }
+
+    /// The Retry or Download button on the Preparing screen.
+    func retryPrepareTrip() {
+        guard prepareTrip != nil else { return }
+        UserDefaults.standard.removeObject(forKey: MuesliPreferences.manuallyRemovedTranscriptionModelKey)
+        prepareTrip = PrepareTrip(id: UUID(), startedAt: Date(), hostAppName: prepareTrip?.hostAppName)
+        modelFailure = nil
+        if modelPreparation.phase == .failed { modelPreparation = ModelPreparationState() }
+        startUserRequestedModelLoad()
+        advancePrepareTrip()
+    }
+
+    func dismissPrepareTrip() {
+        prepareTrip = nil
+    }
+
+    /// Called when the app goes to the background: a finished trip has said its piece.
+    func prepareTripDidEnterBackground() {
+        if prepareTrip?.isFinished == true { prepareTrip = nil }
+        refreshNotificationPermission()
+    }
+
+    var prepareTripPresentation: PrepareTripPresentation? {
+        prepareTrip.map { PrepareTripPresentation.make(trip: $0, model: currentReadinessModelState(), now: Date()) }
+    }
+
+    private func advancePrepareTrip() {
+        guard var trip = prepareTrip else { return }
+        let wasFinished = trip.isFinished
+        let effect = trip.apply(
+            model: currentReadinessModelState(),
+            now: Date(),
+            isAppActive: UIApplication.shared.applicationState == .active,
+            notificationsAllowed: notificationsAllowedForPrepare
+        )
+        guard trip != prepareTrip else { return }
+        prepareTrip = trip
+        if trip.isFinished, !wasFinished {
+            KeyboardDiagnosticsLog.record("prepare.finished", [
+                "trip_outcome": Self.prepareOutcomeCode(trip.outcome),
+                "elapsed_ms": String(Int(Date().timeIntervalSince(trip.startedAt) * 1_000)),
+            ])
+        }
+        if effect == .notifyReady { postPrepareReadyNotification() }
+    }
+
+    private static func prepareOutcomeCode(_ outcome: PrepareTrip.Outcome) -> String {
+        switch outcome {
+        case .working: "working"
+        case .needsDownload: "needsDownload"
+        case .ready: "ready"
+        case .failed: "failed"
+        }
+    }
+
+    /// Only checks. Muesli asks for notification permission in the Action Button setup and nowhere else, and the
+    /// prepare trip does not add a prompt: without it the user simply swipes back when they are ready.
+    private func refreshNotificationPermission() {
+        Task { @MainActor [weak self] in
+            let settings = await UNUserNotificationCenter.current().notificationSettings()
+            self?.notificationsAllowedForPrepare = settings.authorizationStatus == .authorized
+                || settings.authorizationStatus == .provisional
+        }
+    }
+
+    private func postPrepareReadyNotification() {
+        Task {
+            let content = UNMutableNotificationContent()
+            content.title = "Muesli is ready"
+            content.body = "Switch back to your app and tap Record."
+            try? await UNUserNotificationCenter.current().add(
+                UNNotificationRequest(identifier: "muesli.prepare.ready", content: content, trigger: nil)
+            )
         }
     }
 
@@ -4452,6 +4725,7 @@ final class DictationCoordinator {
                 // SuspendingClock stops while the app is suspended, so a load that straddles a backgrounding is not
                 // mistaken for a slow one.
                 let loadStart = SuspendingClock.now
+                await MainActor.run { coordinator.loadWillStart(model) }
                 try await engine.prepare { progress, status in
                     Task { @MainActor in
                         coordinator.applyModelPreparationProgress(progress, status: status, model: model)
@@ -4462,7 +4736,7 @@ final class DictationCoordinator {
                 await MainActor.run {
                     guard coordinator.selectedTranscriptionModel == model else { return }
                     coordinator.modelPrewarmTask = nil
-                    coordinator.modelPrewarmHistory.recordLoad(modelID: model.rawValue, seconds: loadSeconds, now: Date())
+                    coordinator.loadDidFinish(model, seconds: loadSeconds, userInitiated: false)
                     coordinator.modelPreparation = ModelPreparationState(
                         phase: .ready,
                         progress: 1,
@@ -4476,15 +4750,17 @@ final class DictationCoordinator {
                 }
             } catch is CancellationError {
                 await MainActor.run {
+                    coordinator.loadDidEnd(model)
                     if coordinator.selectedTranscriptionModel == model {
                         coordinator.modelPrewarmTask = nil
                     }
                 }
             } catch {
                 await MainActor.run {
+                    coordinator.loadDidEnd(model)
                     guard coordinator.selectedTranscriptionModel == model else { return }
                     coordinator.modelPrewarmTask = nil
-                    coordinator.modelPrewarmHistory.recordFailure(modelID: model.rawValue, now: Date())
+                    coordinator.modelPrewarmHistory.recordFailure(modelID: model.rawValue, now: Date(), stamp: coordinator.boot.stamp.loadKey)
                     coordinator.modelPreparation = ModelPreparationState(
                         phase: .failed,
                         progress: nil,
@@ -4656,6 +4932,7 @@ final class DictationCoordinator {
             do {
                 await engine.selectModel(model)
                 let loadStart = SuspendingClock.now
+                await MainActor.run { coordinator.loadWillStart(model) }
                 try await engine.prepare { progress, status in
                     Task { @MainActor in
                         coordinator.applyModelPreparationProgress(progress, status: status, model: model)
@@ -4665,7 +4942,7 @@ final class DictationCoordinator {
 
                 await MainActor.run {
                     guard coordinator.selectedTranscriptionModel == model else { return }
-                    coordinator.modelPrewarmHistory.recordLoad(modelID: model.rawValue, seconds: loadSeconds, now: Date())
+                    coordinator.loadDidFinish(model, seconds: loadSeconds, userInitiated: true)
                     coordinator.modelPreparationTask = nil
                     coordinator.modelPreparation = ModelPreparationState(
                         phase: .ready,
@@ -4678,12 +4955,14 @@ final class DictationCoordinator {
                 }
             } catch is CancellationError {
                 await MainActor.run {
+                    coordinator.loadDidEnd(model)
                     if coordinator.selectedTranscriptionModel == model {
                         coordinator.modelPreparationTask = nil
                     }
                 }
             } catch {
                 await MainActor.run {
+                    coordinator.loadDidEnd(model)
                     guard coordinator.selectedTranscriptionModel == model else { return }
                     coordinator.modelPreparationTask = nil
                     coordinator.modelPreparation = ModelPreparationState(
@@ -7588,8 +7867,11 @@ final class DictationCoordinator {
                     await self.processPendingKeyboardCommand()
                 case .modelSelectionRequested:
                     self.processPendingKeyboardModelSelection()
+                case .readinessProbe:
+                    self.readinessPublisher.beat()
                 case .handoffStatusChanged, .runtimeStatusChanged, .liveTranscriptChanged,
-                     .modelCatalogChanged, .resultChanged, .ownershipChanged, .typingSettingsChanged:
+                     .modelCatalogChanged, .resultChanged, .ownershipChanged, .typingSettingsChanged,
+                     .readinessChanged:
                     continue
                 }
             }
@@ -7777,6 +8059,7 @@ final class DictationCoordinator {
                 isReady: keyboardSessionKeeper.canAcceptStartCommand
             )
         }
+        publishReadiness()
         let status = keyboardRuntimeStatus(
             isActive: isActive,
             activeRequestID: activeRequestID,

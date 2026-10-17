@@ -19,7 +19,7 @@ final class KeyboardRewriteTests: XCTestCase {
             .appendingPathComponent("keyboard-rewrite-tests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         bus = StubEventBus()
-        store = SharedStore(containerURL: directory, eventPoster: bus)
+        store = LiveAppFixture.store(directory: directory, bus: bus)
         controller = KeyboardController(store: store, eventBus: bus)
         insertedText = []
         deletedCounts = []

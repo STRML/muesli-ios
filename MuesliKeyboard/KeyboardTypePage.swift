@@ -101,7 +101,11 @@ struct KeyboardTypePage: View {
         case .suggestions(let suggestions):
             KeyboardSuggestionStrip(suggestions: suggestions) { typing.accept($0) }.clipped()
         case .empty:
-            Color.clear
+            if controller.readinessPresentation.needsAttention {
+                KeyboardReadinessBadge(controller: controller)
+            } else {
+                Color.clear
+            }
         }
     }
 
@@ -368,14 +372,13 @@ private struct KeyboardTypeKey: View {
         if controller.dictationPhase == .transcribing {
             ProgressView().tint(.white)
         } else {
-            Image(systemName: controller.primaryButtonIcon)
-                .font(.system(size: 19, weight: .semibold))
+            KeyboardReadinessSymbol(controller: controller)
                 .foregroundStyle(.white)
         }
     }
 
     private var recordLabel: String {
-        controller.showsActiveWaveform ? "Stop dictation" : "Record"
+        controller.showsActiveWaveform ? "Stop dictation" : controller.readinessPresentation.accessibilityLabel
     }
 
     private var shiftSymbol: String {

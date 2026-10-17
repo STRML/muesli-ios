@@ -10,6 +10,8 @@ final class KeyboardController {
     private static let staleTranscribingInterval: TimeInterval = 120
     private let store: SharedStore
     private let eventBus: any CrossProcessEventStreaming
+    /// Whether dictation can start, and the truthful state to show (see `KeyboardReadinessModel`).
+    let readinessModel: KeyboardReadinessModel
     private let setupVerificationStore: SetupVerificationStore
     private let handoffRecoveryPolicy = KeyboardHandoffRecoveryPolicy.keyboardDefaults
     private var eventObservationTask: Task<Void, Never>?
@@ -36,6 +38,8 @@ final class KeyboardController {
     /// second stop. It names a request, so the next dictation is unaffected.
     private var pendingStopID: UUID?
     private var isBlockedByAppVoiceNote = false
+    /// Names the next readiness trip in the log. A new one after each tap.
+    private var prepareTripID = UUID()
     /// Tracked separately from `latestHandoffState`, which `refreshLatestDictation`
     /// overwrites before `apply(handoffState:)` runs -- comparing against it
     /// there always says "unchanged".
@@ -129,7 +133,43 @@ final class KeyboardController {
     /// changes only at an appearance, never while the keyboard is up (`loadTypingSettings(appliesLayout:)`).
     private(set) var layout: KeyboardLayout = .fallback
     var recordKeyMode: TypingRecordKey.Mode {
-        TypingRecordKey.mode(opensMuesli: opensMuesliFromPrimaryButton, hasLaunchURL: launchURL != nil)
+        TypingRecordKey.mode(opensMuesli: opensMuesliFromPrimaryButton, hasLaunchURL: effectiveLaunchURL != nil)
+    }
+
+    /// The clock the readiness checks use. A test moves it; the extension never touches it.
+    var now: () -> Date {
+        get { readinessModel.now }
+        set { readinessModel.now = newValue }
+    }
+
+    var readiness: KeyboardReadiness { readinessModel.readiness }
+
+    /// A live app owns a recording but no audio has arrived for a while: what is on screen is not known to be true.
+    /// Stop, insert and the waveform give way to a way back to Muesli, and Cancel works without the app.
+    var isConnectionLost: Bool { readiness.state == .connectionLost }
+    var readinessPresentation: KeyboardReadinessPresentation { readinessModel.presentation }
+
+    /// Where Record sends the user. When the app is not ready it is a prepare trip: load the model, then say when
+    /// to come back. A start request there would only hang.
+    var effectiveLaunchURL: URL? {
+        if isConnectionLost { return openAppURL }
+        return readiness.recordAction == .openAppToPrepare ? prepareURL : launchURL
+    }
+
+    private var prepareURL: URL? {
+        var components = URLComponents()
+        components.scheme = MuesliAppConstants.urlScheme
+        components.host = MuesliAppConstants.prepareHost
+        components.queryItems = [URLQueryItem(name: MuesliAppConstants.tripQueryItem, value: prepareTripID.uuidString)]
+        return components.url
+    }
+
+    /// Opens the app and nothing else, for the way out of a state that has stalled.
+    var openAppURL: URL? {
+        var components = URLComponents()
+        components.scheme = MuesliAppConstants.urlScheme
+        components.host = MuesliAppConstants.openHost
+        return components.url
     }
 
     init(
@@ -148,10 +188,16 @@ final class KeyboardController {
         )
         liveTyper = KeyboardLiveTyper(scheduler: liveTypingScheduler)
         self.eventBus = eventBus
-        self.store = store ?? SharedStore(eventPoster: eventBus)
+        let resolvedStore = store ?? SharedStore(eventPoster: eventBus)
+        self.store = resolvedStore
+        readinessModel = KeyboardReadinessModel(store: resolvedStore)
         self.setupVerificationStore = setupVerificationStore
         typing.document.inserter = { [weak self] in self?.insertTypedText($0) }
         typing.document.backspacer = { [weak self] in self?.deleteTypedBackward() }
+        readinessModel.hasFullAccess = { [weak self] in
+            guard let self else { return false }
+            return self.currentFullAccess?() ?? self.hasOpenAccessForSetup
+        }
     }
 
     static let unreachableAppMessage = "Couldn't reach Muesli. Open the app."
@@ -197,6 +243,8 @@ final class KeyboardController {
             "Waiting for Muesli"
         case .openMuesliRequested:
             "Open Muesli"
+        case .prepareMuesli:
+            readinessPresentation.recordTitle
         case .stop:
             "Stop"
         case .transcribing:
@@ -218,6 +266,8 @@ final class KeyboardController {
             "hourglass"
         case .openMuesliRequested:
             "arrow.up.forward.app"
+        case .prepareMuesli:
+            readinessPresentation.recordSymbol
         case .stop:
             "stop.fill"
         case .transcribing:
@@ -245,6 +295,13 @@ final class KeyboardController {
             return .waitingForMuesli
         }
 
+        if isConnectionLost {
+            return .openMuesliRecovery
+        }
+        if isIdleForPrimaryButton, readiness.recordAction == .openAppToPrepare {
+            return .prepareMuesli
+        }
+
         return switch dictationPhase {
         case .requested:
             activeRequestID == nil ? .openMuesliRequested : .stop
@@ -260,7 +317,8 @@ final class KeyboardController {
     }
 
     var isPrimaryButtonDisabled: Bool {
-        isBlockedByAppVoiceNote || recoveryRequestID == nil && (
+        guard !isConnectionLost else { return false }
+        return isBlockedByAppVoiceNote || recoveryRequestID == nil && (
             dictationPhase == .transcribing
             || latestHandoffState.map({ [.stopRequested, .cancelRequested].contains($0.phase) }) == true
         )
@@ -330,7 +388,7 @@ final class KeyboardController {
     /// Whether the wide pill in the strip stops and saves the dictation right now: while it records, and not
     /// once a stop or a cancel is on its way.
     var canStopFromStatusPill: Bool {
-        TypingStripPill.isTappable(phase: pillPhase, stopRequested: isStopPending, cancelRequested: isCancelPending)
+        !isConnectionLost && TypingStripPill.isTappable(phase: pillPhase, stopRequested: isStopPending, cancelRequested: isCancelPending)
     }
 
     /// A tap on the strip's pill: the Record key's stop, behind the pill's own guard.
@@ -369,27 +427,49 @@ final class KeyboardController {
         return components.url
     }
 
+    private var isIdleForPrimaryButton: Bool {
+        dictationPhase == .idle
+            || dictationPhase == .finished
+            || dictationPhase == .failed
+            || (dictationPhase == .requested && activeRequestID == nil)
+    }
+
+    /// Not ready to dictate: the app has to load, or finish something, before a start request could work.
+    private var readinessSendsTheUserToTheApp: Bool {
+        [.openAppToPrepare, .openAppToRecover].contains(readiness.recordAction)
+    }
+
     var opensMuesliFromPrimaryButton: Bool {
         !isBlockedByAppVoiceNote
             && (recoveryRequestID != nil
-                || !canUseRuntimeStart
-                && (
-                    dictationPhase == .idle
-                        || dictationPhase == .finished
-                        || dictationPhase == .failed
-                        || (dictationPhase == .requested && activeRequestID == nil)
-                ))
+                || isConnectionLost
+                || (!canUseRuntimeStart || readinessSendsTheUserToTheApp) && isIdleForPrimaryButton)
     }
 
     func primaryLaunchAction() {
         refreshLatestDictation()
         guard !isBlockedByAppVoiceNote else { return }
-        if recoveryRequestID != nil {
+        if recoveryRequestID != nil || isConnectionLost {
             statusText = "Opening Muesli"
+            return
+        }
+        if readiness.recordAction == .openAppToPrepare {
+            noteReadinessTrip()
             return
         }
 
         startDictation()
+    }
+
+    /// The tap that opens Muesli to get ready. No request is claimed: the app is not in a position to start one.
+    private func noteReadinessTrip() {
+        MuesliHaptics.dictationStart()
+        KeyboardDiagnosticsLog.record("intent.prepare", [
+            "readiness": readiness.state.code,
+            "action": readiness.recordAction.rawValue,
+        ])
+        prepareTripID = UUID()
+        statusText = "Opening Muesli"
     }
 
     func primaryAction() {
@@ -463,6 +543,10 @@ final class KeyboardController {
         guard !isBlockedByAppVoiceNote else { return }
         guard canRewrite else {
             statusText = "Set up a Custom LLM in Muesli"
+            return
+        }
+        guard readiness.recordAction != .openAppToPrepare else {
+            statusText = readinessPresentation.caption ?? "Open Muesli to get ready"
             return
         }
         let text = textContextProvider?() ?? KeyboardTextContext()
@@ -650,6 +734,12 @@ final class KeyboardController {
                 message: "Cancelling"
             ))
             try store.saveCommand(.init(requestID: activeRequestID, action: .cancel))
+            // Nobody confirms this request, so nobody will acknowledge the cancel. End it here, once, so the
+            // persisted state can never bring the recording back when the keyboard is next shown.
+            if !readinessModel.isOwnerConfirmed {
+                cancelWithoutAnOwner(activeRequestID)
+                return
+            }
             pendingCancellationIDs.insert(activeRequestID)
             // The words come out now; a late partial from the app is ignored.
             liveTyper.cancel(requestID: activeRequestID)
@@ -664,6 +754,23 @@ final class KeyboardController {
         } catch {
             statusText = sharedStoreFailureMessage()
         }
+    }
+
+    /// The user cancelled a request no live app confirms. The cancel command stays for an app that only looks
+    /// quiet, and the request ends as cancelled by this keyboard, atomically, whatever the app does later.
+    private func cancelWithoutAnOwner(_ requestID: UUID) {
+        let owner = (try? store.keyboardHandoffState())?.ownerBootID
+        let won = (try? store.abandonRequest(requestID, expectedOwner: owner, reason: .ownerLost, endingAs: .cancelled)) ?? false
+        if won { logAbandoned(requestID, reason: .ownerLost, phase: .cancelRequested, owner: owner) }
+        liveTyper.cancel(requestID: requestID)
+        cancelledRequestIDs.insert(requestID)
+        pendingCancellationIDs.remove(requestID)
+        commandAcknowledgementTask?.cancel()
+        commandAcknowledgementTask = nil
+        pendingStopID = nil
+        latestHandoffState = .init(requestID: requestID, phase: .cancelled, message: "Cancelled", ownerBootID: owner, endReason: AbandonReason.ownerLost.rawValue)
+        releaseLocalRequest(requestID)
+        readinessModel.setRequest(.notInProgress)
     }
 
     private func hasPendingCancelCommand() -> Bool {
@@ -682,12 +789,16 @@ final class KeyboardController {
         refreshSetupVerificationChallenge()
         KeyboardDiagnosticsLog.record("keyboard.appeared")
         markKeyboardVisible(hasOpenAccess: hasOpenAccess)
+        // Ask a running app for a beat right now, and give it a moment to answer before calling it absent.
+        readinessModel.beginChecking()
+        eventBus.post(.readinessProbe)
         visibilityHeartbeatTask?.cancel()
         visibilityHeartbeatTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(1))
                 guard !Task.isCancelled, let self else { return }
                 self.publishVisibilityHeartbeat()
+                self.reevaluateReadiness()
             }
         }
         eventObservationTask?.cancel()
@@ -708,12 +819,29 @@ final class KeyboardController {
                     self.refreshLatestDictation()
                 case .typingSettingsChanged:
                     self.loadTypingSettings()
-                case .commandChanged, .modelSelectionRequested:
+                case .readinessChanged:
+                    self.reevaluateReadiness()
+                case .commandChanged, .modelSelectionRequested, .readinessProbe:
                     break
                 }
             }
         }
     }
+
+    /// Re-reads the app's record and re-judges the request in play. Time passing is an input (a heartbeat ages out,
+    /// a stage passes its bound), so this runs on the keyboard's one-second tick as well as on events. The full
+    /// refresh only runs when something that could change a request's fate has.
+    func reevaluateReadiness() {
+        let liveBefore = readinessModel.liveness.liveBootID
+        readinessModel.reload()
+        let hasRequestInPlay = showsActiveWaveform
+            || latestHandoffState.map { $0.phase.kind != .idle && !Self.settledPhases.contains($0.phase) } == true
+        if liveBefore != readinessModel.liveness.liveBootID || hasRequestInPlay {
+            refreshLatestDictation()
+        }
+    }
+
+    private static let settledPhases: Set<KeyboardHandoffPhase> = [.idle, .inserted, .copyRequired, .cancelled, .failed]
 
     func publishVisibilityHeartbeat() {
         let access = currentFullAccess?() ?? hasOpenAccessForSetup
@@ -799,6 +927,7 @@ final class KeyboardController {
     }
 
     private func refreshLatestDictation() {
+        readinessModel.reload()
         do {
             refreshModelCatalog()
             let runtimeStatus = try store.keyboardRuntimeStatus()
@@ -900,8 +1029,24 @@ final class KeyboardController {
     }
 
     private func apply(handoffState: KeyboardHandoffState) {
-        guard let requestID = handoffState.requestID else { return }
+        guard let requestID = handoffState.requestID else {
+            readinessModel.setRequest(.notInProgress)
+            return
+        }
         settleLiveTyping(for: handoffState.phase, requestID: requestID)
+
+        // Nothing below runs for a request whose owner is gone. A persisted phase is a claim, and only a live owner
+        // can make it true: otherwise the keyboard would show listening or writing for a request nobody holds.
+        readinessModel.recordingSignalAge = recordingSignalAge(for: handoffState)
+        let verdict = readinessModel.judge(handoffState)
+        if case let .abandoned(reason) = verdict {
+            settleAbandoned(handoffState, reason: reason)
+            return
+        }
+        if case .deliverable(isFresh: false) = verdict {
+            releaseLocalRequest(requestID)
+            return
+        }
 
         if let activeRequestID, activeRequestID != requestID {
             // A resumed extension must follow the durable owner, even if the
@@ -914,24 +1059,7 @@ final class KeyboardController {
             dictationPhase = .idle
         }
 
-        // The handoff record is written by both processes with no ordering
-        // guarantee, so record what arrived and what we were already showing.
-        // A phase that moves backwards is visible here and nowhere else.
-        if lastRecordedHandoff?.phase != handoffState.phase
-            || lastRecordedHandoff?.requestID != requestID {
-            lastRecordedHandoff = (requestID, handoffState.phase)
-            var observed = [
-                "phase": handoffState.phase.rawValue,
-                "request": requestID.uuidString.prefix(8).lowercased(),
-                "localPhase": dictationPhase.rawValue,
-                "active": activeRequestID?.uuidString.prefix(8).lowercased() ?? "none",
-                "inserted": insertedRequestIDs.contains(requestID) ? "yes" : "no"
-            ]
-            if handoffState.phase == .failed, let message = handoffState.message {
-                observed["reason"] = message
-            }
-            KeyboardDiagnosticsLog.record("handoff.observed", observed)
-        }
+        recordObservedHandoff(handoffState, requestID: requestID)
 
         if insertedRequestIDs.contains(requestID) {
             reconcileInsertedRequest(requestID)
@@ -1052,12 +1180,16 @@ final class KeyboardController {
             )
             statusText = handoffState.message ?? "Open Muesli to finish"
         case .failed:
-            dictationPhase = .failed
+            // A request ended because its owner was gone is not a failure the user needs to read.
+            let endedByAbandon = handoffState.endReason != nil
+            dictationPhase = endedByAbandon ? .idle : .failed
             activeRequestID = nil
             recoveryRequestID = nil
             liveTranscript = ""
             inputLevel = 0
-            statusText = handoffState.message ?? "Voice note failed"
+            statusText = endedByAbandon
+                ? (hasLatestDictation ? "Latest ready" : "Ready")
+                : (handoffState.message ?? "Voice note failed")
         case .cancelled:
             cancelledRequestIDs.insert(requestID)
             dictationPhase = .idle
@@ -1067,6 +1199,30 @@ final class KeyboardController {
             inputLevel = 0
             statusText = hasLatestDictation ? "Latest ready" : "Ready"
         }
+    }
+
+    /// The handoff record is written by both processes with no ordering guarantee, so record what arrived and what
+    /// we were already showing. A phase that moves backwards is visible here and nowhere else. The keyboard is
+    /// rebuilt constantly and each new instance used to log the row it found again, so the store remembers the
+    /// last one logged.
+    private func recordObservedHandoff(_ handoffState: KeyboardHandoffState, requestID: UUID) {
+        guard lastRecordedHandoff?.phase != handoffState.phase || lastRecordedHandoff?.requestID != requestID else { return }
+        lastRecordedHandoff = (requestID, handoffState.phase)
+        let shortID = requestID.uuidString.prefix(8).lowercased()
+        guard (try? store.noteLogged(topic: "handoff.observed", value: "\(shortID).\(handoffState.phase.rawValue)")) ?? true else {
+            return
+        }
+        var observed = [
+            "phase": handoffState.phase.rawValue,
+            "request": shortID,
+            "localPhase": dictationPhase.rawValue,
+            "active": activeRequestID?.uuidString.prefix(8).lowercased() ?? "none",
+            "inserted": insertedRequestIDs.contains(requestID) ? "yes" : "no"
+        ]
+        if handoffState.phase == .failed, let message = handoffState.message {
+            observed["reason"] = message
+        }
+        KeyboardDiagnosticsLog.record("handoff.observed", observed)
     }
 
     private func apply(runtimeStatus: KeyboardRuntimeStatus?) {
@@ -1107,7 +1263,7 @@ final class KeyboardController {
             $0.canAcceptStartCommand && now.timeIntervalSince($0.updatedAt) < handoffRecoveryPolicy.runtimeFreshnessInterval
         } ?? false
 
-        guard activeRequestID == nil, canUseRuntimeStart else { return }
+        guard activeRequestID == nil, canUseRuntimeStart, readinessModel.isAppLive else { return }
         guard let runtimeRequestID = runtimeStatus?.activeRequestID,
               !insertedRequestIDs.contains(runtimeRequestID),
               !cancelledRequestIDs.contains(runtimeRequestID),
@@ -1147,7 +1303,8 @@ final class KeyboardController {
 
         let resumablePhases: [DictationPhase] = [.requested, .recording, .transcribing, .finished]
         let isRecentStatus = Date().timeIntervalSince(status.updatedAt) < 120
-        if activeRequestID == nil, isRecentStatus, resumablePhases.contains(status.phase) {
+        // A status is only worth adopting while the app that wrote it is alive.
+        if activeRequestID == nil, isRecentStatus, readinessModel.isAppLive, resumablePhases.contains(status.phase) {
             activeRequestID = requestID
         }
 
@@ -1269,6 +1426,57 @@ final class KeyboardController {
     /// The host reported that the field changed (`textDidChange`, `selectionDidChange`).
     func liveTypingHostDidChange() {
         liveTyper.hostDidChange()
+    }
+
+    /// How long since the app last reported audio for a recording, or since the recording began if it has not yet.
+    /// While recording the app publishes a level at least every 0.75 s, so a long silence is not a quiet room.
+    private func recordingSignalAge(for state: KeyboardHandoffState) -> TimeInterval? {
+        guard [.recordingStarted, .stopRequested, .cancelRequested].contains(state.phase) else { return nil }
+        let current = readinessModel.now()
+        var age = max(0, current.timeIntervalSince(state.updatedAt))
+        if let status = latestRuntimeStatus, status.phase == .recording, status.activeRequestID == state.requestID {
+            age = min(age, max(0, current.timeIntervalSince(status.updatedAt)))
+        }
+        return age
+    }
+
+    /// The owner of this request is gone. Show idle, end the request once in the store (whichever process gets
+    /// there first records it; the others only read), and leave any audio to the app's recovery.
+    private func settleAbandoned(_ state: KeyboardHandoffState, reason: AbandonReason) {
+        guard let requestID = state.requestID else { return }
+        let won = (try? store.abandonRequest(requestID, expectedOwner: state.ownerBootID, reason: reason)) ?? false
+        if won { logAbandoned(requestID, reason: reason, phase: state.phase, owner: state.ownerBootID) }
+        liveTyper.endWithoutResult(requestID: requestID)
+        commandAcknowledgementTask?.cancel()
+        commandAcknowledgementTask = nil
+        pendingStopID = nil
+        pendingCancellationIDs.remove(requestID)
+        latestHandoffState = state.advanced(to: .failed, message: reason.message, endReason: reason.rawValue)
+        releaseLocalRequest(requestID)
+        readinessModel.setRequest(.notInProgress)
+    }
+
+    private func logAbandoned(_ requestID: UUID, reason: AbandonReason, phase: KeyboardHandoffPhase, owner: UUID?) {
+        var detail = [
+            "request": String(requestID.uuidString.prefix(8).lowercased()),
+            "reason": reason.rawValue,
+            "phase": phase.rawValue,
+        ]
+        if let owner { detail["boot"] = owner.uuidString }
+        if let age = readinessModel.liveness.heartbeatAge { detail["heartbeat_age_ms"] = String(Int(age * 1_000)) }
+        KeyboardDiagnosticsLog.record("request.abandoned", detail)
+    }
+
+    /// Drops this keyboard's own claim to a request that is over, if it holds it.
+    private func releaseLocalRequest(_ requestID: UUID) {
+        guard activeRequestID == nil || activeRequestID == requestID else { return }
+        activeRequestID = nil
+        recoveryRequestID = nil
+        liveTranscript = ""
+        inputLevel = 0
+        dictationPhase = .idle
+        statusText = hasLatestDictation ? "Latest ready" : "Ready"
+        prepareLaunchRequestIfNeeded()
     }
 
     private func markForRecoveryIfStale(_ status: DictationStatus, requestID: UUID) -> Bool {
@@ -1608,6 +1816,9 @@ final class KeyboardController {
 enum KeyboardPrimaryButtonRole {
     case blocked
     case openMuesliRecovery
+    /// Dictation is not ready (the model is loading or missing, or the app was updated): the key opens Muesli to
+    /// get ready instead of starting a request that would hang.
+    case prepareMuesli
     case waitingForMuesli
     case openMuesliRequested
     case stop

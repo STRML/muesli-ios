@@ -102,7 +102,7 @@ final class LiveDictationDriver {
         directory = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("live-typing-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        store = SharedStore(containerURL: directory, eventPoster: bus)
+        store = LiveAppFixture.store(directory: directory, bus: bus)
         controller = KeyboardController(store: store, eventBus: bus, liveTypingScheduler: clock.scheduler)
         host = FakeProxyHost(before: before, after: after, behavior: behavior)
         if attachHost { host.attach(to: controller) }
