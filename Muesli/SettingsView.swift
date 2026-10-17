@@ -10,6 +10,7 @@ struct SettingsView: View {
 
     @AppStorage(MuesliPreferences.liveActivitiesForDictationsKey) private var liveActivitiesForDictations = true
     @AppStorage(MuesliPreferences.liveActivitiesForMeetingsKey) private var liveActivitiesForMeetings = true
+    @AppStorage(MuesliPreferences.liveActivitiesForKeyboardMicKey) private var liveActivitiesForKeyboardMic = KeyboardMicCardPolicy.keyboardMicSwitchDefault
     @AppStorage(MuesliPreferences.keyboardSessionModeKey) private var keyboardSessionMode = true
     @AppStorage(MuesliPreferences.keyboardAutocorrectKey) private var keyboardAutocorrect = true
     @AppStorage(MuesliPreferences.keyboardLiveTypingKey) private var keyboardLiveTyping = true
@@ -79,6 +80,9 @@ struct SettingsView: View {
                     )
                 }
                 .onChange(of: liveActivitiesForDictations) { _, _ in
+                    coordinator.applyLiveActivityPreferences()
+                }
+                .onChange(of: liveActivitiesForKeyboardMic) { _, _ in
                     coordinator.applyLiveActivityPreferences()
                 }
                 .onChange(of: liveActivitiesForMeetings) { _, _ in
@@ -338,6 +342,13 @@ struct SettingsView: View {
                         title: "Voice Note Live Activities",
                         detail: "Show keyboard and in-app voice note progress on the Dynamic Island and Lock Screen.",
                         isOn: $liveActivitiesForDictations
+                    )
+                    Divider().overlay(MuesliTheme.surfaceBorder)
+                    SettingsToggleRow(
+                        icon: "mic.circle",
+                        title: "Keyboard mic card on the Lock Screen",
+                        detail: "Shows a card with a Turn mic off button while the keyboard mic is on. It is off by default, and needs Voice Note Live Activities on too.",
+                        isOn: $liveActivitiesForKeyboardMic
                     )
                     Divider().overlay(MuesliTheme.surfaceBorder)
                     SettingsToggleRow(
