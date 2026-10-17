@@ -219,6 +219,18 @@ final class ModelPrewarmPolicyTests: XCTestCase {
         XCTAssertEqual(decide(.foreground, history: history), .load)
     }
 
+    // Row 10c: the duration the coordinator measures converts to seconds without losing the fraction, so a 30.5 s
+    // load is slow and a 29.9 s load is not.
+    func testMeasuredDurationConvertsToFractionalSeconds() {
+        XCTAssertEqual(Duration.milliseconds(30_500).totalSeconds, 30.5, accuracy: 0.0001)
+        XCTAssertEqual(Duration.seconds(2).totalSeconds, 2, accuracy: 0.0001)
+        var history = ModelPrewarmHistory(modelID: model)
+        history.recordLoad(seconds: Duration.milliseconds(29_900).totalSeconds, now: t0)
+        XCTAssertEqual(history.strikes, 0)
+        history.recordLoad(seconds: Duration.milliseconds(30_500).totalSeconds, now: t0)
+        XCTAssertEqual(history.strikes, 1)
+    }
+
     // MARK: Persistence
 
     // Row 13: the app relaunches right after a failure. A new store over the same defaults still backs off.

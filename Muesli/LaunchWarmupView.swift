@@ -36,7 +36,7 @@ struct LaunchWarmupContainer<Content: View>: View {
         }
 
         let startedAt = ContinuousClock.now
-        coordinator.prewarmModelIfNeeded(reason: "launch_screen")
+        coordinator.prewarmModelIfNeeded(.launchScreen)
 
         while !Task.isCancelled {
             let elapsed = startedAt.duration(to: .now)

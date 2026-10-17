@@ -164,3 +164,10 @@ struct ModelPrewarmHistoryStore {
         defaults.set(data, forKey: key)
     }
 }
+
+extension Duration {
+    /// Whole and fractional seconds, for comparing a measured duration with ``ModelPrewarmPolicy/slowLoadSeconds``.
+    var totalSeconds: TimeInterval {
+        Double(components.seconds) + Double(components.attoseconds) / 1e18
+    }
+}
