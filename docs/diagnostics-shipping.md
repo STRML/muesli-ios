@@ -3,18 +3,18 @@
 An opt-in way to send Muesli's event log to **your own server**, so a dictation that did not save can be traced
 after the fact. Off by default. No third-party service. No content.
 
-To run the server side, see [diagnostics-receiver.md](diagnostics-receiver.md). Settings > About > Diagnostics links
+To run the server side, see [diagnostics-receiver.md](diagnostics-receiver.md). Settings > Privacy and Sync > Diagnostics links
 to it ("How to set up a receiver").
 
 ## What it is and is not
 
-- **Off by default.** Settings > About > Diagnostics > "Send diagnostics to my server".
-- **Only to the address you set.** Settings > About > Diagnostics shows the full address the batches post to, for
+- **Off by default.** Settings > Privacy and Sync > Diagnostics > "Send diagnostics to my server".
+- **Only to the address you set.** Settings > Privacy and Sync > Diagnostics shows the full address the batches post to, for
   example `https://studio.tail13013.ts.net/v1/diagnostics`, and says where it came from. It is the **Diagnostics
-  server** field when that is filled in, otherwise the Server URL under Settings > AI Summaries (the Custom LLM
+  server** field when that is filled in, otherwise the Server URL under Settings > AI Services (the Custom LLM
   server). Either way the route is `<address>/diagnostics`: a base such as `https://host/v1`, or a pasted full path,
   gives the same URL. A Diagnostics server that is not an https address is shown as an error and is never replaced by
-  the AI Summaries server. The API key is always the one under AI Summaries.
+  the AI Services server. The API key is always the one under AI Services.
   HTTPS only. Redirects are refused, so the key cannot be forwarded to another host. If the address does not look
   private (not loopback, LAN, Tailscale or `.local`), nothing is sent until you confirm that you trust that host,
   and the confirmation is for that host only.

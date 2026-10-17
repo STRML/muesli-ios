@@ -134,8 +134,15 @@ final class MuesliSmokeUITests: XCTestCase {
         XCTAssertTrue(settings.waitForExistence(timeout: 8))
         settings.tap()
 
-        let actionButton = app.staticTexts["Action Button"].firstMatch
+        // The Action Button entry lives in Voice Notes; the Settings list has no card of its own for it.
+        // Scoped to the scroll view so the Voice Notes tab-bar label cannot match.
+        let voiceNotes = app.scrollViews.staticTexts["Voice Notes"].firstMatch
+        XCTAssertTrue(voiceNotes.waitForExistence(timeout: 5))
+        voiceNotes.tap()
+
+        let actionButton = app.scrollViews.staticTexts["Action Button"].firstMatch
         XCTAssertTrue(actionButton.waitForExistence(timeout: 5))
+        for _ in 0..<4 where !actionButton.isHittable { app.swipeUp() }
         XCTAssertTrue(actionButton.isHittable)
         captureActionButton(app, name: "Settings Action Button entry")
         actionButton.tap()
