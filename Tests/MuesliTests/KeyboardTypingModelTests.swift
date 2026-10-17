@@ -356,4 +356,20 @@ final class KeyboardTypingModelTests: XCTestCase {
         typeKeys("Hey is just gets stuck ")
         XCTAssertEqual(controller.typing.state.suggestions, [])
     }
+
+    func testAppearingStartsTheWarmUpAndDisappearingCancelsIt() {
+        let typing = controller.typing
+        XCTAssertEqual(typing.checkerWarmup.state, .idle)
+        typing.keyboardDidAppear()
+        XCTAssertEqual(typing.checkerWarmup.state, .warming)
+        typing.keyboardWillDisappear()
+        XCTAssertEqual(typing.checkerWarmup.state, .idle)
+    }
+
+    func testMemoryReleaseCancelsTheWarmUp() {
+        let typing = controller.typing
+        typing.keyboardDidAppear()
+        typing.releaseMemory()
+        XCTAssertEqual(typing.checkerWarmup.state, .idle)
+    }
 }

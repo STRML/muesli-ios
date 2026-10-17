@@ -146,6 +146,7 @@ final class KeyboardViewController: UIInputViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         refreshSystemGlobeNeed()
+        controller.typing.keyboardDidAppear()
     }
 
     /// `needsInputModeSwitchKey` can change with a hardware keyboard, rotation or a new device state.
@@ -186,6 +187,7 @@ final class KeyboardViewController: UIInputViewController {
     override func viewWillDisappear(_ animated: Bool) {
         appearanceGuard.endAppearance()
         super.viewWillDisappear(animated)
+        controller.typing.keyboardWillDisappear()
 
         isKeyboardPresented = false
         hasEnteredAppearance = false
