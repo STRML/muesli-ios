@@ -72,12 +72,45 @@ final class ModelPrewarmReadinessTests: XCTestCase {
         XCTAssertEqual(decide(.launch, history: history), .load)
     }
 
+    // The picture from a real phone: three automatic prewarms (launch, foreground, keyboard session) refused by a
+    // wait that a failed load under the previous build had left behind, so the model was never loaded and the
+    // keyboard could not know. An update is a new situation; the old wait does not apply to it.
+    func testABackoffEarnedByTheOldBuildDoesNotHoldBackTheFirstLaunchAfterTheUpdate() {
+        var history = ModelPrewarmHistory(modelID: model)
+        history.recordFailure(now: t0, stamp: stampA)
+        history.recordFailure(now: t0, stamp: stampA)
+        let soon = t0.addingTimeInterval(60)
+        for trigger in [Policy.Trigger.launch, .foreground, .keyboardSession] {
+            XCTAssertEqual(decide(trigger, stamp: stampA, history: history, at: soon), .skip(.backingOff), "\(trigger) same build")
+            XCTAssertEqual(decide(trigger, stamp: stampB, history: history, at: soon), .load, "\(trigger) after the update")
+        }
+        XCTAssertEqual(history.remainingBackoff(now: soon, stamp: stampB), 0)
+        XCTAssertGreaterThan(history.remainingBackoff(now: soon, stamp: stampA), 0)
+    }
+
+    func testStrikesFromAnotherBuildRestartTheCount() {
+        var history = ModelPrewarmHistory(modelID: model)
+        history.recordFailure(now: t0, stamp: stampA)
+        history.recordFailure(now: t0, stamp: stampA)
+        history.recordFailure(now: t0.addingTimeInterval(10), stamp: stampB)
+        XCTAssertEqual(history.strikes, 1)
+        XCTAssertEqual(history.remainingBackoff(now: t0.addingTimeInterval(11), stamp: stampB), Policy.baseBackoffSeconds - 1, accuracy: 0.001)
+    }
+
+    // A legacy record has strikes and no build. It cannot be shown to belong to this build, so it does not apply.
+    func testStrikesFromBeforeStampsDoNotApplyToAnyBuild() throws {
+        let legacy = Data(#"{"modelID":"whisper-small-en","strikes":2,"lastStrikeAt":0}"#.utf8)
+        var history = try JSONDecoder().decode(ModelPrewarmHistory.self, from: legacy)
+        history.lastStrikeAt = t0
+        XCTAssertEqual(decide(.launch, history: history, at: t0.addingTimeInterval(5)), .load)
+    }
+
     // MARK: A user-initiated load (R12)
 
     func testAUserRequestedLoadIgnoresTheAutomaticWait() {
         var history = ModelPrewarmHistory(modelID: model)
-        history.recordFailure(now: t0)
-        history.recordFailure(now: t0)
+        history.recordFailure(now: t0, stamp: stampA)
+        history.recordFailure(now: t0, stamp: stampA)
         let soon = t0.addingTimeInterval(5)
         XCTAssertEqual(decide(.foreground, history: history, at: soon), .skip(.backingOff))
         XCTAssertEqual(decide(.keyboardSession, history: history, at: soon), .skip(.backingOff))
@@ -105,8 +138,8 @@ final class ModelPrewarmReadinessTests: XCTestCase {
     // as a strike.
     func testASuccessfulUserRequestedLoadClearsTheBackoffWhateverItsDuration() {
         var history = ModelPrewarmHistory(modelID: model)
-        history.recordFailure(now: t0)
-        history.recordFailure(now: t0)
+        history.recordFailure(now: t0, stamp: stampA)
+        history.recordFailure(now: t0, stamp: stampA)
         history.recordLoad(seconds: 935, now: t0.addingTimeInterval(10), stamp: stampA, userInitiated: true)
         XCTAssertEqual(history.strikes, 0)
         XCTAssertNil(history.lastStrikeAt)
@@ -122,7 +155,7 @@ final class ModelPrewarmReadinessTests: XCTestCase {
 
     func testALoadThatNeverFinishedIsAStrikeOnTheNextBoot() {
         var history = ModelPrewarmHistory(modelID: model)
-        history.markLoadStarted(boot: bootA, now: t0)
+        history.markLoadStarted(boot: bootA, now: t0, stamp: stampA)
         XCTAssertFalse(history.recoverInterruptedLoad(currentBoot: bootA, now: t0.addingTimeInterval(5)), "same boot")
         XCTAssertEqual(history.strikes, 0)
         XCTAssertTrue(history.recoverInterruptedLoad(currentBoot: bootB, now: t0.addingTimeInterval(20)))
@@ -133,7 +166,7 @@ final class ModelPrewarmReadinessTests: XCTestCase {
 
     func testAFinishedLoadLeavesNoMarker() {
         var history = ModelPrewarmHistory(modelID: model)
-        history.markLoadStarted(boot: bootA, now: t0)
+        history.markLoadStarted(boot: bootA, now: t0, stamp: stampA)
         history.markLoadFinished()
         XCTAssertFalse(history.recoverInterruptedLoad(currentBoot: bootB, now: t0))
         XCTAssertEqual(history.strikes, 0)
@@ -150,7 +183,7 @@ final class ModelPrewarmReadinessTests: XCTestCase {
             _ = history.recoverInterruptedLoad(currentBoot: boot, now: now)
             guard decide(.launch, history: history, at: now) == .load else { continue }
             attempts.append(now.timeIntervalSince(t0))
-            history.markLoadStarted(boot: boot, now: now)
+            history.markLoadStarted(boot: boot, now: now, stamp: stampA)
         }
         XCTAssertEqual(attempts, [0, 360, 1_020, 2_280, 4_740, 9_600, 19_260, 38_520, 60_180, 81_840])
         let now = t0.addingTimeInterval(24 * 3_600)
@@ -162,10 +195,10 @@ final class ModelPrewarmReadinessTests: XCTestCase {
         let defaults = UserDefaults(suiteName: name)!
         addTeardownBlock { UserDefaults(suiteName: name)?.removePersistentDomain(forName: name) }
         let store = ModelPrewarmHistoryStore(defaults: defaults)
-        store.markLoadStarted(modelID: model, boot: bootA, now: t0)
+        store.markLoadStarted(modelID: model, boot: bootA, now: t0, stamp: stampA)
         XCTAssertTrue(ModelPrewarmHistoryStore(defaults: defaults).recoverInterruptedLoad(modelID: model, currentBoot: bootB, now: t0.addingTimeInterval(60)))
         XCTAssertEqual(store.history(for: model).strikes, 1)
-        store.markLoadStarted(modelID: model, boot: bootB, now: t0)
+        store.markLoadStarted(modelID: model, boot: bootB, now: t0, stamp: stampA)
         store.markLoadFinished(modelID: model)
         XCTAssertFalse(store.recoverInterruptedLoad(modelID: model, currentBoot: bootC, now: t0))
     }
@@ -214,9 +247,15 @@ final class ModelPrewarmReadinessTests: XCTestCase {
         XCTAssertEqual(resolve(.idle, history: warm(stampOS)), .notLoaded)
     }
 
+    func testABackoffFromAnotherBuildLeavesTheModelPlainlyNotLoaded() {
+        var history = ModelPrewarmHistory(modelID: model)
+        history.recordFailure(now: t0, stamp: stampB)
+        XCTAssertEqual(resolve(.idle, history: history), .notLoaded)
+    }
+
     func testAColdModelUnderBackoffIsDeferred() {
         var history = ModelPrewarmHistory(modelID: model)
-        history.recordFailure(now: t0)
+        history.recordFailure(now: t0, stamp: stampA)
         XCTAssertEqual(resolve(.idle, history: history), .deferredByBackoff(until: t0.addingTimeInterval(300)))
     }
 

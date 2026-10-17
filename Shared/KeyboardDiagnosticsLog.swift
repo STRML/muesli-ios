@@ -26,6 +26,9 @@ enum KeyboardDiagnosticsLog {
     /// session got into a bad state, small enough to stay cheap to rewrite.
     static let entryLimit = 600
 
+    /// Tests read what was recorded without touching the app group container.
+    nonisolated(unsafe) static var captureForTesting: (@Sendable (String, [String: String]) -> Void)?
+
     @TaskLocal static var captureRequestID: String?
     @TaskLocal static var intentInvocationID: String?
 
@@ -48,6 +51,7 @@ enum KeyboardDiagnosticsLog {
         var detail = detail
         if let captureRequestID { detail["capture_request"] = captureRequestID }
         if let intentInvocationID { detail["intent_invocation"] = intentInvocationID }
+        captureForTesting?(event, detail)
         let rendered = DiagnosticsLogFormat.renderDetail(detail)
 
         logger.debug("\(event, privacy: .public) \(rendered, privacy: .public)")

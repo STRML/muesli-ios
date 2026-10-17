@@ -13,7 +13,8 @@ final class KeyboardReadinessDerivationTests: XCTestCase {
         access: Bool = true,
         request: OwnershipVerdict = .notInProgress,
         checking: TimeInterval? = nil,
-        stamp: ReadinessBuildStamp = F.stamp
+        stamp: ReadinessBuildStamp = F.stamp,
+        signal: TimeInterval? = nil
     ) -> KeyboardReadiness {
         Derivation.derive(KeyboardReadinessInput(
             hasStoreAccess: access,
@@ -21,7 +22,8 @@ final class KeyboardReadinessDerivationTests: XCTestCase {
             keyboardStamp: stamp,
             request: request,
             now: F.t0,
-            checkingStartedAt: checking.map { F.t0.addingTimeInterval(-$0) }
+            checkingStartedAt: checking.map { F.t0.addingTimeInterval(-$0) },
+            recordingSignalAge: signal
         ))
     }
 
@@ -202,6 +204,30 @@ final class KeyboardReadinessDerivationTests: XCTestCase {
         XCTAssertEqual(derive(record: record, request: .live(.recording)).state, .recording)
     }
 
+    // The picture from a real phone: a flat meter, an owner that still beats, a pill that did nothing. A recording
+    // with no audio level for 6 s is a lost connection, whatever the row says.
+    func testARecordingWithNoAudioLevelIsALostConnection() {
+        for request in [OwnershipVerdict.live(.recording), .live(.stopping), .stalled(.stopping)] {
+            let fresh = derive(record: live(.ready), request: request, signal: 5.9)
+            XCTAssertEqual(fresh.state, .recording, "\(request)")
+            let lost = derive(record: live(.ready), request: request, signal: 6.1)
+            XCTAssertEqual(lost, KeyboardReadiness(state: .connectionLost, recordAction: .openAppToRecover, offersEscape: true), "\(request)")
+        }
+        XCTAssertEqual(derive(record: live(.ready), request: .live(.recording), signal: nil).state, .recording)
+    }
+
+    func testAMissingAudioLevelOnlyAffectsRecording() {
+        XCTAssertEqual(derive(record: live(.ready), request: .live(.transcribing), signal: 100).state, .transcribing)
+        XCTAssertEqual(derive(record: live(.ready), request: .live(.starting), signal: 100).state, .starting)
+    }
+
+    // After an update the old build's wait does not apply: the model is shown as simply not loaded, and Record
+    // prepares it. The keyboard's word for a backoff earned under this build stays "not loaded" too.
+    func testABackoffEarnedByAnOldBuildReadsAsNotLoaded() {
+        XCTAssertEqual(derive(record: live(.deferredByBackoff(until: F.t0.addingTimeInterval(200)))).state, .needsApp(.modelNotLoaded))
+        XCTAssertEqual(derive(record: live(.deferredByBackoff(until: F.t0.addingTimeInterval(200)))).recordAction, .openAppToPrepare)
+    }
+
     func testEveryLiveStageMapsToItsState() {
         let cases: [(ProgressStage, KeyboardReadinessState)] = [
             (.starting, .starting), (.recording, .recording), (.stopping, .recording), (.transcribing, .transcribing),
@@ -261,6 +287,7 @@ final class KeyboardReadinessDerivationTests: XCTestCase {
         ]
         let heartbeats: [TimeInterval?] = [nil, -3_600, -3, 0, 14.9, 15, 15.1, 600]
         let stamps = [F.stamp, F.updatedStamp, F.newOSStamp]
+        let signals: [TimeInterval?] = [nil, 1, 7]
         let requests: [OwnershipVerdict] = [
             .notInProgress, .deliverable(isFresh: true), .deliverable(isFresh: false), .recoveryPrompt,
             .live(.starting), .live(.recording), .live(.stopping), .live(.transcribing),
@@ -276,9 +303,11 @@ final class KeyboardReadinessDerivationTests: XCTestCase {
                         for stamp in stamps {
                             for request in requests {
                                 for checking in [nil, 0.5, 5.0] as [TimeInterval?] {
-                                    cells += 1
-                                    let record = heartbeat.map { F.record(stamp: stamp, heartbeatAge: $0, model: model, mic: mic) }
-                                    check(access: access, record: record, request: request, checking: checking)
+                                    for signal in signals {
+                                        cells += 1
+                                        let record = heartbeat.map { F.record(stamp: stamp, heartbeatAge: $0, model: model, mic: mic) }
+                                        check(access: access, record: record, request: request, checking: checking, signal: signal)
+                                    }
                                 }
                             }
                         }
@@ -286,11 +315,11 @@ final class KeyboardReadinessDerivationTests: XCTestCase {
                 }
             }
         }
-        XCTAssertEqual(cells, 2 * models.count * 4 * heartbeats.count * stamps.count * requests.count * 3)
+        XCTAssertEqual(cells, 2 * models.count * 4 * heartbeats.count * stamps.count * requests.count * 3 * signals.count)
     }
 
-    private func check(access: Bool, record: AppReadinessRecord?, request: OwnershipVerdict, checking: TimeInterval?) {
-        let readiness = derive(record: record, access: access, request: request, checking: checking)
+    private func check(access: Bool, record: AppReadinessRecord?, request: OwnershipVerdict, checking: TimeInterval?, signal: TimeInterval?) {
+        let readiness = derive(record: record, access: access, request: request, checking: checking, signal: signal)
         let liveness = F.liveness(record)
         let isLive = liveness.liveBootID != nil
         let label = "access=\(access) record=\(String(describing: record?.model)) hb=\(String(describing: liveness.heartbeatAge)) req=\(request) checking=\(String(describing: checking)) -> \(readiness)"
@@ -308,8 +337,13 @@ final class KeyboardReadinessDerivationTests: XCTestCase {
         }()
 
         switch readiness.state {
-        case .recording, .transcribing, .starting:
+        case .recording, .transcribing, .starting, .connectionLost:
             XCTAssertTrue(inProgress, label)
+            if readiness.state == .recording { XCTAssertTrue((signal ?? 0) <= AppLivenessPolicy.levelStaleAfter, label) }
+            if readiness.state == .connectionLost {
+                XCTAssertTrue((signal ?? 0) > AppLivenessPolicy.levelStaleAfter, label)
+                XCTAssertTrue(readiness.offersEscape, label)
+            }
         case .ready:
             XCTAssertTrue(isLive && record?.model.isUsable == true && !inProgress, label)
         case .loading, .failed:

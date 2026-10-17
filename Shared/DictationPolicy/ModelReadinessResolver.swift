@@ -37,7 +37,7 @@ enum ModelReadinessResolver {
         // Loaded under this build and OS before: the compiled model is cached and a load takes seconds. This holds
         // for a fresh launch and for a model the app let go of after a memory warning.
         if history.isWarm(for: stamp) { return .readyOnDemand }
-        let remaining = history.remainingBackoff(now: now)
+        let remaining = history.remainingBackoff(now: now, stamp: stamp)
         if remaining > 0, let lastStrikeAt = history.lastStrikeAt {
             return .deferredByBackoff(until: lastStrikeAt.addingTimeInterval(ModelPrewarmPolicy.backoffSeconds(forStrikes: history.strikes)))
         }

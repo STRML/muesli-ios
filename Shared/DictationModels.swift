@@ -15,7 +15,7 @@ enum DictationCommandAction: String, Codable, Sendable, Equatable {
     case cancel
 }
 
-enum KeyboardHandoffPhase: String, Codable, Sendable, Equatable {
+enum KeyboardHandoffPhase: String, Codable, Sendable, Equatable, CaseIterable {
     case idle
     case startRequested
     case startAcknowledged
@@ -31,6 +31,11 @@ enum KeyboardHandoffPhase: String, Codable, Sendable, Equatable {
     case recoveryRequested
     case failed
     case cancelled
+
+    /// The same phase in the package that decides who owns a request (`RequestOwnershipPolicy`).
+    var kind: HandoffPhaseKind {
+        HandoffPhaseKind(rawValue: rawValue) ?? .idle
+    }
 
     var dictationPhase: DictationPhase {
         switch self {
@@ -214,6 +219,12 @@ struct KeyboardHandoffState: Codable, Sendable, Equatable {
     let recoveryAction: DictationCommandAction?
     let createdAt: Date
     let updatedAt: Date
+    /// The boot (one app process launch) that is working on this request. The app's store stamps it on every write
+    /// it makes; the keyboard's carries the stored one forward. Nil on a request no app has adopted yet, and on a
+    /// row written before owners existed. A request whose owner is not the live boot is abandoned.
+    let ownerBootID: UUID?
+    /// Why a request ended without a result when nobody was there to end it (`AbandonReason`).
+    let endReason: String?
 
     init(
         requestID: UUID?,
@@ -222,7 +233,9 @@ struct KeyboardHandoffState: Codable, Sendable, Equatable {
         recoveryAttemptCount: Int = 0,
         recoveryAction: DictationCommandAction? = nil,
         createdAt: Date = .now,
-        updatedAt: Date = .now
+        updatedAt: Date = .now,
+        ownerBootID: UUID? = nil,
+        endReason: String? = nil
     ) {
         self.requestID = requestID
         self.phase = phase
@@ -231,6 +244,8 @@ struct KeyboardHandoffState: Codable, Sendable, Equatable {
         self.recoveryAction = recoveryAction
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.ownerBootID = ownerBootID
+        self.endReason = endReason
     }
 
     /// Stop retains capture ownership: finish startup, then consume the pending
@@ -279,7 +294,8 @@ struct KeyboardHandoffState: Codable, Sendable, Equatable {
         message: String? = nil,
         recoveryAttemptCount: Int? = nil,
         recoveryAction: DictationCommandAction? = nil,
-        updatedAt: Date = .now
+        updatedAt: Date = .now,
+        endReason: String? = nil
     ) -> KeyboardHandoffState {
         KeyboardHandoffState(
             requestID: requestID,
@@ -288,7 +304,24 @@ struct KeyboardHandoffState: Codable, Sendable, Equatable {
             recoveryAttemptCount: recoveryAttemptCount ?? self.recoveryAttemptCount,
             recoveryAction: recoveryAction ?? self.recoveryAction,
             createdAt: createdAt,
-            updatedAt: updatedAt
+            updatedAt: updatedAt,
+            ownerBootID: ownerBootID,
+            endReason: endReason
+        )
+    }
+
+    /// The same state under another owner.
+    func owned(by bootID: UUID?) -> KeyboardHandoffState {
+        KeyboardHandoffState(
+            requestID: requestID,
+            phase: phase,
+            message: message,
+            recoveryAttemptCount: recoveryAttemptCount,
+            recoveryAction: recoveryAction,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            ownerBootID: bootID,
+            endReason: endReason
         )
     }
 

@@ -61,7 +61,7 @@ final class KeyboardReadinessPresentationTests: XCTestCase {
             .appNotRunning: "Open Muesli to start",
             .loadInterrupted: "Open Muesli to finish loading",
             .modelMissing: "Open Muesli to download the model",
-            .modelNotLoaded: "Open Muesli to load the model",
+            .modelNotLoaded: "Speech model not loaded. Open Muesli to load it",
             .recovery: "Open Muesli to finish",
         ]
         XCTAssertEqual(Set(expected.keys), Set(NeedsAppReason.allCases))
@@ -84,6 +84,16 @@ final class KeyboardReadinessPresentationTests: XCTestCase {
         XCTAssertEqual(present(.failed(.unknown)).accessibilityLabel, "Record. Speech model failed")
     }
 
+    // The stuck picture from a real phone: a recording nobody can hear, with a pill that does nothing.
+    func testALostConnectionSaysSoAndOffersTheWayBack() {
+        let lost = present(.connectionLost, escape: true, action: .openAppToRecover)
+        XCTAssertEqual(lost.caption, "Lost connection to Muesli. Tap to reconnect")
+        XCTAssertEqual(lost.recordTitle, "Reconnect")
+        XCTAssertEqual(lost.recordSymbol, "arrow.up.forward.app")
+        XCTAssertEqual(lost.tone, .attention)
+        XCTAssertEqual(lost.accessibilityHint, "Opens Muesli")
+    }
+
     func testCheckingIsQuiet() {
         let checking = present(.checking, action: .openAppToStart)
         XCTAssertEqual(checking.caption, "Checking Muesli…")
@@ -103,7 +113,7 @@ final class KeyboardReadinessPresentationTests: XCTestCase {
     // R18: every state has a caption rule, a symbol, a title and a label, so no page can show a blank.
     func testEveryStateIsPresentable() {
         var states: [KeyboardReadinessState] = [
-            .checking, .ready, .starting, .recording, .transcribing,
+            .checking, .ready, .starting, .recording, .transcribing, .connectionLost,
             .loading(.preparing, progress: nil, elapsed: 5), .loading(.downloading, progress: 0.5, elapsed: 0),
         ]
         states += NeedsAppReason.allCases.map { .needsApp($0) }

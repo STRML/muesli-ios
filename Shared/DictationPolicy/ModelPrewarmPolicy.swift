@@ -85,7 +85,7 @@ enum ModelPrewarmPolicy {
         if loadInFlight { return .skip(.loadInFlight) }
         if isLoaded { return .skip(.alreadyLoaded) }
         if !isDownloaded { return .download }
-        if !trigger.bypassesBackoff, history.remainingBackoff(now: now) > 0 { return .skip(.backingOff) }
+        if !trigger.bypassesBackoff, history.remainingBackoff(now: now, stamp: stamp) > 0 { return .skip(.backingOff) }
         if trigger.isOpportunistic, history.isWarm(for: stamp) { return .skip(.alreadyWarmedOnce) }
         return .load
     }
@@ -97,6 +97,8 @@ struct ModelPrewarmHistory: Codable, Sendable, Equatable {
     struct LoadMarker: Codable, Sendable, Equatable {
         var bootID: UUID
         var startedAt: Date
+        /// The build and OS it was loading under, so the strike lands on the right build.
+        var stamp: String?
     }
 
     var modelID: String
@@ -106,6 +108,10 @@ struct ModelPrewarmHistory: Codable, Sendable, Equatable {
     /// Failed, slow or interrupted loads in a row. A fast load sets it back to zero.
     var strikes = 0
     var lastStrikeAt: Date?
+    /// The build and OS the strikes were earned under. A wait earned under another build does not apply: an update
+    /// is a new situation, and the 5 minute wait a failed load left behind must not keep the first launch after
+    /// the update from warming the model.
+    var strikeStamp: String?
     var loadMarker: LoadMarker?
 
     init(modelID: String) {
@@ -119,16 +125,19 @@ struct ModelPrewarmHistory: Codable, Sendable, Equatable {
 
     /// Seconds left of the wait. A clock that moved backwards, or a record with strikes but no timestamp, reads as
     /// over: a wrong clock may cost one extra load, never a lockout.
-    func remainingBackoff(now: Date) -> TimeInterval {
+    func remainingBackoff(now: Date, stamp: String? = nil) -> TimeInterval {
         guard strikes > 0, let lastStrikeAt else { return 0 }
+        if let stamp, strikeStamp != stamp { return 0 }
         let elapsed = now.timeIntervalSince(lastStrikeAt)
         guard elapsed >= 0 else { return 0 }
         return max(0, ModelPrewarmPolicy.backoffSeconds(forStrikes: strikes) - elapsed)
     }
 
-    mutating func recordFailure(now: Date) {
-        strikes += 1
+    mutating func recordFailure(now: Date, stamp: String) {
+        // Strikes from another build do not count towards this one's wait.
+        strikes = strikeStamp == stamp || strikes == 0 ? strikes + 1 : 1
         lastStrikeAt = now
+        strikeStamp = stamp
     }
 
     /// A load finished. A fast one clears the strikes; a slow one is a strike, unless the user asked for it: a
@@ -139,13 +148,14 @@ struct ModelPrewarmHistory: Codable, Sendable, Equatable {
         guard seconds > ModelPrewarmPolicy.slowLoadSeconds, !userInitiated else {
             strikes = 0
             lastStrikeAt = nil
+            strikeStamp = nil
             return
         }
-        recordFailure(now: now)
+        recordFailure(now: now, stamp: stamp)
     }
 
-    mutating func markLoadStarted(boot: UUID, now: Date) {
-        loadMarker = LoadMarker(bootID: boot, startedAt: now)
+    mutating func markLoadStarted(boot: UUID, now: Date, stamp: String) {
+        loadMarker = LoadMarker(bootID: boot, startedAt: now, stamp: stamp)
     }
 
     mutating func markLoadFinished() {
@@ -158,7 +168,7 @@ struct ModelPrewarmHistory: Codable, Sendable, Equatable {
     mutating func recoverInterruptedLoad(currentBoot: UUID, now: Date) -> Bool {
         guard let marker = loadMarker, marker.bootID != currentBoot else { return false }
         loadMarker = nil
-        recordFailure(now: now)
+        recordFailure(now: now, stamp: marker.stamp ?? "")
         return true
     }
 }
@@ -185,9 +195,9 @@ struct ModelPrewarmHistoryStore {
         return stored
     }
 
-    func recordFailure(modelID: String, now: Date) {
+    func recordFailure(modelID: String, now: Date, stamp: String) {
         var history = history(for: modelID)
-        history.recordFailure(now: now)
+        history.recordFailure(now: now, stamp: stamp)
         save(history)
     }
 
@@ -197,9 +207,9 @@ struct ModelPrewarmHistoryStore {
         save(history)
     }
 
-    func markLoadStarted(modelID: String, boot: UUID, now: Date) {
+    func markLoadStarted(modelID: String, boot: UUID, now: Date, stamp: String) {
         var history = history(for: modelID)
-        history.markLoadStarted(boot: boot, now: now)
+        history.markLoadStarted(boot: boot, now: now, stamp: stamp)
         save(history)
     }
 

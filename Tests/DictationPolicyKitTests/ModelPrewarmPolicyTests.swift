@@ -40,7 +40,7 @@ final class ModelPrewarmPolicyTests: XCTestCase {
 
     private func failedOnce(at time: Date? = nil) -> ModelPrewarmHistory {
         var history = ModelPrewarmHistory(modelID: model)
-        history.recordFailure(now: time ?? t0)
+        history.recordFailure(now: time ?? t0, stamp: stamp)
         return history
     }
 
@@ -153,8 +153,8 @@ final class ModelPrewarmPolicyTests: XCTestCase {
     // Row 9b: each failure restarts the wait from the failure, with the next length.
     func testEachFailureRestartsTheWaitFromThatFailure() {
         var history = ModelPrewarmHistory(modelID: model)
-        history.recordFailure(now: t0)
-        history.recordFailure(now: t0.addingTimeInterval(400))
+        history.recordFailure(now: t0, stamp: stamp)
+        history.recordFailure(now: t0.addingTimeInterval(400), stamp: stamp)
         XCTAssertEqual(history.strikes, 2)
         XCTAssertEqual(history.remainingBackoff(now: t0.addingTimeInterval(400)), 600, accuracy: 0.001)
         XCTAssertEqual(history.remainingBackoff(now: t0.addingTimeInterval(1_000)), 0, accuracy: 0.001)
@@ -239,7 +239,7 @@ final class ModelPrewarmPolicyTests: XCTestCase {
     // Row 13: the app relaunches right after a failure. A new store over the same defaults still backs off.
     func testRelaunchRightAfterAFailureRespectsThePersistedBackoff() {
         let defaults = isolatedDefaults()
-        ModelPrewarmHistoryStore(defaults: defaults).recordFailure(modelID: model, now: t0)
+        ModelPrewarmHistoryStore(defaults: defaults).recordFailure(modelID: model, now: t0, stamp: stamp)
 
         let relaunched = ModelPrewarmHistoryStore(defaults: defaults)
         let history = relaunched.history(for: model)
@@ -262,7 +262,7 @@ final class ModelPrewarmPolicyTests: XCTestCase {
     func testChangingTheModelResetsTheBackoff() {
         let defaults = isolatedDefaults()
         let store = ModelPrewarmHistoryStore(defaults: defaults)
-        store.recordFailure(modelID: model, now: t0)
+        store.recordFailure(modelID: model, now: t0, stamp: stamp)
 
         XCTAssertEqual(store.history(for: "parakeet-v3").strikes, 0)
         XCTAssertFalse(store.history(for: "parakeet-v3").isWarm(for: stamp))
@@ -277,7 +277,7 @@ final class ModelPrewarmPolicyTests: XCTestCase {
         let defaults = isolatedDefaults()
         let store = ModelPrewarmHistoryStore(defaults: defaults)
         store.recordLoad(modelID: "parakeet-v3", seconds: 1, now: t0, stamp: stamp)
-        store.recordFailure(modelID: model, now: t0)
+        store.recordFailure(modelID: model, now: t0, stamp: stamp)
         XCTAssertEqual(store.history(for: model).strikes, 1)
         // One record is kept, for the model that reported last; the earlier model reads back clean.
         XCTAssertEqual(store.history(for: "parakeet-v3").strikes, 0)
@@ -312,7 +312,7 @@ final class ModelPrewarmPolicyTests: XCTestCase {
             let decision = decide(.foreground, history: store.history(for: model), at: now)
             guard decision == .load else { continue }
             attempts += 1
-            store.recordFailure(modelID: model, now: now)
+            store.recordFailure(modelID: model, now: now, stamp: stamp)
         }
         XCTAssertEqual(attempts, 1)
         XCTAssertEqual(legacyAttempts(foregrounds: 10), 10)
@@ -327,7 +327,7 @@ final class ModelPrewarmPolicyTests: XCTestCase {
             let now = t0.addingTimeInterval(Double(minute) * 60)
             guard decide(.foreground, history: store.history(for: model), at: now) == .load else { continue }
             attemptTimes.append(now.timeIntervalSince(t0))
-            store.recordFailure(modelID: model, now: now)
+            store.recordFailure(modelID: model, now: now, stamp: stamp)
         }
         // Each attempt is followed by the next wait: 5, 10, 20, 40, 80, 160, 320 min, then the 6 h cap twice.
         XCTAssertEqual(attemptTimes, [0, 300, 900, 2_100, 4_500, 9_300, 18_900, 38_100, 59_700, 81_300])

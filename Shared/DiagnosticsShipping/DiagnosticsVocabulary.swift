@@ -17,6 +17,10 @@ enum DiagnosticsVocabulary {
         "keyboard.appeared", "keyboard.disappeared", "keyboard.autoOff", "keyboard.persistencePreferenceChanged",
         "level.freshness", "model.select", "rewrite.skipped",
         "live_typing.unsupported", "live_typing.detached", "live_typing.yielded", "live_typing.final_withheld",
+        // Readiness: what the keyboard shows (one line per change), a request ended because its owner was gone, and
+        // the trip that gets the app ready.
+        "keyboard.readiness", "request.abandoned", "intent.prepare", "prepare.started", "prepare.finished",
+        "model.loadInterrupted",
         // App: audio session and recorder
         "audioSession.activated", "audioSession.activateRequested", "audioSession.configureRequested",
         "audioSession.deactivated", "audioSession.deactivateRequested", "audioSession.deactivationFailed",
@@ -49,7 +53,7 @@ enum DiagnosticsVocabulary {
         var rules: [String: DiagnosticsValueRule] = [:]
         func add(_ rule: DiagnosticsValueRule, _ keys: String...) { for key in keys { rules[key] = rule } }
 
-        add(.uuid, "capture_request", "intent_invocation", "history_id")
+        add(.uuid, "capture_request", "intent_invocation", "history_id", "boot")
         add(.requestID, "request")
         add(.optionalID, "active", "active_request", "session", "mic_generation")
         add(.int, "type", "attempt", "elapsed_ms", "duration_ms", "samples", "bytes", "characters", "code",
@@ -63,7 +67,7 @@ enum DiagnosticsVocabulary {
             "decoder_specialization_s", "age", "appSeenAt")
         add(.identifier, "model", "variant", "source", "trigger", "kind", "error", "stage", "step", "caller",
             "file", "category", "category_before", "mode", "mode_before", "preference", "phase", "localPhase",
-            "appPhase")
+            "appPhase", "readiness", "action", "model_state", "trip_outcome")
         add(.identifierList, "input_ports", "output_ports")
         add(.errorDomain, "domain")
         add(.oneOf(values(DictationExitOutcome.self, extra: ["missingAudio", "noRecoverableRecording"])), "outcome")

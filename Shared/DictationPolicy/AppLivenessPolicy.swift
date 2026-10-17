@@ -20,6 +20,10 @@ enum AppLivenessPolicy {
     /// How long a keyboard that has just appeared waits for a heartbeat before it calls the app absent. The
     /// keyboard asks a running app for an immediate beat when it appears, so a live app answers well inside this.
     static let checkingWindow: TimeInterval = 1.5
+    /// While a recording runs the app republishes the input level at least every 0.75 s
+    /// (`MuesliWaveformLevelThrottle.heartbeatInterval`), whatever the level. No level for this long means the
+    /// recording the keyboard thinks it sees is not happening, even if the app still beats.
+    static let levelStaleAfter: TimeInterval = 6
 
     enum Freshness: Equatable, Sendable { case fresh, stale, clockSkewed }
 

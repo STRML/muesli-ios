@@ -30,6 +30,9 @@ enum KeyboardReadinessState: Equatable, Sendable {
     /// Requested or acknowledged, waiting for the microphone.
     case starting
     case recording
+    /// A live app owns a recording but no audio level has arrived for a while, so what the keyboard would show is
+    /// not known to be true. Shown as a lost connection with a way out, never as an inert pill.
+    case connectionLost
     case transcribing
     case failed(ReadinessModelFailure)
 }
@@ -64,6 +67,9 @@ struct KeyboardReadinessInput: Equatable, Sendable {
     var now: Date
     /// When this keyboard began waiting for a heartbeat. Nil when it is not waiting.
     var checkingStartedAt: Date?
+    /// How long since the app last reported audio for the recording in play (or since the recording began, if it
+    /// has not yet). Nil when there is no recording to judge.
+    var recordingSignalAge: TimeInterval?
 }
 
 enum KeyboardReadinessDerivation {
@@ -74,7 +80,12 @@ enum KeyboardReadinessDerivation {
         guard input.hasStoreAccess else {
             return KeyboardReadiness(state: .needsApp(.fullAccessOff), recordAction: .openAppToPrepare, offersEscape: false)
         }
-        if let active = activeRequest(input) { return active }
+        if var active = activeRequest(input) {
+            if active.state == .recording, let age = input.recordingSignalAge, age > AppLivenessPolicy.levelStaleAfter {
+                active = KeyboardReadiness(state: .connectionLost, recordAction: .openAppToRecover, offersEscape: true)
+            }
+            return active
+        }
 
         let liveness = AppLivenessPolicy.liveness(record: input.record, keyboardStamp: input.keyboardStamp, now: input.now)
         guard liveness.liveBootID != nil, let record = input.record else {
@@ -159,6 +170,23 @@ enum KeyboardReadinessDerivation {
             return KeyboardReadiness(state: .needsApp(.modelNotLoaded), recordAction: .openAppToPrepare, offersEscape: false)
         case let .failed(failure):
             return KeyboardReadiness(state: .failed(failure), recordAction: .openAppToPrepare, offersEscape: false)
+        }
+    }
+}
+
+extension KeyboardReadinessState {
+    /// A short word for the diagnostics log: one per state, with the reason where there is one.
+    var code: String {
+        switch self {
+        case .checking: "checking"
+        case let .needsApp(reason): "needsApp.\(reason.rawValue)"
+        case let .loading(stage, _, _): "loading.\(stage.rawValue)"
+        case .ready: "ready"
+        case .starting: "starting"
+        case .recording: "recording"
+        case .connectionLost: "connectionLost"
+        case .transcribing: "transcribing"
+        case let .failed(failure): "failed.\(failure.rawValue)"
         }
     }
 }

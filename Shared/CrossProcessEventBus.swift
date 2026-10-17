@@ -11,6 +11,11 @@ enum CrossProcessEvent: String, CaseIterable, Sendable {
     case typingSettingsChanged = "typing-settings.changed"
     case resultChanged = "result.changed"
     case ownershipChanged = "ownership.changed"
+    /// The app's readiness record changed: the model state, the mic session, or a new boot.
+    case readinessChanged = "readiness.changed"
+    /// A keyboard has just appeared and asks a running app for an immediate heartbeat. A suspended app cannot
+    /// answer, which is the point.
+    case readinessProbe = "readiness.probe"
 
     var notificationName: String {
         "\(MuesliAppConstants.crossProcessPrefix).\(rawValue).v1"

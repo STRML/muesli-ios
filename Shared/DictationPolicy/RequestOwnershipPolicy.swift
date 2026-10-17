@@ -13,8 +13,18 @@ enum ProgressStage: String, CaseIterable, Sendable {
 }
 
 enum AbandonReason: String, CaseIterable, Sendable {
+    /// A newer boot is running, or the app was updated: the process that owned the request is gone.
     case appRestarted = "app_restarted"
+    /// The owner is the last boot on record and has stopped beating (suspended or killed), or nobody took it.
     case ownerLost = "owner_lost"
+
+    /// Stored with the request. Never shown as a failure: the keyboard shows idle.
+    var message: String {
+        switch self {
+        case .appRestarted: "Muesli restarted"
+        case .ownerLost: "Muesli stopped responding"
+        }
+    }
 }
 
 /// What the policy says about a persisted request.

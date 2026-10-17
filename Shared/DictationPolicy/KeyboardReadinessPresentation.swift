@@ -34,6 +34,11 @@ struct KeyboardReadinessPresentation: Equatable, Sendable {
             return running(escape ? "Stopping is taking a while. Tap to open Muesli" : "Listening", title: "Stop", escape: escape)
         case .transcribing:
             return running(escape ? "Taking longer than usual. Tap to open Muesli" : "Writing your text", title: "Writing…", escape: escape)
+        case .connectionLost:
+            return Self(caption: "Lost connection to Muesli. Tap to reconnect", tone: .attention, recordTitle: "Reconnect",
+                        recordSymbol: "arrow.up.forward.app", showsSpinner: false,
+                        accessibilityLabel: "Lost connection to Muesli. Double tap to open Muesli",
+                        accessibilityHint: "Opens Muesli", needsAttention: false)
         case let .needsApp(reason):
             return needsApp(reason)
         case let .loading(stage, progress, elapsed):
@@ -68,7 +73,7 @@ struct KeyboardReadinessPresentation: Equatable, Sendable {
         case .modelMissing:
             (caption, label) = ("Open Muesli to download the model", "Open Muesli to download the speech model")
         case .modelNotLoaded:
-            (caption, label) = ("Open Muesli to load the model", "Open Muesli to load the speech model")
+            (caption, label) = ("Speech model not loaded. Open Muesli to load it", "Speech model not loaded. Open Muesli to load it")
         case .recovery:
             (caption, label) = ("Open Muesli to finish", "Open Muesli to finish your recording")
         }
