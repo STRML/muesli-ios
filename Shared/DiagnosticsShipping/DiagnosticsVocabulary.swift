@@ -50,14 +50,14 @@ enum DiagnosticsVocabulary {
         add(.requestID, "request")
         add(.optionalID, "active", "active_request", "session", "mic_generation")
         add(.int, "type", "attempt", "elapsed_ms", "duration_ms", "samples", "bytes", "characters", "code",
-            "options", "options_before", "channels", "app_state", "audio_ms")
+            "options", "options_before", "channels", "app_state", "audio_ms", "heartbeat_age_ms", "bg_remaining_ms")
         add(.codeOrInt, "reason")
         add(.flag, "should_resume", "enabled", "startup", "recording", "protected_data", "persistent", "loaded",
             "input_enabled", "output_enabled", "input_available", "other_audio", "file_written", "empty", "fresh",
             "inserted", "matchesActive", "canUseRuntimeStart")
         add(.decimal, "sample_rate", "input_sample_rate")
         add(.duration, "total_s", "wall_s", "encoder_load_s", "encoder_specialization_s", "decoder_load_s",
-            "decoder_specialization_s", "age", "appSeenAt", "heartbeat_age", "bg_remaining")
+            "decoder_specialization_s", "age", "appSeenAt")
         add(.identifier, "model", "variant", "source", "trigger", "kind", "error", "stage", "step", "caller",
             "file", "category", "category_before", "mode", "mode_before", "preference", "phase", "localPhase",
             "appPhase")
@@ -104,7 +104,7 @@ enum DictationExitOutcome: String, CaseIterable, Sendable {
 
 /// The last step a request reached, in the order the stop-to-save path takes them.
 enum DictationStage: String, CaseIterable, Sendable {
-    case requested, startup, recording, stopping, finalizingAudio, transcribing, delivering, persisting, completed
+    case requested, startup, recording, stopping, finalizingAudio, transcribing, persisting, delivering, completed
 }
 
 enum DictationCancelSource: String, CaseIterable, Sendable {

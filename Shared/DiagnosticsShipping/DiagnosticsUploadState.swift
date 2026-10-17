@@ -8,6 +8,8 @@ struct DiagnosticsEngineConfig: Sendable, Equatable {
     var maxBackoff: TimeInterval = 15 * 60
     var maxBatchesPerFlush = 5
     var seenLimit = 1_500
+    /// The longest `Retry-After` honored.
+    var maxRetryAfter: TimeInterval = 3_600
 
     static let standard = DiagnosticsEngineConfig()
 }
@@ -55,6 +57,9 @@ struct DiagnosticsUploadState: Codable, Equatable, Sendable {
     var rejectedEvents = 0
     var failures = 0
     var retryNotBefore: Date?
+    /// How long the current wait was meant to be. A deadline further away than this can only come from a clock that
+    /// moved backwards.
+    var retryDelay: TimeInterval = 0
     var stopped: DiagnosticsStopReason?
     var lastUploadAt: Date?
     var lastError: String?
@@ -114,6 +119,8 @@ enum DiagnosticsTransportResult: Equatable, Sendable {
     case status(Int)
     /// No response: offline, timed out, refused, TLS failure. The code is the `URLError` raw value or 0.
     case networkFailure(code: Int)
+    /// A 429 or 503 that named how long to wait (`Retry-After`, in seconds).
+    case deferred(status: Int, retryAfter: TimeInterval)
     /// The send was cancelled before it finished (background time ran out).
     case cancelled
 }

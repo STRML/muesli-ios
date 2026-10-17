@@ -48,7 +48,8 @@ enum DiagnosticsSanitizer {
                 result.droppedFields += 1
                 continue
             }
-            fields[pair.key] = pair.value
+            // The receiver's value alphabet has no comma, so a list goes out joined with "+".
+            fields[pair.key] = rule == .identifierList ? pair.value.replacingOccurrences(of: ",", with: "+") : pair.value
         }
         result.event = DiagnosticsEvent(id: line.id, time: line.time, process: line.process, name: line.name, fields: fields)
         return result

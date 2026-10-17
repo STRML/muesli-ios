@@ -103,7 +103,8 @@ enum DiagnosticsEvents {
         heartbeatAge: TimeInterval?
     ) -> DiagnosticsRecord {
         record("delivery.outcome", request, [
-            "route": route.rawValue, "route_reason": reason.rawValue, "heartbeat_age": heartbeatAge.map(seconds),
+            "route": route.rawValue, "route_reason": reason.rawValue,
+            "heartbeat_age_ms": heartbeatAge.map(milliseconds),
         ])
     }
 
@@ -116,9 +117,10 @@ enum DiagnosticsEvents {
     }
 
     /// `remaining` is `UIApplication.backgroundTimeRemaining`, which is `greatestFiniteMagnitude` in the foreground.
+    /// `bg_remaining_ms` is left out when the OS reports no limit.
     static func backgroundTask(request: UUID?, state: BackgroundTaskState, remaining: TimeInterval?) -> DiagnosticsRecord {
         var extra: [String: String?] = ["bg_state": state.rawValue]
-        extra["bg_remaining"] = remaining.map { $0 > 1_000_000 ? "unlimited" : seconds($0) }
+        if let remaining, remaining < 1_000_000 { extra["bg_remaining_ms"] = milliseconds(remaining) }
         return record("backgroundTask", request, extra)
     }
 
@@ -130,8 +132,9 @@ enum DiagnosticsEvents {
         DiagnosticsRecord(name: "app.thermalState", fields: ["thermal": level.rawValue])
     }
 
-    private static func seconds(_ value: TimeInterval) -> String {
-        String(format: "%.1fs", value)
+    /// Durations go out as whole milliseconds: the receiver drops an event that carries a float.
+    private static func milliseconds(_ value: TimeInterval) -> String {
+        String(Int((value * 1_000).rounded()))
     }
 
     private static func record(_ name: String, _ request: UUID?, _ extra: [String: String?]) -> DiagnosticsRecord {

@@ -203,6 +203,7 @@ actor DiagnosticsUploadEngine {
         if force {
             current.stopped = nil
             current.retryNotBefore = nil
+            current.retryDelay = 0
             commit(current)
         } else if let stopped = current.stopped {
             return .stopped(stopped)
@@ -252,6 +253,8 @@ actor DiagnosticsUploadEngine {
             return .finished(.interrupted)
         case .networkFailure(let code):
             return .finished(backOff(&state, now: now, error: "network_\(code)"))
+        case .deferred(let status, let retryAfter):
+            return .finished(backOff(&state, now: now, error: "status_\(status)", minimum: min(retryAfter, config.maxRetryAfter)))
         case .status(let status):
             switch status {
             case 200..<300, 409:
@@ -285,9 +288,15 @@ actor DiagnosticsUploadEngine {
         return .stopped(reason)
     }
 
-    private func backOff(_ state: inout DiagnosticsUploadState, now: Date, error: String) -> DiagnosticsFlushReport {
+    private func backOff(
+        _ state: inout DiagnosticsUploadState,
+        now: Date,
+        error: String,
+        minimum: TimeInterval = 0
+    ) -> DiagnosticsFlushReport {
         state.failures += 1
-        state.retryNotBefore = now.addingTimeInterval(backoff(forFailures: state.failures))
+        state.retryDelay = max(backoff(forFailures: state.failures), minimum)
+        state.retryNotBefore = now.addingTimeInterval(state.retryDelay)
         state.lastError = error
         return .failed(error)
     }
@@ -302,7 +311,7 @@ actor DiagnosticsUploadEngine {
     /// that moved backwards, so it is replaced by a fresh single wait: a wrong clock costs one wait, never a lockout.
     private func remainingBackoff(_ state: inout DiagnosticsUploadState, now: Date) -> TimeInterval? {
         guard let deadline = state.retryNotBefore else { return nil }
-        let step = backoff(forFailures: max(state.failures, 1))
+        let step = max(state.retryDelay, backoff(forFailures: max(state.failures, 1)))
         var remaining = deadline.timeIntervalSince(now)
         if remaining > step {
             state.retryNotBefore = now.addingTimeInterval(step)
@@ -333,17 +342,21 @@ actor DiagnosticsUploadEngine {
     /// unknown thermal word) becomes `unknown` instead of going out.
     private func envelope(for batch: DiagnosticsSealedBatch, trigger: DiagnosticsFlushTrigger) -> DiagnosticsEnvelope {
         let device = deviceInfo()
-        func checked(_ value: String, _ rule: DiagnosticsValueRule) -> String { rule.accepts(value) ? value : "unknown" }
+        func checked(_ value: String, _ rule: DiagnosticsValueRule, fallback: String = "unknown") -> String {
+            rule.accepts(value) ? value : fallback
+        }
         return DiagnosticsEnvelope(
             batchID: batch.id,
             seq: batch.seq,
             sentAt: DiagnosticsLogFormat.timestamp(clock.now()),
-            deviceID: checked(device.deviceID, .uuid),
+            // The receiver rejects a whole batch for a bad device id or thermal state, so these fall back to values
+            // it accepts rather than to "unknown".
+            deviceID: checked(device.deviceID, .uuid, fallback: "00000000-0000-0000-0000-000000000000"),
             appVersion: checked(device.appVersion, .version),
             appBuild: checked(device.appBuild, .version),
-            iosVersion: checked(device.iosVersion, .version),
-            deviceModel: checked(device.deviceModel, .hardwareModel),
-            thermalState: checked(device.thermalState, .oneOf(Set(ThermalLevel.allCases.map(\.rawValue)))),
+            os: "iOS " + checked(device.iosVersion, .version),
+            model: checked(device.deviceModel, .hardwareModel),
+            thermal: checked(device.thermalState, .oneOf(Set(ThermalLevel.allCases.map(\.rawValue))), fallback: ThermalLevel.nominal.rawValue),
             trigger: trigger,
             droppedEvents: batch.droppedEvents,
             droppedFields: batch.droppedFields,

@@ -53,6 +53,12 @@ final class DiagnosticsSanitizerTests: XCTestCase {
         for value in result.event?.fields.values ?? [:].values { XCTAssertFalse(value.contains("secret")) }
     }
 
+    /// The receiver's value alphabet has no comma, so route port lists go out joined with a plus sign.
+    func testAPortListIsJoinedWithPlusSignsForTheReceiver() {
+        let result = sanitize("recorder_start_failed", ["input_ports": "MicrophoneBuiltIn,BluetoothHFP"])
+        XCTAssertEqual(result.event?.fields["input_ports"], "MicrophoneBuiltIn+BluetoothHFP")
+    }
+
     func testVeryLongValuesAreDropped() {
         let result = sanitize("recording.startFailed", ["error": String(repeating: "a", count: 500), "elapsed_ms": "1"])
         XCTAssertEqual(result.event?.fields, ["elapsed_ms": "1"])

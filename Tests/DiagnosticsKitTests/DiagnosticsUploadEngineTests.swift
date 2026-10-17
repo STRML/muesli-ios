@@ -241,6 +241,28 @@ final class DiagnosticsUploadEngineTests: XCTestCase {
         XCTAssertEqual(waits, [30, 60, 120, 240, 480, 900, 900, 900])
     }
 
+    func testRetryAfterLengthensTheWaitAndIsCapped() async {
+        let rig = Rig()
+        rig.transport.setFallback(.deferred(status: 429, retryAfter: 120))
+        let engine = rig.engine
+        _ = await run(engine, "")
+        let first = await run(engine, Fixture.numbered(1))
+        XCTAssertEqual(first, .failed("status_429"))
+        var until = await engine.status().retryNotBefore
+        XCTAssertEqual(until?.timeIntervalSince(rig.clock.now()), 120)
+        // Still inside the server's wait, and a clock check must not shorten it to the 30 s backoff step.
+        rig.clock.advance(60)
+        let waiting = await run(engine, Fixture.numbered(1))
+        XCTAssertEqual(waiting, .backingOff(until: rig.clock.now().addingTimeInterval(60)))
+        XCTAssertEqual(rig.transport.sent.count, 1)
+
+        rig.clock.advance(61)
+        rig.transport.setFallback(.deferred(status: 503, retryAfter: 86_400))
+        _ = await run(engine, Fixture.numbered(1))
+        until = await engine.status().retryNotBefore
+        XCTAssertEqual(until?.timeIntervalSince(rig.clock.now()), 3_600, "a day-long Retry-After is capped at an hour")
+    }
+
     func testRateLimitingIsABackoffNotAStop() async {
         let rig = Rig()
         rig.transport.setFallback(.status(429))
@@ -529,9 +551,9 @@ final class DiagnosticsUploadEngineTests: XCTestCase {
         XCTAssertEqual(envelope?.deviceID, Fixture.device.deviceID)
         XCTAssertEqual(envelope?.appVersion, "0.1.7")
         XCTAssertEqual(envelope?.appBuild, "9")
-        XCTAssertEqual(envelope?.iosVersion, "26.0")
-        XCTAssertEqual(envelope?.deviceModel, "iPhone18,1")
-        XCTAssertEqual(envelope?.thermalState, "nominal")
+        XCTAssertEqual(envelope?.os, "iOS 26.0")
+        XCTAssertEqual(envelope?.model, "iPhone18,1")
+        XCTAssertEqual(envelope?.thermal, "nominal")
         XCTAssertEqual(envelope?.trigger, .background)
         XCTAssertEqual(envelope?.sentAt, DiagnosticsLogFormat.timestamp(rig.clock.now()))
         XCTAssertEqual(envelope?.schema, 1)
@@ -546,8 +568,9 @@ final class DiagnosticsUploadEngineTests: XCTestCase {
         let engine = DiagnosticsUploadEngine(store: rig.store, transport: rig.transport, clock: rig.clock, deviceInfo: { hostile })
         _ = await run(engine, "")
         _ = await run(engine, Fixture.numbered(1))
-        XCTAssertEqual(rig.transport.sent.first?.envelope.deviceModel, "unknown")
-        XCTAssertEqual(rig.transport.sent.first?.envelope.thermalState, "unknown")
+        XCTAssertEqual(rig.transport.sent.first?.envelope.model, "unknown")
+        // The receiver rejects a whole batch for a thermal state outside its four words.
+        XCTAssertEqual(rig.transport.sent.first?.envelope.thermal, "nominal")
     }
 
     func testAHostileValueIsDroppedEndToEndAndTheBatchReportsTheCount() async {
@@ -611,7 +634,7 @@ final class DiagnosticsUploadEngineTests: XCTestCase {
             Fixture.line(1.5, "transcription.started", ["request": full, "model": "parakeet-tdt-v3"]),
             Fixture.line(2, "handoff.observed", process: "MuesliKeyboard", ["phase": "transcribingStarted", "request": id]),
             Fixture.line(10, "scene.inactive", ["active_request": full, "recording": "no"]),
-            Fixture.line(19, "backgroundTask", ["request": full, "bg_state": "expired", "bg_remaining": "0.0"]),
+            Fixture.line(19, "backgroundTask", ["request": full, "bg_state": "expired", "bg_remaining_ms": "0"]),
             Fixture.line(19.1, "dictation.exit", ["request": full, "outcome": "abandoned", "last_stage": "transcribing"])
         )
         let report = await run(engine, log)

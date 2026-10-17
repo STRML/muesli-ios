@@ -82,6 +82,17 @@ final class DiagnosticsEventsTests: XCTestCase {
         }
     }
 
+    func testDurationsGoOutAsWholeMillisecondsAndAnUnlimitedBackgroundTimeIsOmitted() {
+        XCTAssertEqual(
+            DiagnosticsEvents.deliveryOutcome(request: request, route: .copyRequired, reason: .heartbeatStale, heartbeatAge: 4.25).fields["heartbeat_age_ms"],
+            "4250"
+        )
+        XCTAssertEqual(DiagnosticsEvents.backgroundTask(request: request, state: .expired, remaining: 0.4).fields["bg_remaining_ms"], "400")
+        let foreground = DiagnosticsEvents.backgroundTask(request: request, state: .begin, remaining: .greatestFiniteMagnitude)
+        XCTAssertNil(foreground.fields["bg_remaining_ms"])
+        XCTAssertEqual(foreground.fields["bg_state"], "begin")
+    }
+
     func testNoBuilderAcceptsFreeTextFromItsCaller() {
         // The only String parameters are source/model/phase. A caller that passes a sentence gets the field dropped,
         // not sent: the sanitizer, not the builder, is the guard.
