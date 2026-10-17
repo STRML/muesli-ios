@@ -38,6 +38,7 @@ final class KeyboardSnapshotTests: XCTestCase {
         var page: TypingPage = .letters
         var lockCaps = false
         var width: CGFloat = 393
+        var layout: KeyboardLayout = .full
     }
 
 
@@ -48,7 +49,10 @@ final class KeyboardSnapshotTests: XCTestCase {
         try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
         let bus = StubEventBus()
         let store = SharedStore(containerURL: temp, eventPoster: bus)
+        // The layout goes through the store and the appearance read, the way the keyboard gets it.
+        try store.saveKeyboardTypingSettings(KeyboardTypingSettings(autocorrect: true, layout: scene.layout))
         let controller = KeyboardController(store: store, eventBus: bus)
+        controller.loadTypingSettings(appliesLayout: true)
         var field = KeyboardTextContext(selectedText: nil, textBeforeCursor: editText)
         controller.textContextProvider = { field }
         controller.textInserter = { _ in }
@@ -179,6 +183,25 @@ final class KeyboardSnapshotTests: XCTestCase {
             Scene(name: "type-landscape", setup: .ready, rewriteAvailable: true, surface: .type, before: "See you at the offi",
                   width: 852),
             Scene(name: "dictate-landscape", setup: .ready, rewriteAvailable: true, width: 852),
+            // The layout setting and the large recording panel.
+            Scene(name: "full-idle", setup: .ready, rewriteAvailable: true, surface: .type,
+                  before: "See you tomorrow at the offi"),
+            Scene(name: "full-recording", setup: .listening, rewriteAvailable: true, surface: .type),
+            Scene(name: "full-recording-words", setup: .listening, rewriteAvailable: true,
+                  liveText: "so the plan for tomorrow is to pick up the parts first and then head over to the shop",
+                  surface: .type),
+            Scene(name: "full-recording-long", setup: .listening, rewriteAvailable: true,
+                  liveText: (1...80).map { "word\($0)" }.joined(separator: " "), surface: .type),
+            Scene(name: "full-recording-landscape", setup: .listening, rewriteAvailable: true,
+                  liveText: "so the plan for tomorrow is to pick up the parts first", surface: .type, width: 852),
+            Scene(name: "full-recording-edit", setup: .editListening, rewriteAvailable: true, surface: .type),
+            Scene(name: "full-transcribing", setup: .transcribing, rewriteAvailable: true,
+                  liveText: "so the plan for tomorrow is to pick up the parts first and then head over to the shop",
+                  surface: .type),
+            Scene(name: "minimal-idle", setup: .ready, rewriteAvailable: true, layout: .minimal),
+            Scene(name: "minimal-recording", setup: .listening, rewriteAvailable: true,
+                  liveText: "so the plan for tomorrow is to pick up the parts first", layout: .minimal),
+            Scene(name: "minimal-transcribing", setup: .transcribing, rewriteAvailable: true, layout: .minimal),
         ]
         for scene in scenes {
             for (suffix, style) in [("light", UIUserInterfaceStyle.light), ("dark", .dark)] {
@@ -201,6 +224,7 @@ final class KeyboardSnapshotTests: XCTestCase {
                 let image = UIGraphicsImageRenderer(size: size, format: format).image { _ in
                     host.view.drawHierarchy(in: CGRect(origin: .zero, size: size), afterScreenUpdates: true)
                 }
+                XCTAssertEqual(image.size.height, CGFloat(TypingMetrics.preferredHeight), "\(scene.name) height")
                 try XCTUnwrap(image.pngData()).write(to: directory.appendingPathComponent("\(scene.name)-\(suffix).png"))
                 window.isHidden = true
             }
