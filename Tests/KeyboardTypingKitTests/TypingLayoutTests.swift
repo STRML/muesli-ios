@@ -196,19 +196,19 @@ final class TypingPresentationTests: XCTestCase {
     // P6: setup verification
     func testPendingVerificationForcesTheDictatePage() {
         XCTAssertEqual(
-            TypingSurface.resolve(selected: .type, hasPendingSetupVerification: true, isDictationActive: false),
+            TypingSurface.resolve(layout: .full, selected: .type, hasPendingSetupVerification: true, isDictationActive: false),
             .dictate
         )
         XCTAssertEqual(
-            TypingSurface.resolve(selected: .type, hasPendingSetupVerification: true, isDictationActive: true),
+            TypingSurface.resolve(layout: .full, selected: .type, hasPendingSetupVerification: true, isDictationActive: true),
             .type
         )
         XCTAssertEqual(
-            TypingSurface.resolve(selected: .type, hasPendingSetupVerification: false, isDictationActive: false),
+            TypingSurface.resolve(layout: .full, selected: .type, hasPendingSetupVerification: false, isDictationActive: false),
             .type
         )
         XCTAssertEqual(
-            TypingSurface.resolve(selected: .dictate, hasPendingSetupVerification: false, isDictationActive: false),
+            TypingSurface.resolve(layout: .full, selected: .dictate, hasPendingSetupVerification: false, isDictationActive: false),
             .dictate
         )
     }

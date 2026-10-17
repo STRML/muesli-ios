@@ -106,11 +106,17 @@ final class KeyboardController {
     @ObservationIgnored private let surfaceDefaults: UserDefaults?
     var surface: TypingSurface {
         TypingSurface.resolve(
+            layout: layout,
             selected: selectedSurface,
             hasPendingSetupVerification: hasPendingSetupVerification,
             isDictationActive: showsActiveWaveform
         )
     }
+    /// STUB: the layout the keyboard is showing.
+    private(set) var layout: KeyboardLayout = .fallback
+    /// STUB: the recording panel.
+    var recordingPanel: TypingRecordingPanel { .hidden }
+    var recordingPanelPreview: String? { nil }
     var recordKeyMode: TypingRecordKey.Mode {
         TypingRecordKey.mode(opensMuesli: opensMuesliFromPrimaryButton, hasLaunchURL: launchURL != nil)
     }
@@ -124,6 +130,7 @@ final class KeyboardController {
     ) {
         self.surfaceDefaults = surfaceDefaults
         selectedSurface = TypingSurface.atLaunch(
+            layout: .fallback,
             stored: surfaceDefaults?.string(forKey: Self.selectedSurfaceDefaultsKey),
             hasPendingSetupVerification: false,
             isDictationActive: false
@@ -1574,7 +1581,7 @@ final class KeyboardController {
 
     /// Reads the typing settings the app published. Unreadable (Full Access off) or never published means the
     /// default: autocorrect on.
-    func loadTypingSettings() {
+    func loadTypingSettings(appliesLayout: Bool = false) {
         let settings = (try? store.keyboardTypingSettings()) ?? nil
         typing.autocorrectEnabled = (settings ?? .default).autocorrect
         liveTyper.isEnabled = (settings ?? .default).liveTyping

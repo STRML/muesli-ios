@@ -21,11 +21,13 @@ extension TypingSurface {
     /// The page chosen when the keyboard opens: the remembered one (Type when there is none or it is unreadable),
     /// then the same rule as every later render, so setup verification still forces Dictate.
     static func atLaunch(
+        layout: KeyboardLayout,
         stored: String?,
         hasPendingSetupVerification: Bool,
         isDictationActive: Bool
     ) -> TypingSurface {
         resolve(
+            layout: layout,
             selected: stored.flatMap(TypingSurface.init(storedValue:)) ?? .type,
             hasPendingSetupVerification: hasPendingSetupVerification,
             isDictationActive: isDictationActive

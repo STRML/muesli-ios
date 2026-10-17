@@ -14,6 +14,12 @@ enum TypingMetrics {
     static let bottomInset: Double = 6
     static let rowCount = 4
 
+    /// A key row's slot: the key and the gap under it. Each row's tap area fills its whole slot.
+    static var rowSlotHeight: Double { keyHeight + rowSpacing }
+    /// The slots above the bottom row: the three letter (or number, or symbol) rows. The recording panel fills
+    /// exactly these, so the bottom row stays where it is.
+    static var panelSlotHeight: Double { Double(rowCount - 1) * rowSlotHeight }
+
     /// 4 + 40 + 6 + 4 x 44 + 3 x 10 + 6 = 262.
     static var preferredHeight: Double {
         let rows = Double(rowCount)
@@ -29,7 +35,12 @@ enum TypingSurface: Sendable, Equatable {
 
     /// Setup verification needs the Dictate page's Verify row, whichever page was last chosen. A running
     /// dictation shows on both pages, so it never forces one.
-    static func resolve(selected: TypingSurface, hasPendingSetupVerification: Bool, isDictationActive: Bool) -> TypingSurface {
+    static func resolve(
+        layout: KeyboardLayout,
+        selected: TypingSurface,
+        hasPendingSetupVerification: Bool,
+        isDictationActive: Bool
+    ) -> TypingSurface {
         hasPendingSetupVerification && !isDictationActive ? .dictate : selected
     }
 }
@@ -144,4 +155,31 @@ enum TypingStripPill {
     static func isTappable(phase: TypingPillPhase, stopRequested: Bool, cancelRequested: Bool) -> Bool {
         phase == .recording && !stopRequested && !cancelRequested
     }
+}
+
+/// The large panel that takes the place of the letter rows while a dictation records, so the whole key area is
+/// one stop target. STUB: always hidden.
+enum TypingRecordingPanel: Sendable, Equatable {
+    case hidden
+    case recording
+    case stopping
+    case cancelling
+    case transcribing
+
+    static func resolve(
+        layout: KeyboardLayout,
+        surface: TypingSurface,
+        phase: TypingPillPhase,
+        stopRequested: Bool,
+        cancelRequested: Bool
+    ) -> TypingRecordingPanel {
+        .hidden
+    }
+
+    var isTappable: Bool { self == .recording }
+
+    static func previewTail(_ text: String, limit: Int = 140) -> String { text }
+    func caption(isEdit: Bool) -> String { "" }
+    func accessibilityLabel(isEdit: Bool) -> String { "" }
+    func accessibilityHint(isEdit: Bool) -> String? { "" }
 }
