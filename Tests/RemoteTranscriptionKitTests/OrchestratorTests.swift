@@ -192,18 +192,28 @@ final class OrchestratorTests: XCTestCase {
 
     func testRow06RemoteAfterTheBudgetIsDroppedAndNothingReplacesTheOnDeviceText() async throws {
         let h = Harness()
+        // Both signals are opened by the upload itself, so the test waits on the events, not on a poll. The budget
+        // must not be released before the upload starts: a run that ends first cancels the remote task while it is
+        // still probing, and the upload then never starts, so there is nothing to cancel.
+        let uploadStarted = Gate()
+        let uploadWasCancelled = Gate()
         let orchestrator = make(h, upload: {
-            try await cancellableSleep(1_000, cancelled: h.uploadCancelled)
+            uploadStarted.open()
+            do { try await cancellableSleep(1_000) } catch {
+                uploadWasCancelled.open()
+                throw error
+            }
             return "remote text"
         })
         let (audio, eligible) = (self.audio, self.eligible)
         let run = Task { try await orchestrator.transcribe(audioURL: audio, context: eligible, local: { "local text" }) }
+        await uploadStarted.waitOrFail("the upload to start")
         await h.sleeper.waitUntilPending(timing.resultBudget)
         h.sleeper.release(timing.resultBudget)
         let outcome = try await run.value
         XCTAssertEqual(outcome, .init(text: "local text", source: .onDevice))
         XCTAssertEqual(h.sleeper.released, [timing.resultBudget], "it waited for the remote exactly until the budget ran out")
-        await eventually("the late upload to be cancelled") { h.uploadCancelled.value }
+        await uploadWasCancelled.waitOrFail("the late upload to be cancelled")
     }
 
     func testRow07EmptyOrGarbageRemoteTextFallsBackToOnDevice() async throws {
