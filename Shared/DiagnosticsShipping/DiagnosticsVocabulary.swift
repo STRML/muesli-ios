@@ -16,6 +16,7 @@ enum DiagnosticsVocabulary {
         "intent.start", "intent.stop", "intent.captureEntered", "intent.captureExited",
         "keyboard.appeared", "keyboard.disappeared", "keyboard.autoOff", "keyboard.persistencePreferenceChanged",
         "level.freshness", "model.select", "rewrite.skipped",
+        "live_typing.unsupported", "live_typing.detached", "live_typing.yielded", "live_typing.final_withheld",
         // App: audio session and recorder
         "audioSession.activated", "audioSession.activateRequested", "audioSession.configureRequested",
         "audioSession.deactivated", "audioSession.deactivateRequested", "audioSession.deactivationFailed",

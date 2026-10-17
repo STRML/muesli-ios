@@ -3980,11 +3980,19 @@ final class DictationCoordinator {
         publishKeyboardTypingSettings()
     }
 
+    func setKeyboardLiveTypingEnabled(_ enabled: Bool) {
+        UserDefaults.standard.set(enabled, forKey: MuesliPreferences.keyboardLiveTypingKey)
+        publishKeyboardTypingSettings()
+    }
+
     /// Hands the keyboard its typing settings. Without Full Access the keyboard cannot read them and
-    /// autocorrect stays on, its default.
+    /// autocorrect and live typing stay on, their defaults.
     private func publishKeyboardTypingSettings() {
         try? store.saveKeyboardTypingSettings(
-            KeyboardTypingSettings(autocorrect: MuesliPreferences.keyboardAutocorrectEnabled)
+            KeyboardTypingSettings(
+                autocorrect: MuesliPreferences.keyboardAutocorrectEnabled,
+                liveTyping: MuesliPreferences.keyboardLiveTypingEnabled
+            )
         )
     }
 
