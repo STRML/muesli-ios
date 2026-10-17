@@ -418,8 +418,11 @@ private extension SharedStoreBackfillTests {
     func createLegacyDatabase(in directory: URL, rows: LegacyRows, userVersion: Int) throws {
         let database = try openRaw(in: directory)
         defer { sqlite3_close(database) }
+        // Stores in the field are always in WAL mode. Switching a rollback-journal file to WAL while another
+        // connection is open is a lock fight that has nothing to do with the backfill, so the fixture starts in WAL.
         try execute(
             """
+            PRAGMA journal_mode = WAL;
             CREATE TABLE key_values (key TEXT PRIMARY KEY NOT NULL, payload BLOB NOT NULL, updated_at REAL NOT NULL);
             CREATE TABLE result_pickups (request_id TEXT PRIMARY KEY NOT NULL, payload BLOB NOT NULL, updated_at REAL NOT NULL);
             CREATE TABLE result_history (id TEXT NOT NULL, request_id TEXT PRIMARY KEY NOT NULL, created_at REAL NOT NULL, payload BLOB NOT NULL);
