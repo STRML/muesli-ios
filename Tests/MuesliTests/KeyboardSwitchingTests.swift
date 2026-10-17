@@ -81,12 +81,38 @@ final class KeyboardSwitchingTests: XCTestCase {
 
     // MARK: Globe
 
-    func testWhenTheSystemNeedsTheKeyTheTouchGoesToTheSystemKeyboardList() {
+    func testTheGlobeIsHiddenUntilTheSystemHasAnswered() {
+        XCTAssertFalse(makeController().typing.showsGlobe)
+    }
+
+    func testTheGlobeFollowsNeedsInputModeSwitchKeyOnBothPagesAsItChanges() {
+        let typing = makeController().typing
+        typing.setNeedsInputModeSwitchKey(true)
+        XCTAssertTrue(typing.showsGlobe)
+        typing.setNeedsInputModeSwitchKey(false)
+        XCTAssertFalse(typing.showsGlobe, "a hardware keyboard or a new device state takes it away again")
+        typing.setNeedsInputModeSwitchKey(true)
+        typing.setNeedsInputModeSwitchKey(nil)
+        XCTAssertFalse(typing.showsGlobe)
+    }
+
+    func testTheTypePageBottomRowDropsTheGlobeAndKeepsItsWidth() {
+        let typing = makeController().typing
+        func bottom() -> [TypingKey] {
+            TypingLayout.rows(
+                page: .letters, uppercase: false, traits: TypingTraits(), showsGlobe: typing.showsGlobe)[3]
+        }
+        XCTAssertFalse(bottom().contains { $0.action == .globe })
+        typing.setNeedsInputModeSwitchKey(true)
+        XCTAssertTrue(bottom().contains { $0.action == .globe })
+        XCTAssertEqual(bottom().map(\.weight).reduce(0, +), TypingLayout.rowWeight, accuracy: 0.001)
+    }
+
+    func testEveryTouchOnAShownGlobeGoesToTheSystemKeyboardList() {
         let controller = makeController()
         var advanced = 0
         var listViews: [UIView] = []
         controller.inputModeSwitcher = { advanced += 1 }
-        controller.needsInputModeSwitchKey = { true }
         controller.inputModeListPresenter = { view, _ in listViews.append(view) }
 
         let control = KeyboardGlobeTouchControl(controller: controller)
@@ -97,46 +123,15 @@ final class KeyboardSwitchingTests: XCTestCase {
         XCTAssertEqual(advanced, 0, "the system switches on the tap itself; advancing here too would skip a keyboard")
     }
 
-    func testWhenTheSystemDrawsItsOwnGlobeATapStillAdvances() {
+    func testVoiceOverActivationAdvances() {
         let controller = makeController()
         var advanced = 0
         var listCalls = 0
         controller.inputModeSwitcher = { advanced += 1 }
-        controller.needsInputModeSwitchKey = { false }
-        controller.inputModeListPresenter = { _, _ in listCalls += 1 }
-
-        let control = KeyboardGlobeTouchControl(controller: controller)
-        control.sendActions(for: .touchDown)
-        XCTAssertEqual(advanced, 0)
-        control.sendActions(for: .touchUpInside)
-        XCTAssertEqual(advanced, 1)
-        XCTAssertEqual(listCalls, 0)
-    }
-
-    func testWithNoAnswerFromTheSystemATapAdvances() {
-        let controller = makeController()
-        var advanced = 0
-        controller.inputModeSwitcher = { advanced += 1 }
-        controller.globeTapped()
-        XCTAssertEqual(advanced, 1)
-    }
-
-    func testVoiceOverActivationAdvancesWhateverTheRoute() {
-        let controller = makeController()
-        var advanced = 0
-        var listCalls = 0
-        controller.inputModeSwitcher = { advanced += 1 }
-        controller.needsInputModeSwitchKey = { true }
         controller.inputModeListPresenter = { _, _ in listCalls += 1 }
         let control = KeyboardGlobeTouchControl(controller: controller)
         XCTAssertTrue(control.accessibilityActivate())
         XCTAssertEqual(advanced, 1)
         XCTAssertEqual(listCalls, 0)
-    }
-
-    func testTheGlobeStaysVisibleWhateverTheSystemSays() {
-        let controller = makeController()
-        controller.needsInputModeSwitchKey = { false }
-        XCTAssertTrue(controller.typing.showsGlobe)
     }
 }

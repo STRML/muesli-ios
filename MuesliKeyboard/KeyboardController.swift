@@ -71,8 +71,6 @@ final class KeyboardController {
     }
     var inputModeSwitcher: (@MainActor () -> Void)?
     var keyboardDismisser: (@MainActor () -> Void)?
-    /// `needsInputModeSwitchKey` as the view controller reads it; nil until wired.
-    var needsInputModeSwitchKey: (@MainActor () -> Bool)?
     /// `handleInputModeList(from:with:)`: the system keyboard picker. The event is optional only so tests can
     /// call it; UIKit's own touch actions always carry one.
     var inputModeListPresenter: (@MainActor (UIView, UIEvent?) -> Void)?
@@ -585,21 +583,10 @@ final class KeyboardController {
         inputModeSwitcher?()
     }
 
-    private var globeRoute: TypingGlobeKey.Route {
-        TypingGlobeKey.route(needsInputModeSwitchKey: needsInputModeSwitchKey?())
-    }
-
-    /// Every touch on the globe. When the system tracks the touch, it switches on a tap and lists the keyboards on
-    /// a long press.
+    /// Every touch on our globe, which only exists when the system draws none. The system tracks the touch: it
+    /// switches on a tap and lists the keyboards on a long press.
     func globeTouchTracked(from view: UIView, with event: UIEvent?) {
-        guard globeRoute == .systemTracking else { return }
         inputModeListPresenter?(view, event)
-    }
-
-    /// A finished tap on the globe, for when the system is not tracking it.
-    func globeTapped() {
-        guard globeRoute == .advanceOnTap else { return }
-        switchInputMode()
     }
 
     func dismissKeyboard() {

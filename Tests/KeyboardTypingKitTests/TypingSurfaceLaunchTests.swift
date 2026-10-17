@@ -52,19 +52,23 @@ final class TypingSurfaceLaunchTests: XCTestCase {
     }
 }
 
-/// Whether the globe asks the system to track the touch (tap = next keyboard, long press = the list) or advances
-/// on a plain tap.
+/// Whether our own globe key is drawn at all: only when the system says it draws none (Apple's
+/// `needsInputModeSwitchKey`). Otherwise the system's globe, under the keyboard, is the only one.
 final class TypingGlobeKeyTests: XCTestCase {
-    func testWhenTheSystemNeedsTheKeyTheSystemTracksTheTouch() {
-        XCTAssertEqual(TypingGlobeKey.route(needsInputModeSwitchKey: true), .systemTracking)
+    func testTheGlobeIsShownWhenTheSystemNeedsOurKey() {
+        XCTAssertTrue(TypingGlobeKey.isShown(needsInputModeSwitchKey: true))
     }
 
-    /// The system draws its own globe then, and the list is on that one. Ours still switches on a tap.
-    func testWhenTheSystemDrawsItsOwnGlobeATapStillAdvances() {
-        XCTAssertEqual(TypingGlobeKey.route(needsInputModeSwitchKey: false), .advanceOnTap)
+    func testTheGlobeIsHiddenWhenTheSystemDrawsItsOwn() {
+        XCTAssertFalse(TypingGlobeKey.isShown(needsInputModeSwitchKey: false))
     }
 
-    func testWithNoAnswerATapAdvances() {
-        XCTAssertEqual(TypingGlobeKey.route(needsInputModeSwitchKey: nil), .advanceOnTap)
+    func testTheGlobeIsHiddenWhileTheAnswerIsUnknown() {
+        XCTAssertFalse(TypingGlobeKey.isShown(needsInputModeSwitchKey: nil))
+    }
+
+    func testTheDecisionFollowsAnAnswerThatChangesAfterTheFirstRead() {
+        let reads: [Bool?] = [nil, true, false, true, nil]
+        XCTAssertEqual(reads.map { TypingGlobeKey.isShown(needsInputModeSwitchKey: $0) }, [false, true, false, true, false])
     }
 }

@@ -2,8 +2,8 @@ import SwiftUI
 import UIKit
 
 /// The transparent touch surface over the globe key. SwiftUI buttons cannot hand UIKit the `UIEvent` that
-/// `handleInputModeList(from:with:)` needs, so the globe's touches are taken here and routed by the controller:
-/// the system tracks them (tap = next keyboard, long press = the list), or a plain tap advances.
+/// `handleInputModeList(from:with:)` needs, so the globe's touches are taken here and handed to the system, which
+/// switches on a tap and lists the keyboards on a long press.
 @MainActor
 final class KeyboardGlobeTouchControl: UIControl {
     private weak var controller: KeyboardController?
@@ -17,7 +17,6 @@ final class KeyboardGlobeTouchControl: UIControl {
         accessibilityLabel = "Next keyboard"
         accessibilityIdentifier = "keyboard.globe"
         addTarget(self, action: #selector(touched(_:forEvent:)), for: .allTouchEvents)
-        addAction(UIAction { [weak self] _ in self?.controller?.globeTapped() }, for: .touchUpInside)
     }
 
     required init?(coder: NSCoder) { nil }

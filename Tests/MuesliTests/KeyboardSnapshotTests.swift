@@ -38,6 +38,8 @@ final class KeyboardSnapshotTests: XCTestCase {
         var page: TypingPage = .letters
         var lockCaps = false
         var width: CGFloat = 393
+        /// The system asked for our globe (`needsInputModeSwitchKey` true). Off by default, as on a Face ID iPhone.
+        var globe = false
     }
 
 
@@ -101,6 +103,7 @@ final class KeyboardSnapshotTests: XCTestCase {
             field = KeyboardTextContext()
         }
         controller.selectedSurface = scene.surface
+        controller.typing.setNeedsInputModeSwitchKey(scene.globe)
         if let before = scene.before { controller.typing.document.beforeReader = { before } }
         controller.typing.setDocumentLanguage("en-US")
         controller.typing.engine.apply(traits: scene.traits)
@@ -176,6 +179,8 @@ final class KeyboardSnapshotTests: XCTestCase {
             Scene(name: "type-transcribing", setup: .transcribing, rewriteAvailable: true, surface: .type),
             Scene(name: "type-edit-listening", setup: .editListening, rewriteAvailable: true, surface: .type),
             Scene(name: "type-undo", setup: .undoAvailable, rewriteAvailable: true, surface: .type),
+            Scene(name: "type-empty-globe", setup: .ready, rewriteAvailable: true, surface: .type, globe: true),
+            Scene(name: "ready-globe", setup: .ready, rewriteAvailable: true, globe: true),
             Scene(name: "type-landscape", setup: .ready, rewriteAvailable: true, surface: .type, before: "See you at the offi",
                   width: 852),
             Scene(name: "dictate-landscape", setup: .ready, rewriteAvailable: true, width: 852),
