@@ -44,6 +44,8 @@ final class KeyboardController {
     var hasLatestDictation = false
     var dictationPhase: DictationPhase = .idle {
         didSet {
+            // A running dictation owns the strip, so suggestions stop being computed or tappable.
+            typing.setSuggestionsSuspended(showsActiveWaveform)
             // The preview's elapsed time counts from when this keyboard saw recording begin.
             if dictationPhase == .recording, oldValue != .recording {
                 recordingStartedAt = Date()
@@ -70,6 +72,22 @@ final class KeyboardController {
     private var lastInsertedCharacterCount = 0
     private var canUseRuntimeStart = false
 
+    /// Typing (layout, shift, suggestions). Dictation state stays here; the Type page only reads it.
+    let typing = KeyboardTypingModel()
+    /// The page the user chose. It lives here, not in a view, so a reopened keyboard and its launch snapshot come
+    /// up on the page it was left on, and switching pages never touches a running dictation.
+    var selectedSurface: TypingSurface = .type
+    var surface: TypingSurface {
+        TypingSurface.resolve(
+            selected: selectedSurface,
+            hasPendingSetupVerification: hasPendingSetupVerification,
+            isDictationActive: showsActiveWaveform
+        )
+    }
+    var recordKeyMode: TypingRecordKey.Mode {
+        TypingRecordKey.mode(opensMuesli: opensMuesliFromPrimaryButton, hasLaunchURL: launchURL != nil)
+    }
+
     init(
         store: SharedStore? = nil,
         eventBus: any CrossProcessEventStreaming = DarwinCrossProcessEventBus.shared,
@@ -78,6 +96,8 @@ final class KeyboardController {
         self.eventBus = eventBus
         self.store = store ?? SharedStore(eventPoster: eventBus)
         self.setupVerificationStore = setupVerificationStore
+        typing.document.inserter = { [weak self] in self?.insertTypedText($0) }
+        typing.document.backspacer = { [weak self] in self?.deleteTypedBackward() }
     }
 
     static let unreachableAppMessage = "Couldn't reach Muesli. Open the app."
@@ -455,6 +475,18 @@ final class KeyboardController {
         } catch {
             statusText = sharedStoreFailureMessage()
         }
+    }
+
+    /// A key typed on the Type page. It retires an Undo edit like any typing, but leaves the status text alone.
+    func insertTypedText(_ text: String) {
+        lastRewrite = nil
+        insertText(text)
+    }
+
+    func deleteTypedBackward() {
+        lastRewrite = nil
+        textDeleter?(1)
+        lastInsertedCharacterCount = 0
     }
 
     func insertSpace() {
