@@ -33,7 +33,7 @@ enum TypingSurface: Sendable, Equatable {
     case type
     case dictate
 
-    /// Setup verification needs the Dictate page's Verify row, whichever page was last chosen. A running
+    /// Minimal always shows the Dictate page. Setup verification needs the Dictate page's Verify row, whichever page was last chosen. A running
     /// dictation shows on both pages, so it never forces one.
     static func resolve(
         layout: KeyboardLayout,
@@ -41,7 +41,9 @@ enum TypingSurface: Sendable, Equatable {
         hasPendingSetupVerification: Bool,
         isDictationActive: Bool
     ) -> TypingSurface {
-        hasPendingSetupVerification && !isDictationActive ? .dictate : selected
+        // Minimal has one page. Full follows the chosen one, except that setup verification needs Dictate.
+        guard layout.offersTypePage else { return .dictate }
+        return hasPendingSetupVerification && !isDictationActive ? .dictate : selected
     }
 }
 
@@ -157,13 +159,19 @@ enum TypingStripPill {
     }
 }
 
-/// The large panel that takes the place of the letter rows while a dictation records, so the whole key area is
-/// one stop target. STUB: always hidden.
+/// The large panel that takes the place of the three letter rows while a dictation records, so the whole key area
+/// above the bottom row is one stop target. Only the Full layout's Type page has it: the Dictate page already
+/// has its big pill. It appears when recording begins (not while the start is still requested, so a start that
+/// fails never shows it) and stays through transcribing; then the keys come back.
 enum TypingRecordingPanel: Sendable, Equatable {
     case hidden
+    /// Recording; the whole panel stops and saves.
     case recording
+    /// A stop is on its way.
     case stopping
+    /// A cancel is on its way.
     case cancelling
+    /// The final pass is running.
     case transcribing
 
     static func resolve(
@@ -173,13 +181,53 @@ enum TypingRecordingPanel: Sendable, Equatable {
         stopRequested: Bool,
         cancelRequested: Bool
     ) -> TypingRecordingPanel {
-        .hidden
+        guard layout.offersTypePage, surface == .type else { return .hidden }
+        guard phase == .recording || phase == .transcribing else { return .hidden }
+        if cancelRequested { return .cancelling }
+        if TypingStripPill.isTappable(phase: phase, stopRequested: stopRequested, cancelRequested: cancelRequested) {
+            return .recording
+        }
+        return phase == .recording ? .stopping : .transcribing
     }
 
+    /// The same guard as the strip pill and the Record key, so the three can never disagree.
     var isTappable: Bool { self == .recording }
 
-    static func previewTail(_ text: String, limit: Int = 140) -> String { text }
-    func caption(isEdit: Bool) -> String { "" }
-    func accessibilityLabel(isEdit: Bool) -> String { "" }
-    func accessibilityHint(isEdit: Bool) -> String? { "" }
+    /// The line at the foot of the panel. `isEdit` is a Quill voice edit rather than a dictation.
+    func caption(isEdit: Bool) -> String {
+        switch self {
+        case .hidden: ""
+        case .recording: isEdit ? "Speak your change, then tap anywhere" : "Tap anywhere to stop and save"
+        case .stopping: "Stopping"
+        case .cancelling: "Cancelling"
+        case .transcribing: isEdit ? "Applying your edit" : "Writing your text"
+        }
+    }
+
+    func accessibilityLabel(isEdit: Bool) -> String {
+        switch self {
+        case .hidden: ""
+        case .recording: isEdit ? "Finish voice edit" : "Stop and save dictation"
+        case .stopping: "Stopping dictation"
+        case .cancelling: "Cancelling dictation"
+        case .transcribing: isEdit ? "Applying your edit" : "Writing your text"
+        }
+    }
+
+    /// Only the tappable state is a button, so only it has a hint.
+    func accessibilityHint(isEdit: Bool) -> String? {
+        guard self == .recording else { return nil }
+        return isEdit ? "Stops recording and applies your edit" : "Stops recording and inserts the text"
+    }
+
+    /// The newest words of a long preview, starting on a whole word and led by an ellipsis, so the panel's text
+    /// never grows with the dictation.
+    static func previewTail(_ text: String, limit: Int = 140) -> String {
+        guard text.count > limit else { return text }
+        let start = text.index(text.endIndex, offsetBy: -limit)
+        var tail = text[start...]
+        let cutsAWord = !text[text.index(before: start)].isWhitespace && tail.first?.isWhitespace == false
+        if cutsAWord, let gap = tail.firstIndex(where: \.isWhitespace) { tail = tail[gap...] }
+        return "\u{2026}" + tail.drop(while: \.isWhitespace)
+    }
 }
