@@ -41,7 +41,7 @@ enum MuesliPreferences {
     static let diagnosticsShippingEnabledKey = "muesli.diagnostics.shipping.enabled"
     /// The host the user said they trust although it does not look private. A different host needs a new answer.
     static let diagnosticsAcknowledgedHostKey = "muesli.diagnostics.shipping.acknowledgedHost"
-    /// Where diagnostics go when the user does not want the AI Summaries server. Empty means use that one.
+    /// Where diagnostics go when the user does not want the AI Services server. Empty means use that one.
     static let diagnosticsEndpointURLKey = "muesli.diagnostics.shipping.endpointURL"
     static let diagnosticsDeviceIDKey = "muesli.diagnostics.deviceID"
     static let meetingTemplateKey = "muesli.meetings.template"
@@ -49,8 +49,6 @@ enum MuesliPreferences {
     static let pinnedSectionsKey = "muesli.navigation.pinnedSections"
     static let actionButtonOnboardingCompletedKey = "muesli.actionButton.onboarding.completed"
     static let actionButtonSelectedModeKey = "muesli.actionButton.selectedMode"
-    static let actionButtonVerifiedModePrefix = "muesli.actionButton.verified."
-    static let actionButtonInvitationDismissedKey = "muesli.actionButton.invitation.dismissed"
 
     static var appearanceMode: MuesliAppearanceMode {
         MuesliAppearanceMode(
