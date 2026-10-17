@@ -11,6 +11,8 @@ after the fact. Off by default. No third-party service. No content.
   HTTPS only. Redirects are refused, so the key cannot be forwarded to another host. If the address does not look
   private (not loopback, LAN, Tailscale or `.local`), nothing is sent until you confirm that you trust that host,
   and the confirmation is for that host only.
+- **Your own receiver.** [diagnostics-receiver.md](diagnostics-receiver.md) shows how to run one (a small reference
+  server is in `tools/diagnostics-receiver/`), reach it over Tailscale and point the app at it.
 - **Only the app uploads.** The keyboard extension writes to the log, as it always has, and never touches the
   network.
 - **No content, ever.** The log records what happened and when. It never holds a transcript, rewrite, selected text,
