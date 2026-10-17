@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import UIKit
 
 @MainActor
 @Observable
@@ -70,6 +71,9 @@ final class KeyboardController {
     }
     var inputModeSwitcher: (@MainActor () -> Void)?
     var keyboardDismisser: (@MainActor () -> Void)?
+    /// `handleInputModeList(from:with:)`: the system keyboard picker. The event is optional only so tests can
+    /// call it; UIKit's own touch actions always carry one.
+    var inputModeListPresenter: (@MainActor (UIView, UIEvent?) -> Void)?
     var liveTranscript = ""
     /// The app marks the final text it is about to deliver; it is never shown as a preview.
     private var liveTranscriptIsFinal = false
@@ -88,7 +92,16 @@ final class KeyboardController {
     let typing = KeyboardTypingModel()
     /// The page the user chose. It lives here, not in a view, so a reopened keyboard and its launch snapshot come
     /// up on the page it was left on, and switching pages never touches a running dictation.
-    var selectedSurface: TypingSurface = .type
+    /// Remembered in the keyboard's own defaults (not the shared store, which needs Full Access) so the next
+    /// launch opens on the page it was left on. Only a chosen page is stored, never one forced by setup verification.
+    var selectedSurface: TypingSurface {
+        didSet {
+            guard selectedSurface != oldValue else { return }
+            surfaceDefaults?.set(selectedSurface.storedValue, forKey: Self.selectedSurfaceDefaultsKey)
+        }
+    }
+    static let selectedSurfaceDefaultsKey = "keyboard.selectedSurface"
+    @ObservationIgnored private let surfaceDefaults: UserDefaults?
     var surface: TypingSurface {
         TypingSurface.resolve(
             selected: selectedSurface,
@@ -104,8 +117,15 @@ final class KeyboardController {
         store: SharedStore? = nil,
         eventBus: any CrossProcessEventStreaming = DarwinCrossProcessEventBus.shared,
         setupVerificationStore: SetupVerificationStore = SetupVerificationStore(),
-        liveTypingScheduler: LiveTypingScheduler = .system
+        liveTypingScheduler: LiveTypingScheduler = .system,
+        surfaceDefaults: UserDefaults? = nil
     ) {
+        self.surfaceDefaults = surfaceDefaults
+        selectedSurface = TypingSurface.atLaunch(
+            stored: surfaceDefaults?.string(forKey: Self.selectedSurfaceDefaultsKey),
+            hasPendingSetupVerification: false,
+            isDictationActive: false
+        )
         liveTyper = KeyboardLiveTyper(scheduler: liveTypingScheduler)
         self.eventBus = eventBus
         self.store = store ?? SharedStore(eventPoster: eventBus)
@@ -561,6 +581,12 @@ final class KeyboardController {
 
     func switchInputMode() {
         inputModeSwitcher?()
+    }
+
+    /// Every touch on our globe, which only exists when the system draws none. The system tracks the touch: it
+    /// switches on a tap and lists the keyboards on a long press.
+    func globeTouchTracked(from view: UIView, with event: UIEvent?) {
+        inputModeListPresenter?(view, event)
     }
 
     func dismissKeyboard() {

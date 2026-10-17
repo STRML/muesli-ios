@@ -363,6 +363,13 @@ struct KeyboardRootView: View {
                     .frame(maxWidth: 58)
                 }
 
+                if controller.typing.showsGlobe {
+                    KeyboardTextKeyLabel(systemImage: "globe")
+                        .muesliKeyboardKeySurface()
+                        .overlay(KeyboardGlobeTouchOverlay(controller: controller))
+                        .frame(maxWidth: 58)
+                }
+
                 KeyboardTextKey("ABC") { controller.selectedSurface = .type }
                     .frame(maxWidth: 66)
                     .accessibilityHint("Back to the typing keyboard")
