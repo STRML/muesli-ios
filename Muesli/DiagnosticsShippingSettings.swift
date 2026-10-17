@@ -47,13 +47,6 @@ struct DiagnosticsShippingSettings: View {
                     .keyboardType(.URL)
                     .accessibilityIdentifier("settings.diagnostics.endpointField")
 
-                    if let guide = URL(string: DiagnosticsShippingCopy.receiverGuideURL) {
-                        Link(destination: guide) {
-                            rowLabel(DiagnosticsShippingCopy.receiverGuideTitle, icon: "book", trailing: nil)
-                        }
-                        .accessibilityIdentifier("settings.diagnostics.receiverGuide")
-                    }
-
                     destination
 
                     if let publicWarning, let host = server?.host {
@@ -69,6 +62,13 @@ struct DiagnosticsShippingSettings: View {
                             isOn: acknowledgementBinding(for: host)
                         )
                         .accessibilityIdentifier("settings.diagnostics.acknowledge")
+                    }
+
+                    if let guide = URL(string: DiagnosticsShippingCopy.receiverGuideURL) {
+                        Link(destination: guide) {
+                            rowLabel(DiagnosticsShippingCopy.receiverGuideTitle, icon: "book", trailing: nil)
+                        }
+                        .accessibilityIdentifier("settings.diagnostics.receiverGuide")
                     }
 
                     if enabled {
