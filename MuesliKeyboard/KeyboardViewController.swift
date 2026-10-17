@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 
 final class KeyboardViewController: UIInputViewController {
-    private let controller = KeyboardController()
+    private let controller = KeyboardController(surfaceDefaults: .standard)
     private var hostingController: UIHostingController<KeyboardRootView>?
     private let launchSnapshotView = UIImageView()
     private var keyboardHeightConstraint: NSLayoutConstraint?
@@ -64,6 +64,11 @@ final class KeyboardViewController: UIInputViewController {
         typingDocument.selectionReader = { [weak self] in self?.textDocumentProxy.selectedText }
         controller.inputModeSwitcher = { [weak self] in
             self?.advanceToNextInputMode()
+        }
+        controller.needsInputModeSwitchKey = { [weak self] in self?.needsInputModeSwitchKey ?? false }
+        controller.inputModeListPresenter = { [weak self] view, event in
+            guard let event else { return }
+            self?.handleInputModeList(from: view, with: event)
         }
         controller.keyboardDismisser = { [weak self] in
             self?.dismissKeyboard()
