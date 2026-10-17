@@ -11,8 +11,27 @@ import XCTest
 /// fat-finger corpus (`Tests/KeyboardTypingKitTests/Corpus`), and the tokens that must never change.
 @MainActor
 final class AutocorrectCorpusTests: XCTestCase {
+    /// A fresh simulator's first `UITextChecker` lookups miss common typos ("teh", "adn", "wiht") until the system has
+    /// loaded its language data. The old single CI job never saw it because `testGeneratedCorpusReport` ran first and
+    /// paid for the load; the sharded unit job reached the hand-made test cold and scored 73.9% against 86.4%.
+    /// Waiting until a known typo is corrected makes the floor independent of test order. It is per process.
+    private static let checkerIsWarm: Void = {
+        let checker = UITextCheckerAdapter()
+        var probes = 0
+        while probes < 50, !checker.guesses(forWord: "teh", language: "en-US").contains("the") {
+            probes += 1
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        // One pass over the typos themselves, so every word the test measures has been looked up once.
+        for pair in AutocorrectCorpus.typos + AutocorrectCorpus.sentenceStartTypos {
+            _ = checker.guesses(forWord: pair.typed, language: "en-US")
+        }
+        print("AUTOCORRECT CORPUS WARM-UP: \(probes) failed probe(s) before the checker answered (50 means never)")
+    }()
+
     private func makeRunner() -> CorpusRunner {
-        CorpusRunner { UITextCheckerAdapter() }
+        _ = Self.checkerIsWarm
+        return CorpusRunner { UITextCheckerAdapter() }
     }
 
     /// The process's physical footprint, the number the system's jetsam limit looks at. A proxy for the keyboard
