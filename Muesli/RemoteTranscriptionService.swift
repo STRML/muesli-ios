@@ -60,7 +60,7 @@ actor RemoteTranscriptionService {
     private static func guardedUpload(_ client: RemoteTranscriptionClient, audioURL: URL) async throws -> String {
         let outcome = try await ClipSilenceGuard.run(
             audioURL: audioURL,
-            log: { KeyboardDiagnosticsLog.record($0, $1.merging(["route": "remote"]) { $1 }) }
+            log: { KeyboardDiagnosticsLog.record($0, $1.merging(["text_source": "remote"]) { $1 }) }
         ) { .init(text: try await client.transcribe(audioURL: $0)) }
         return outcome.text
     }

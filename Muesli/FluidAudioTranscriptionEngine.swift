@@ -96,7 +96,7 @@ actor FluidAudioTranscriptionEngine: TranscriptionEngine {
         let transcribed = ResultBox()
         let outcome = try await ClipSilenceGuard.run(
             audioURL: audioURL,
-            log: { KeyboardDiagnosticsLog.record($0, $1.merging(["route": "on_device"]) { $1 }) }
+            log: { KeyboardDiagnosticsLog.record($0, $1.merging(["text_source": "onDevice"]) { $1 }) }
         ) { [self] guardedURL in
             let result = try await transcribeUnguarded(audioURL: guardedURL, progress: progress)
             transcribed.value = result

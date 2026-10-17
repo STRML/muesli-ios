@@ -33,6 +33,7 @@ Only these event names are uploaded. An event recorded under any other name is d
 | Audio | `audioSession.activated`, `audioSession.activateRequested`, `audioSession.configureRequested`, `audioSession.deactivated`, `audioSession.deactivateRequested`, `audioSession.deactivationFailed`, `audioSession.failed`, `audioSession.inputConfigured`, `audioSession.interruption`, `audioSession.interruptionHandling`, `audioSession.mediaServicesReset`, `audioSession.routeChanged`, `audioSession.routeHandling`, `keyboardMic.activityFailed`, `keyboardMic.ioConfiguration`, `keyboardMic.retryWithOutput`, `keyboardMic.started`, `keyboardMic.startFailed`, `keyboardMic.startStep`, `recorder.engineStarted`, `recorder.ioConfiguration`, `recorder.prepareCompleted`, `recorder.prepareRequested`, `recorder_start_failed` |
 | Recording and dictation | `recording.audioEstablished`, `recording.engineAttempt`, `recording.inputReady`, `recording.interruptedStop`, `recording.recovery`, `recording.recoveryRejected`, `recording.started`, `recording.startFailed`, `recording.startRequested`, `recording.startRetry`, `dictation.delivery`, `dictation.finalText`, `preview.persistFailed`, `startup.exited`, `startup.permissionRequested`, `startup.permissionResolved` |
 | Models, Live Activity, lifecycle | `liveActivity.failed`, `liveActivity.skipped`, `liveActivity.started`, `livePreview.memoryWarning`, `model.prewarm.backingOff`, `whisper.loaded`, `scene.active`, `scene.inactive`, `scene.background` |
+| Silence guard | `transcribe.trimmed` (`leading_ms`, `trailing_ms`, `text_source`), `transcribe.tail_dropped` (`reason`, `phrase_len`, `text_source`), `transcribe.skipped_silent` (`duration_ms`, `text_source`) |
 | Stop to save | `handoff.saved`, `stop.received`, `stop.ignored`, `recording.stopped`, `transcription.started`, `transcription.finished`, `transcription.failed`, `result.persisted`, `delivery.outcome`, `dictation.cancelled`, `dictation.exit`, `backgroundTask`, `app.memoryWarning`, `app.thermalState` |
 
 ### Keys
@@ -46,7 +47,7 @@ than the limit never match.
 | UUID | `capture_request`, `intent_invocation`, `history_id` |
 | UUID or 8 hex characters | `request` |
 | UUID, 8 hex characters, or `none` | `active`, `active_request`, `session`, `mic_generation` |
-| integer (sent as a JSON integer) | `type`, `attempt`, `elapsed_ms`, `duration_ms`, `samples`, `bytes`, `characters`, `code`, `options`, `options_before`, `channels`, `app_state`, `audio_ms`, `heartbeat_age_ms`, `bg_remaining_ms` |
+| integer (sent as a JSON integer) | `type`, `attempt`, `elapsed_ms`, `duration_ms`, `samples`, `bytes`, `characters`, `code`, `options`, `options_before`, `channels`, `app_state`, `audio_ms`, `heartbeat_age_ms`, `bg_remaining_ms`, `leading_ms`, `trailing_ms`, `phrase_len` |
 | code word or integer | `reason` |
 | true, false, yes or no (sent as a JSON bool) | `should_resume`, `enabled`, `startup`, `recording`, `protected_data`, `persistent`, `loaded`, `input_enabled`, `output_enabled`, `input_available`, `other_audio`, `file_written`, `empty`, `fresh`, `inserted`, `matchesActive`, `canUseRuntimeStart` |
 | decimal number | `sample_rate`, `input_sample_rate` |
