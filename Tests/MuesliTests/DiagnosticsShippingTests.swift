@@ -11,6 +11,7 @@ final class DiagnosticsShippingTests: XCTestCase {
         MuesliPreferences.diagnosticsAcknowledgedHostKey,
         MuesliPreferences.diagnosticsDeviceIDKey,
         MuesliPreferences.customLLMBaseURLKey,
+        MuesliPreferences.diagnosticsEndpointURLKey,
     ]
 
     override func setUp() async throws {
@@ -58,6 +59,38 @@ final class DiagnosticsShippingTests: XCTestCase {
         )
         UserDefaults.standard.set("logs.example.com", forKey: MuesliPreferences.diagnosticsAcknowledgedHostKey)
         XCTAssertEqual(DiagnosticsShipper.currentSettings().acknowledgedHost, "logs.example.com")
+    }
+
+    func testTheDiagnosticsServerFieldWinsOverAISummariesAndSettingsSeeTheSameURL() throws {
+        UserDefaults.standard.set("https://summaries.tail13013.ts.net/v1", forKey: MuesliPreferences.customLLMBaseURLKey)
+        UserDefaults.standard.set("https://logs.tail13013.ts.net/v1/", forKey: MuesliPreferences.diagnosticsEndpointURLKey)
+        let endpoint = try XCTUnwrap(DiagnosticsShipper.currentSettings().endpoint)
+        XCTAssertEqual(endpoint.url, "https://logs.tail13013.ts.net/v1/diagnostics")
+        let shown = DiagnosticsServerResolver.resolve(
+            override: MuesliPreferences.diagnosticsEndpointURL, aiSummariesBaseURL: MuesliPreferences.customLLMBaseURL
+        ).server
+        XCTAssertEqual(shown?.url.absoluteString, endpoint.url, "the screen and the uploader share one resolution")
+    }
+
+    func testABadDiagnosticsServerFieldMeansNoEndpointEvenWithAGoodAISummariesServer() {
+        UserDefaults.standard.set("https://summaries.tail13013.ts.net/v1", forKey: MuesliPreferences.customLLMBaseURLKey)
+        UserDefaults.standard.set("http://logs.tail13013.ts.net/v1", forKey: MuesliPreferences.diagnosticsEndpointURLKey)
+        XCTAssertNil(DiagnosticsShipper.currentSettings().endpoint)
+    }
+
+    func testAPublicDiagnosticsServerNeedsAnAcknowledgementForItsHost() throws {
+        UserDefaults.standard.set("https://summaries.tail13013.ts.net/v1", forKey: MuesliPreferences.customLLMBaseURLKey)
+        UserDefaults.standard.set("https://logs.example.com", forKey: MuesliPreferences.diagnosticsEndpointURLKey)
+        let settings = DiagnosticsShipper.currentSettings()
+        let endpoint = try XCTUnwrap(settings.endpoint)
+        XCTAssertFalse(endpoint.looksPrivate)
+        XCTAssertEqual(
+            DiagnosticsGate.decide(
+                enabled: true, endpointHost: endpoint.host, endpointLooksPrivate: endpoint.looksPrivate,
+                acknowledgedHost: settings.acknowledgedHost
+            ),
+            .blocked(.publicEndpointNotAcknowledged)
+        )
     }
 
     func testTheDeviceIDIsARandomUUIDKeptUntilReset() {
