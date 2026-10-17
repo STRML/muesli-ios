@@ -3987,13 +3987,19 @@ final class DictationCoordinator {
         publishKeyboardTypingSettings()
     }
 
+    func setKeyboardLayout(_ layout: KeyboardLayout) {
+        UserDefaults.standard.set(layout.storedValue, forKey: MuesliPreferences.keyboardLayoutKey)
+        publishKeyboardTypingSettings()
+    }
+
     /// Hands the keyboard its typing settings. Without Full Access the keyboard cannot read them and
-    /// autocorrect and live typing stay on, their defaults.
+    /// autocorrect and live typing stay on and the layout stays Full, their defaults.
     private func publishKeyboardTypingSettings() {
         try? store.saveKeyboardTypingSettings(
             KeyboardTypingSettings(
                 autocorrect: MuesliPreferences.keyboardAutocorrectEnabled,
-                liveTyping: MuesliPreferences.keyboardLiveTypingEnabled
+                liveTyping: MuesliPreferences.keyboardLiveTypingEnabled,
+                layout: MuesliPreferences.keyboardLayout
             )
         )
     }
