@@ -1,132 +1,106 @@
+import Darwin
 import UIKit
 import XCTest
 @testable import Muesli
 
-/// A host text field for the corpus run: just text before the cursor.
-@MainActor
-private final class CorpusDocument: TypingDocument {
-    var before = ""
-    let documentIdentifier: UUID? = UUID()
-    var contextBefore: String? { before.isEmpty ? nil : before }
-    var contextAfter: String? { nil }
-    var selectedText: String? { nil }
-    func insert(_ text: String) { before += text }
-    func deleteBackward() { if !before.isEmpty { before.removeLast() } }
-}
-
-/// Runs the corpus through the real stack: a `TypingEngine` fed one key at a time, the real
+/// Runs the autocorrect corpus through the real stack: a `TypingEngine` fed one key at a time, the real
 /// `TypingAutocorrector`, and the real `UITextChecker`. `UITextChecker` needs a UIKit runtime, so this is the
 /// only layer that can measure the engine; the logic around it has a host layer with a fake checker.
+///
+/// Three sets, because the engine is judged on all of them: the hand-made typos from PR 13, the generated
+/// fat-finger corpus (`Tests/KeyboardTypingKitTests/Corpus`), and the tokens that must never change.
 @MainActor
 final class AutocorrectCorpusTests: XCTestCase {
-    private struct Trial {
-        let typed: String
-        let expected: String
-        let result: String
-        let boundary: String
-        var isCorrect: Bool { result == expected }
-        var isUnchanged: Bool { result == typed + " " }
+    private func makeRunner() -> CorpusRunner {
+        CorpusRunner { UITextCheckerAdapter() }
     }
 
-    private var builder: TypingSuggestionBuilder!
-    private var autocorrector: TypingAutocorrector!
-    private var engine: TypingEngine!
-
-    override func setUp() async throws {
-        let builder = TypingSuggestionBuilder(
-            makeChecker: { UITextCheckerAdapter() },
-            languageCandidates: { ["en-US"] }
-        )
-        self.builder = builder
-        autocorrector = TypingAutocorrector(
-            checker: { builder.currentChecker() },
-            languageCandidates: { ["en-US"] },
-            traits: { TypingTraits() },
-            isEnabled: { true },
-            ignoreWord: { builder.ignore($0) }
-        )
-    }
-
-    /// Types `token` after `prefix`, one key at a time, then the boundary. Returns what the field holds from
-    /// the end of `prefix` on.
-    private func run(prefix: String, token: String, boundary: String) -> String {
-        let document = CorpusDocument()
-        document.before = prefix
-        engine = TypingEngine(document: document, suggestionSource: builder, now: { 0 })
-        engine.completionHandler = autocorrector
-        engine.documentDidChange()
-        for character in token { engine.type(String(character)) }
-        switch boundary {
-        case " ": engine.tapSpace()
-        case "\n": engine.tapReturn()
-        default: engine.type(boundary)
-        }
-        return String(document.before.dropFirst(prefix.count))
-    }
-
-    private let midSentence = "I think "
-    private let sentenceStart = "Thanks. "
-
-    private func typoTrials(_ pairs: [(typed: String, expected: String)], prefix: String) -> [Trial] {
-        pairs.map { Trial(typed: $0.typed, expected: $0.expected + " ", result: run(prefix: prefix, token: $0.typed, boundary: " "), boundary: " ") }
-    }
-
-    private func neverTrials() -> [Trial] {
-        var trials: [Trial] = []
-        for token in AutocorrectCorpus.neverChange {
-            for boundary in [" ", "."] {
-                trials.append(Trial(typed: token + boundary, expected: token + boundary,
-                                    result: run(prefix: midSentence, token: token, boundary: boundary), boundary: boundary))
-            }
-            if token.first?.isUppercase == true {
-                trials.append(Trial(typed: token + " ", expected: token + " ",
-                                    result: run(prefix: sentenceStart, token: token, boundary: " "), boundary: "sentence start"))
+    /// The process's physical footprint, the number the system's jetsam limit looks at. A proxy for the keyboard
+    /// extension's footprint: this is the test host, not the extension.
+    private func footprintBytes() -> Int {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
             }
         }
-        return trials
+        return result == KERN_SUCCESS ? Int(info.phys_footprint) : 0
     }
 
-    // Matrix rows Q1 (correction rate on typos) and Q2 (false-correction rate on words that must not change).
-    func testCorpusCorrectionAndFalseCorrectionRates() throws {
-        var report = ["OS \(UIDevice.current.systemVersion), dictionaries: \(UITextChecker.availableLanguages.filter { $0.hasPrefix("en") })"]
-
-        let typos = typoTrials(AutocorrectCorpus.typos, prefix: midSentence)
-        let startTypos = typoTrials(AutocorrectCorpus.sentenceStartTypos, prefix: sentenceStart)
-        let never = neverTrials()
-
-        let corrected = typos.filter(\.isCorrect).count
-        let wrongFix = typos.filter { !$0.isCorrect && !$0.isUnchanged }
-        let startCorrected = startTypos.filter(\.isCorrect).count
-        let falseCorrections = never.filter { $0.result != $0.expected }
-
-        let rate = Double(corrected) / Double(typos.count)
-        let startRate = Double(startCorrected) / Double(startTypos.count)
-        let falseRate = Double(falseCorrections.count) / Double(never.count)
-        report.append(String(format: "(a) typos corrected: %d/%d = %.1f%%", corrected, typos.count, rate * 100))
-        report.append(String(format: "(a2) sentence-start typos corrected: %d/%d = %.1f%%", startCorrected, startTypos.count, startRate * 100))
-        report.append(String(format: "(b) false corrections: %d/%d trials = %.2f%% (%d distinct tokens, each typed before a space and a period)",
-                             falseCorrections.count, never.count, falseRate * 100, AutocorrectCorpus.neverChange.count))
-        report.append("wrong fixes among (a): " + wrongFix.map { "\($0.typed) -> \($0.result)" }.joined(separator: ", "))
-        report.append("missed (a): " + typos.filter { !$0.isCorrect }.map { "\($0.typed) -> \($0.result)" }.joined(separator: ", "))
-        report.append("missed (a2): " + startTypos.filter { !$0.isCorrect }.map { "\($0.typed) -> \($0.result)" }.joined(separator: ", "))
-        report.append("FALSE CORRECTIONS (b): " + falseCorrections.map { "\($0.typed) [\($0.boundary)] -> \($0.result)" }.joined(separator: ", "))
-
+    private func publish(_ report: [String], named name: String) {
         let text = report.joined(separator: "\n")
-        print("AUTOCORRECT CORPUS REPORT\n\(text)")
-        let path = NSTemporaryDirectory() + "autocorrect-corpus-report.txt"
-        try? text.write(toFile: path, atomically: true, encoding: .utf8)
+        print("AUTOCORRECT CORPUS REPORT \(name)\n\(text)")
+        try? text.write(toFile: NSTemporaryDirectory() + "autocorrect-corpus-\(name).txt", atomically: true, encoding: .utf8)
         let attachment = XCTAttachment(string: text)
+        attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+
+    // Matrix rows Q1 (correction rate on the hand-made typos) and Q2 (false corrections on words that must not change).
+    func testHandMadeTyposAndNeverChangeSet() throws {
+        let runner = makeRunner()
+        let typos = runner.run(pairs: AutocorrectCorpus.typos, kind: "hand-made")
+        let startTypos = runner.run(pairs: AutocorrectCorpus.sentenceStartTypos, kind: "sentence start", prefix: CorpusRunner.sentenceStart)
+        let never = runner.runNeverChange(groups: AutocorrectCorpus.neverChangeGroups)
+
+        let rate = CorpusRate(typos), startRate = CorpusRate(startTypos)
+        let changed = never.filter(\.wasChanged)
+        let falseRate = Double(changed.count) / Double(never.count)
+        var report = ["OS \(UIDevice.current.systemVersion)"]
+        report.append("(a) hand-made typos: " + rate.text)
+        report.append("(a2) sentence-start typos: " + startRate.text)
+        report.append("(b) never-change set, \(AutocorrectCorpus.neverChange.count) tokens:")
+        report += CorpusReport.neverChange(never)
+        report.append("wrong fixes among (a): " + typos.filter { $0.verdict == .wrong }.map { "\($0.typed) -> \($0.result)" }.joined(separator: ", "))
+        report.append("missed (a): " + typos.filter { $0.verdict != .corrected }.map { "\($0.typed) -> \($0.result)" }.joined(separator: ", "))
+        report.append("missed (a2): " + startTypos.filter { $0.verdict != .corrected }.map { "\($0.typed) -> \($0.result)" }.joined(separator: ", "))
+        publish(report, named: "hand-made")
 
         XCTAssertGreaterThanOrEqual(AutocorrectCorpus.typos.count, 60)
-        XCTAssertGreaterThanOrEqual(AutocorrectCorpus.neverChange.count, 80)
-        // Thresholds sit below what was measured on this runtime (OS 27.0 simulator: 81.8% corrected, 0.5% false,
-        // 1 wrong fix), with room for a different dictionary on CI. The false-correction limit is the hard
-        // 2% cap and is never loosened to fit a result: tighten the rule instead.
-        XCTAssertLessThanOrEqual(falseRate, 0.02, "false corrections: \(falseCorrections.map(\.typed))")
-        XCTAssertGreaterThanOrEqual(rate, 0.75, text)
-        XCTAssertGreaterThanOrEqual(startRate, 0.6, text)
-        XCTAssertLessThanOrEqual(wrongFix.count, 3, "a wrong fix is worse than a missed one: \(wrongFix)")
+        XCTAssertGreaterThanOrEqual(AutocorrectCorpus.neverChange.count, 300)
+        // The false-correction limit is the hard 2% cap and is never loosened to fit a result: tighten the rule.
+        XCTAssertLessThanOrEqual(falseRate, 0.02, "false corrections: \(changed.map(\.token))")
+        XCTAssertGreaterThanOrEqual(rate.correctedRate, 0.75, report.joined(separator: "\n"))
+        XCTAssertGreaterThanOrEqual(startRate.correctedRate, 0.6, report.joined(separator: "\n"))
+        XCTAssertLessThanOrEqual(rate.wrong, 3, "a wrong fix is worse than a missed one")
+    }
+
+    // Matrix row Q3: the generated fat-finger corpus, by typo class and word length, tuning half and held-out half.
+    func testGeneratedCorpusReport() throws {
+        let runner = makeRunner()
+        let footprintBefore = footprintBytes()
+        let commonTypos = TypoGenerator.generate(from: CommonWords.all)
+        let tailTypos = TypoGenerator.generateTail()
+        let run = runner.run(generated: commonTypos + tailTypos)
+        let common = run.trials.filter { !$0.isTail }, tail = run.trials.filter(\.isTail)
+        let held = common.filter { !$0.isTuning }
+
+        var report = ["OS \(UIDevice.current.systemVersion), generated \(commonTypos.count) typos from \(CommonWords.all.count) common words and " +
+            "\(tailTypos.count) from \(TailWords.all.count) tail words, \(run.trials.count) typed (\(run.excludedAsWords.values.reduce(0, +)) " +
+            "excluded because the dictionary accepts them as words: " +
+            run.excludedAsWords.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" }.joined(separator: ", ") + ")"]
+        for (name, trials) in [("COMMON WORDS, held-out half", held), ("COMMON WORDS, tuning half", common.filter(\.isTuning)),
+                               ("COMMON WORDS, all", common), ("TAIL WORDS, all", tail)] {
+            report.append("\n\(name)")
+            report += CorpusReport.headline(trials)
+            report += CorpusReport.byClassAndLength(trials)
+            report.append("  misses by stage:")
+            report += CorpusReport.missStages(trials)
+        }
+        report.append("\nlatency")
+        report.append(CorpusReport.latencyLine(runner.timer.seconds))
+        report.append("footprint: before \(footprintBefore / 1024) KB, after \(footprintBytes() / 1024) KB")
+        let wrong = held.filter { $0.verdict == .wrong }.prefix(60)
+        report.append("\nwrong fixes (held-out, first 60): " + wrong.map { "\($0.typed)->\($0.result.trimmingCharacters(in: .whitespaces)) [\($0.intended)]" }.joined(separator: ", "))
+        publish(report, named: "generated")
+        XCTAssertGreaterThan(common.count, 5000)
+
+        // The targets. Single slips (neighbour key, drop, double, transposition) of words of four letters or more.
+        let slips = held.filter { CorpusReport.singleSlipClasses.contains($0.kind) && $0.length >= 4 }
+        XCTAssertGreaterThanOrEqual(CorpusRate(slips).correctedRate, 0.90, report.joined(separator: "\n"))
+        XCTAssertGreaterThanOrEqual(CorpusRate(common).correctedRate, 0.85, "all generated typos, common words")
+        XCTAssertLessThanOrEqual(CorpusRate(common).wrongRate, 0.03, "corrected to a word other than the intended one")
     }
 }

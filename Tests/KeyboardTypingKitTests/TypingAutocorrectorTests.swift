@@ -33,6 +33,7 @@ final class TypingAutocorrectorTests: XCTestCase {
             "hashtg": ["hashtag"], "gmial": ["gmail"], "sam": ["same"], "githb": ["github"],
             "kubectl": ["cubicle"], "json": ["Jason"], "tomorow": ["tomorrow"],
         ]
+        checker.listGuessesAsUsed()
     }
 
     private func event(
