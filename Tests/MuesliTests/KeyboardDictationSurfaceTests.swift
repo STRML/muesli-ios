@@ -20,7 +20,7 @@ final class KeyboardDictationSurfaceTests: XCTestCase {
         suiteName = "kb-surface-\(UUID().uuidString)"
         defaults = UserDefaults(suiteName: suiteName)
         bus = StubEventBus()
-        store = SharedStore(containerURL: directory, eventPoster: bus)
+        store = LiveAppFixture.store(directory: directory, bus: bus)
         controller = makeController()
         controller.textInserter = { _ in }
         controller.loadTypingSettings(appliesLayout: true)
