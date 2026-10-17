@@ -566,7 +566,7 @@ final class DictationCoordinator {
             )
         }
         prewarmModelIfNeeded(.launch)
-        Task { await keyboardMicActivity.removeOrphanedActivities() }
+        Task { await keyboardMicActivity.removeOrphanedActivities(liveSessionID: nil) }
         // A saved preference is not a request to activate the microphone at launch.
     }
 
@@ -3792,23 +3792,25 @@ final class DictationCoordinator {
     }
 
     /// Foreground check: no keyboard mic session means no keyboard mic Island, whatever ended it
-    /// (iOS can drop the session while the app is suspended, and an activity outlives its app).
+    /// (iOS can drop the session while the app is suspended, and an activity outlives its app). Cards that are
+    /// stale, from another session, or not allowed by the switches go too, even while the session is live.
     func reconcileKeyboardMicActivity() {
+        let liveSessionID = isKeyboardMicOn || isKeyboardSessionArmed ? keyboardMicSession.id : nil
         // A capture that took the mic from the session also resumes it afterwards: leave that Island alone.
-        guard !isKeyboardMicOn, !isKeyboardSessionArmed,
-              !isRecording, !hasMeetingRecordingInProgress, activeRequest == nil else { return }
-        Task { await keyboardMicActivity.endAll() }
+        // A card the switches do not allow is never worth keeping, so that case sweeps regardless.
+        let captureInFlight = isRecording || hasMeetingRecordingInProgress || activeRequest != nil
+        if liveSessionID == nil, captureInFlight, keyboardMicActivity.cardsAllowed { return }
+        Task { await keyboardMicActivity.removeOrphanedActivities(liveSessionID: liveSessionID) }
     }
 
     func applyLiveActivityPreferences() {
         Task {
             await liveActivityController.endDisabledActivities()
-            if let sessionID = keyboardMicSession.id {
-                if MuesliPreferences.liveActivitiesForDictationsEnabled, isKeyboardMicOn {
-                    keyboardMicActivity.start(sessionID: sessionID, isRecording: isRecording)
-                } else {
-                    await keyboardMicActivity.end(sessionID: sessionID)
-                }
+            let sessionID = keyboardMicSession.id
+            // Ends every keyboard mic card first when a switch is off; a card that is allowed is started below.
+            await keyboardMicActivity.removeOrphanedActivities(liveSessionID: isKeyboardMicOn ? sessionID : nil)
+            if let sessionID, isKeyboardMicOn {
+                keyboardMicActivity.start(sessionID: sessionID, isRecording: isRecording)
             }
         }
     }
@@ -5287,7 +5289,9 @@ final class DictationCoordinator {
                     if deliversToKeyboard {
                         await processPendingKeyboardCommand()
                     }
-                    if !requiresLiveActivity, !(source == "keyboard" && keyboardMicActivity.hasActivity(sessionID: micSessionID)) {
+                    // A keyboard recording on the persistent mic session never gets a voice note card: it is the keyboard mic
+                    // card's job, and that card is off unless the user turned it on.
+                    if !requiresLiveActivity, !(source == "keyboard" && micSessionID != nil) {
                         Task {
                             await liveActivityController.start(
                                 session: session,

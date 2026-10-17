@@ -1,8 +1,55 @@
 @preconcurrency import ActivityKit
 import Foundation
 
+/// The ActivityKit calls the controller makes on activities it does not hold, behind a seam so tests can fake them.
+@MainActor
+protocol KeyboardMicActivitySystem {
+    var activitiesEnabled: Bool { get }
+    func cards() -> [KeyboardMicCardPolicy.Card]
+    func end(cardID: String) async
+}
+
+struct SystemKeyboardMicActivities: KeyboardMicActivitySystem {
+    var activitiesEnabled: Bool { ActivityAuthorizationInfo().areActivitiesEnabled }
+
+    func cards() -> [KeyboardMicCardPolicy.Card] {
+        Activity<KeyboardMicActivityAttributes>.activities.map {
+            .init(id: $0.id, sessionID: $0.attributes.sessionID, isStale: $0.activityState == .stale)
+        }
+    }
+
+    func end(cardID: String) async {
+        for item in Activity<KeyboardMicActivityAttributes>.activities where item.id == cardID {
+            await item.end(nil, dismissalPolicy: .immediate)
+        }
+    }
+}
+
 @MainActor
 final class KeyboardMicActivityController {
+    private let system: KeyboardMicActivitySystem
+    private let dictationSwitch: () -> Bool
+    private let keyboardMicSwitch: () -> Bool
+
+    init(
+        system: KeyboardMicActivitySystem = SystemKeyboardMicActivities(),
+        dictationSwitch: @escaping () -> Bool = { MuesliPreferences.liveActivitiesForDictationsEnabled },
+        keyboardMicSwitch: @escaping () -> Bool = { MuesliPreferences.liveActivitiesForKeyboardMicEnabled }
+    ) {
+        self.system = system
+        self.dictationSwitch = dictationSwitch
+        self.keyboardMicSwitch = keyboardMicSwitch
+    }
+
+    /// The card may exist only when the system, the voice note switch and the keyboard mic switch all allow it.
+    var cardsAllowed: Bool {
+        KeyboardMicCardPolicy.allowsCard(
+            systemActivitiesEnabled: system.activitiesEnabled,
+            dictationSwitch: dictationSwitch(),
+            keyboardMicSwitch: keyboardMicSwitch()
+        )
+    }
+
     private var activity: Activity<KeyboardMicActivityAttributes>?
     private var lastState: KeyboardMicActivityAttributes.ContentState?
     private var updateTask: Task<Void, Never>?
@@ -24,8 +71,7 @@ final class KeyboardMicActivityController {
     }
 
     func start(sessionID: UUID, isRecording: Bool) {
-        guard activity == nil, ActivityAuthorizationInfo().areActivitiesEnabled,
-              MuesliPreferences.liveActivitiesForDictationsEnabled else { return }
+        guard activity == nil, cardsAllowed else { return }
         do {
             let state = KeyboardMicActivityAttributes.ContentState(isRecording: isRecording, isReady: true)
             activity = try Activity.request(
@@ -106,8 +152,8 @@ final class KeyboardMicActivityController {
         }
     }
 
-    /// Ends every keyboard mic activity, whatever session it belongs to. For when the mic is known to be off.
-    func endAll() async {
+    /// Stops the renewals and updates for the card this instance holds and forgets it.
+    private func releaseOwnedActivity() async {
         keepAliveTask?.cancel()
         keepAliveTask = nil
         completionTask?.cancel()
@@ -118,33 +164,35 @@ final class KeyboardMicActivityController {
         updateTask = nil
         pendingUpdate?.cancel()
         await pendingUpdate?.value
-        for item in Activity<KeyboardMicActivityAttributes>.activities {
-            await item.end(nil, dismissalPolicy: .immediate)
-        }
+    }
+
+    /// Ends every keyboard mic activity, whatever session it belongs to. For when the mic is known to be off.
+    func endAll() async {
+        await releaseOwnedActivity()
+        for card in system.cards() { await system.end(cardID: card.id) }
     }
 
     func end(sessionID: UUID) async {
-        if activity?.attributes.sessionID == sessionID.uuidString {
-            keepAliveTask?.cancel()
-            keepAliveTask = nil
-            completionTask?.cancel()
-            completionTask = nil
-            activity = nil
-            lastState = nil
-            let pendingUpdate = updateTask
-            updateTask = nil
-            pendingUpdate?.cancel()
-            await pendingUpdate?.value
-        }
-        for item in Activity<KeyboardMicActivityAttributes>.activities
-            where item.attributes.sessionID == sessionID.uuidString {
-            await item.end(nil, dismissalPolicy: .immediate)
+        if activity?.attributes.sessionID == sessionID.uuidString { await releaseOwnedActivity() }
+        for card in system.cards() where card.sessionID == sessionID.uuidString {
+            await system.end(cardID: card.id)
         }
     }
 
-    func removeOrphanedActivities() async {
-        for item in Activity<KeyboardMicActivityAttributes>.activities where item.id != activity?.id {
-            await item.end(nil, dismissalPolicy: .immediate)
+    /// Ends every card that should not be on screen: all of them when cards are not allowed, otherwise any that is
+    /// stale, from another session, or a duplicate of the one this instance holds. A stale card of the live session
+    /// that this instance holds is renewed instead, since the mic really is on.
+    func removeOrphanedActivities(liveSessionID: UUID?) async {
+        let plan = KeyboardMicCardPolicy.reconcile(
+            cards: system.cards(),
+            ownedCardID: activity?.id,
+            liveSessionID: liveSessionID?.uuidString,
+            cardsAllowed: cardsAllowed
+        )
+        if let activity, plan.end.contains(activity.id) { await releaseOwnedActivity() }
+        for id in plan.end { await system.end(cardID: id) }
+        if let activity, plan.renew.contains(activity.id), let state = lastState {
+            await activity.update(ActivityContent(state: state, staleDate: Self.staleDate()))
         }
     }
 }

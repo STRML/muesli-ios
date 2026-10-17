@@ -5,6 +5,7 @@ enum MuesliPreferences {
     static let accentThemeKey = "muesli.appearance.accent"
     static let liveActivitiesForDictationsKey = "muesli.liveActivities.dictations"
     static let liveActivitiesForMeetingsKey = "muesli.liveActivities.meetings"
+    static let liveActivitiesForKeyboardMicKey = "muesli.liveActivities.keyboardMic"
 
     static let keyboardSessionModeKey = "muesli.keyboardSession.enabled"
     static let keyboardMicAutoOffMinutesKey = "muesli.keyboardSession.autoOffMinutes"
@@ -63,6 +64,11 @@ enum MuesliPreferences {
 
     static var liveActivitiesForDictationsEnabled: Bool {
         bool(for: liveActivitiesForDictationsKey, defaultValue: true)
+    }
+
+    /// Off unless the user turns it on, including for people who had the card before this switch existed.
+    static var liveActivitiesForKeyboardMicEnabled: Bool {
+        bool(for: liveActivitiesForKeyboardMicKey, defaultValue: KeyboardMicCardPolicy.keyboardMicSwitchDefault)
     }
 
     static var liveActivitiesForMeetingsEnabled: Bool {
