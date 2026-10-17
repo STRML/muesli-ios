@@ -24,7 +24,15 @@ final class KeyboardSnapshotTests: XCTestCase {
         let rewriteAvailable: Bool
         /// Streaming words for the live preview strip.
         var liveText: String?
+        /// The Dictate page unless a scene asks for the Type page.
+        var surface: TypingSurface = .dictate
+        var before: String?
+        var traits = TypingTraits()
+        var page: TypingPage = .letters
+        var lockCaps = false
+        var width: CGFloat = 393
     }
+
 
     private let editText = "Next Amazon order, I want to get a desk mat, a rack for my Mac minis, and a holder for my pen holders."
 
@@ -85,6 +93,15 @@ final class KeyboardSnapshotTests: XCTestCase {
             controller.prepareInitialPresentationState()
             field = KeyboardTextContext()
         }
+        controller.selectedSurface = scene.surface
+        if let before = scene.before { controller.typing.document.beforeReader = { before } }
+        controller.typing.setDocumentLanguage("en-US")
+        controller.typing.engine.apply(traits: scene.traits)
+        controller.typing.engine.switchPage(scene.page)
+        if scene.lockCaps {
+            controller.typing.perform(.shift)
+            controller.typing.perform(.shift)
+        }
         return controller
     }
 
@@ -110,11 +127,37 @@ final class KeyboardSnapshotTests: XCTestCase {
             Scene(name: "edit-listening", setup: .editListening, rewriteAvailable: true),
             Scene(name: "edit-transcribing", setup: .editTranscribing, rewriteAvailable: true),
             Scene(name: "undo", setup: .undoAvailable, rewriteAvailable: true),
+            // The Type page.
+            Scene(name: "type-empty", setup: .ready, rewriteAvailable: true, surface: .type),
+            Scene(name: "type-suggest-complete", setup: .ready, rewriteAvailable: true, surface: .type,
+                  before: "See you tomorrow at the offi"),
+            Scene(name: "type-suggest-correct", setup: .ready, rewriteAvailable: true, surface: .type,
+                  before: "I think teh"),
+            Scene(name: "type-after-space", setup: .ready, rewriteAvailable: true, surface: .type,
+                  before: "Sounds good. "),
+            Scene(name: "type-caps-lock", setup: .ready, rewriteAvailable: false, surface: .type,
+                  before: "hello ", lockCaps: true),
+            Scene(name: "type-numbers", setup: .ready, rewriteAvailable: true, surface: .type, page: .numbers),
+            Scene(name: "type-symbols", setup: .ready, rewriteAvailable: true, surface: .type, page: .symbols),
+            Scene(name: "type-send", setup: .ready, rewriteAvailable: true, surface: .type, before: "ok",
+                  traits: TypingTraits(returnKey: .send, enablesReturnKeyAutomatically: false)),
+            Scene(name: "type-email", setup: .ready, rewriteAvailable: true, surface: .type, before: "sam",
+                  traits: TypingTraits(autocapitalization: .none, variant: .email)),
+            Scene(name: "type-listening", setup: .listening, rewriteAvailable: true, surface: .type),
+            Scene(name: "type-preview", setup: .listening, rewriteAvailable: true,
+                  liveText: "so the plan for tomorrow is to pick up the parts first and then head over to the shop",
+                  surface: .type),
+            Scene(name: "type-transcribing", setup: .transcribing, rewriteAvailable: true, surface: .type),
+            Scene(name: "type-edit-listening", setup: .editListening, rewriteAvailable: true, surface: .type),
+            Scene(name: "type-undo", setup: .undoAvailable, rewriteAvailable: true, surface: .type),
+            Scene(name: "type-landscape", setup: .ready, rewriteAvailable: true, surface: .type, before: "See you at the offi",
+                  width: 852),
+            Scene(name: "dictate-landscape", setup: .ready, rewriteAvailable: true, width: 852),
         ]
         for scene in scenes {
             for (suffix, style) in [("light", UIUserInterfaceStyle.light), ("dark", .dark)] {
                 let controller = try makeController(scene)
-                let size = CGSize(width: 393, height: KeyboardRootView.preferredHeight)
+                let size = CGSize(width: scene.width, height: KeyboardRootView.preferredHeight)
                 let host = UIHostingController(rootView: KeyboardRootView(controller: controller))
                 host.view.frame = CGRect(origin: .zero, size: size)
                 host.safeAreaRegions = []

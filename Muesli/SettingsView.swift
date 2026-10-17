@@ -11,6 +11,7 @@ struct SettingsView: View {
     @AppStorage(MuesliPreferences.liveActivitiesForDictationsKey) private var liveActivitiesForDictations = true
     @AppStorage(MuesliPreferences.liveActivitiesForMeetingsKey) private var liveActivitiesForMeetings = true
     @AppStorage(MuesliPreferences.keyboardSessionModeKey) private var keyboardSessionMode = true
+    @AppStorage(MuesliPreferences.keyboardAutocorrectKey) private var keyboardAutocorrect = true
     @AppStorage(MuesliPreferences.keyboardMicAutoOffMinutesKey) private var keyboardMicAutoOffMinutes = KeyboardMicAutoOff.defaultMinutes
     @AppStorage(MuesliPreferences.recordingMicrophonePreferenceKey) private var microphonePreference = RecordingMicrophonePreference.automatic.rawValue
     @AppStorage(MuesliPreferences.keepDictationAudioRecordingsKey) private var keepDictationAudioRecordings = false
@@ -298,6 +299,13 @@ struct SettingsView: View {
             MuesliSurface {
                 VStack(alignment: .leading, spacing: MuesliTheme.spacing12) {
                     SettingsToggleRow(
+                        icon: "textformat.abc",
+                        title: "Autocorrect",
+                        detail: "Fix typos when you type a space or punctuation on the Muesli keyboard. Backspace right after a fix puts your word back. Needs Allow Full Access to follow this switch; without it, autocorrect stays on.",
+                        isOn: keyboardAutocorrectBinding
+                    )
+                    Divider().overlay(MuesliTheme.surfaceBorder)
+                    SettingsToggleRow(
                         icon: "keyboard.badge.ellipsis",
                         title: "Turn mic off after each dictation",
                         detail: keyboardSessionModeDetail,
@@ -344,6 +352,13 @@ struct SettingsView: View {
     private var keyboardSessionBinding: Binding<Bool> {
         Binding(get: { !keyboardSessionMode }, set: { stopAfterEach in
             coordinator.setKeyboardSessionModeEnabled(!stopAfterEach)
+        })
+    }
+
+    private var keyboardAutocorrectBinding: Binding<Bool> {
+        Binding(get: { keyboardAutocorrect }, set: { enabled in
+            keyboardAutocorrect = enabled
+            coordinator.setKeyboardAutocorrectEnabled(enabled)
         })
     }
 

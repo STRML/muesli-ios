@@ -8,6 +8,7 @@ enum MuesliPreferences {
 
     static let keyboardSessionModeKey = "muesli.keyboardSession.enabled"
     static let keyboardMicAutoOffMinutesKey = "muesli.keyboardSession.autoOffMinutes"
+    static let keyboardAutocorrectKey = "muesli.keyboard.autocorrect"
     static let retiredKeyboardSessionModeKey = "muesli.keyboardSession.keepReadyBetweenDictations"
 
     static func migrateKeyboardSessionPreference(in defaults: UserDefaults = .standard) {
@@ -70,6 +71,12 @@ enum MuesliPreferences {
     static var keyboardMicAutoOffMinutes: Int {
         let stored = UserDefaults.standard.object(forKey: keyboardMicAutoOffMinutesKey) as? Int
         return KeyboardMicAutoOff.resolved(minutes: stored ?? KeyboardMicAutoOff.defaultMinutes)
+    }
+
+    /// Autocorrect on the Muesli keyboard. On until the user turns it off; the keyboard reads it from the shared
+    /// store, which the coordinator fills from here.
+    static var keyboardAutocorrectEnabled: Bool {
+        bool(for: keyboardAutocorrectKey, defaultValue: true)
     }
 
     static var keyboardSessionModeEnabled: Bool {

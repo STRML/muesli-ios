@@ -1,8 +1,8 @@
 import SwiftUI
 
 struct KeyboardRootView: View {
-    /// Room for the control row, a one-line status and two rows of keys.
-    static let preferredHeight: CGFloat = 234
+    /// The one height of the keyboard, for the Type and the Dictate page alike (see `TypingMetrics`).
+    static let preferredHeight = CGFloat(TypingMetrics.preferredHeight)
 
     /// Three slots that never move: a side button, the primary pill, a side button. Only their content changes.
     private static let controlHeight: CGFloat = 64
@@ -13,13 +13,20 @@ struct KeyboardRootView: View {
     @Bindable var controller: KeyboardController
 
     var body: some View {
-        VStack(spacing: 5) {
-            keyboardDeck
-            helperKeys
+        Group {
+            switch controller.surface {
+            case .type:
+                KeyboardTypePage(controller: controller)
+                    .padding(.horizontal, MuesliTheme.spacing8 - KeyboardTypePage.sideBleed)
+                    .padding(.top, CGFloat(TypingMetrics.topInset))
+                    .padding(.bottom, CGFloat(TypingMetrics.bottomInset))
+            case .dictate:
+                dictatePage
+                    .padding(.horizontal, MuesliTheme.spacing8)
+                    .padding(.top, 4)
+                    .padding(.bottom, 5)
+            }
         }
-        .padding(.horizontal, MuesliTheme.spacing8)
-        .padding(.top, 4)
-        .padding(.bottom, 5)
         .frame(maxWidth: .infinity)
         .frame(height: Self.preferredHeight, alignment: .bottom)
         .transaction { transaction in
@@ -41,6 +48,15 @@ struct KeyboardRootView: View {
         // an intermediate height. Keep those extra host regions transparent;
         // only the final keyboard envelope should paint Muesli's surface.
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+    }
+
+    /// The original dictation panel: Start, Model and Quill, status, live preview and helper keys. It fills the
+    /// shared height, so the helper keys take whatever the taller Type page leaves them.
+    private var dictatePage: some View {
+        VStack(spacing: 5) {
+            keyboardDeck
+            helperKeys
+        }
     }
 
     private var isActive: Bool { controller.showsActiveWaveform }
@@ -206,25 +222,8 @@ struct KeyboardRootView: View {
 
     // MARK: Primary pill
 
-    @ViewBuilder
     private var primaryPill: some View {
-        if controller.opensMuesliFromPrimaryButton, let launchURL = controller.launchURL {
-            Link(destination: launchURL) { pillLabel }
-                .simultaneousGesture(TapGesture().onEnded {
-                    controller.primaryLaunchAction()
-                })
-                .buttonStyle(KeyboardPressStyle())
-                .allowsHitTesting(!controller.isPrimaryButtonDisabled)
-        } else {
-            Button {
-                controller.primaryAction()
-            } label: {
-                pillLabel
-            }
-            .buttonStyle(KeyboardPressStyle())
-            // A disabled button is auto-dimmed, which made a working pill look empty. Block taps instead.
-            .allowsHitTesting(!controller.isPrimaryButtonDisabled)
-        }
+        KeyboardPrimaryActionControl(controller: controller) { pillLabel }
     }
 
     private var pillLabel: some View {
@@ -288,57 +287,15 @@ struct KeyboardRootView: View {
     private var statusBody: some View {
         Group {
             if isActive {
-                if let edit = controller.activeRewrite, controller.dictationPhase != .transcribing {
-                    editTarget(edit.original)
-                } else if let preview = controller.livePreview {
-                    KeyboardLivePreviewStrip(preview: preview, recordingStartedAt: controller.recordingStartedAt)
-                } else {
-                    caption(activeCaption)
-                }
+                KeyboardDictationStatusView(controller: controller)
             } else if controller.canUndoRewrite {
-                undoButton
+                KeyboardUndoEditButton(controller: controller)
             } else {
                 readyCaption
             }
         }
         .frame(maxWidth: .infinity)
         .frame(height: Self.statusBodyHeight)
-    }
-
-    /// The text a voice edit will change, highlighted the way a selection is, with what to do next.
-    private func editTarget(_ original: String) -> some View {
-        VStack(spacing: 4) {
-            Text(original)
-                .font(.system(size: 13, weight: .regular))
-                .foregroundStyle(MuesliTheme.textPrimary)
-                .lineLimit(1)
-                .truncationMode(.head)
-                .multilineTextAlignment(.leading)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(MuesliTheme.accent.opacity(0.18), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            Text("Speak to edit · tap the pill when you're done")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(MuesliTheme.textSecondary)
-        }
-    }
-
-    private func caption(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(MuesliTheme.textSecondary)
-            .multilineTextAlignment(.center)
-    }
-
-    private var activeCaption: String {
-        switch controller.dictationPhase {
-        case .recording:
-            "Listening · tap the pill to insert"
-        case .transcribing:
-            controller.activeRewrite != nil ? "Applying your edit" : "Writing your text"
-        default:
-            "Starting"
-        }
     }
 
     private var readyCaption: some View {
@@ -358,23 +315,6 @@ struct KeyboardRootView: View {
                     .accessibilityIdentifier("keyboard.remoteProcessingBanner")
             }
         }
-    }
-
-    private var undoButton: some View {
-        Button(action: controller.undoLastRewrite) {
-            HStack(spacing: 6) {
-                Image(systemName: "arrow.uturn.backward")
-                    .font(.system(size: 13, weight: .semibold))
-                Text("Undo edit")
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-            }
-            .foregroundStyle(MuesliTheme.textPrimary)
-            .padding(.horizontal, 16)
-            .frame(height: 38)
-            .keyboardGlassSurface(cornerRadius: 19)
-        }
-        .buttonStyle(KeyboardPressStyle())
-        .accessibilityIdentifier("keyboard.undo")
     }
 
     private var verifyRow: some View {
@@ -423,8 +363,9 @@ struct KeyboardRootView: View {
                     .frame(maxWidth: 58)
                 }
 
-                KeyboardTextKey("ABC") { controller.switchInputMode() }
+                KeyboardTextKey("ABC") { controller.selectedSurface = .type }
                     .frame(maxWidth: 66)
+                    .accessibilityHint("Back to the typing keyboard")
 
                 KeyboardTextKey("space") { controller.insertSpace() }
 
@@ -452,7 +393,7 @@ struct KeyboardRootView: View {
 }
 
 /// Presses in slightly, like a physical key, instead of dimming.
-private struct KeyboardPressStyle: ButtonStyle {
+struct KeyboardPressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.97 : 1)
@@ -517,7 +458,7 @@ private struct KeyboardGlassSurface: ViewModifier {
     }
 }
 
-private extension View {
+extension View {
     func keyboardPrimarySurface(muted: Bool = false) -> some View {
         modifier(KeyboardPrimarySurface(muted: muted))
     }
@@ -596,41 +537,11 @@ private struct KeyboardRepeatingTextKey: View {
     let accessibilityLabel: String
     let action: () -> Void
 
-    @State private var repeatTask: Task<Void, Never>?
-
     var body: some View {
         KeyboardTextKeyLabel(title: nil, systemImage: systemImage)
             .muesliKeyboardKeySurface()
             .accessibilityLabel(accessibilityLabel)
-            .accessibilityAddTraits(.isButton)
-            .accessibilityAction {
-                action()
-            }
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { _ in startRepeatingIfNeeded() }
-                    .onEnded { _ in stopRepeating() }
-            )
-            .onDisappear {
-                stopRepeating()
-            }
-    }
-
-    private func startRepeatingIfNeeded() {
-        guard repeatTask == nil else { return }
-        action()
-        repeatTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(360))
-            while !Task.isCancelled {
-                action()
-                try? await Task.sleep(for: .milliseconds(65))
-            }
-        }
-    }
-
-    private func stopRepeating() {
-        repeatTask?.cancel()
-        repeatTask = nil
+            .holdToRepeat(action)
     }
 }
 
@@ -651,7 +562,7 @@ private struct KeyboardTextKeyLabel: View {
         }
         .foregroundStyle(MuesliTheme.textPrimary)
         .frame(maxWidth: .infinity)
-        .frame(minHeight: 38)
+        .frame(minHeight: 38, maxHeight: .infinity)
         .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
@@ -720,7 +631,7 @@ private struct MuesliKeyboardKeySurfaceModifier: ViewModifier {
 
 /// One line of what the streaming model has heard, newest words kept visible by truncating from the left. Gray and
 /// display only; the final text is inserted once, after the final pass, and this strip then clears.
-private struct KeyboardLivePreviewStrip: View {
+struct KeyboardLivePreviewStrip: View {
     let preview: KeyboardLivePreview
     let recordingStartedAt: Date?
 
