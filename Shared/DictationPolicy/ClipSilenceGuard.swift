@@ -77,7 +77,12 @@ enum ClipSilenceGuard {
                 copy = candidate
                 handed = candidate
                 leading = plan.leadingTrimSeconds
-                analysed = profile.slice(fromFrame: plan.keepStartFrame, toFrame: plan.keepEndFrame)
+                // The filter judges the silence after the speech, so it must not see silence the trimmer added to
+                // reach the minimum length: that would make a real sign-off look like a hallucinated one.
+                let pad = ClipEnergyProfile.frame(atSeconds: options.silence.padSeconds)
+                analysed = profile.slice(
+                    fromFrame: plan.keepStartFrame, toFrame: min(plan.keepEndFrame, plan.speechEndFrame + pad)
+                )
                 log("transcribe.trimmed", [
                     "leading_ms": milliseconds(plan.leadingTrimSeconds),
                     "trailing_ms": milliseconds(plan.trailingTrimSeconds),

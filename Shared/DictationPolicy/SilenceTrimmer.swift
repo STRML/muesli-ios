@@ -46,6 +46,8 @@ enum SilenceTrimmer {
         var keepStartFrame: Int
         var keepEndFrame: Int
         var totalFrames: Int
+        /// Where the last speech ends, or the end of the clip when it was not judged.
+        var speechEndFrame: Int
 
         var leadingTrimSeconds: Double { Double(keepStartFrame) * ClipEnergyProfile.frameSeconds }
         var trailingTrimSeconds: Double { Double(totalFrames - keepEndFrame) * ClipEnergyProfile.frameSeconds }
@@ -66,15 +68,17 @@ enum SilenceTrimmer {
 
     static func plan(for profile: ClipEnergyProfile, config: Config = .standard) -> Plan {
         let total = profile.frameCount
-        let untouched = Plan(hasSpeech: true, keepStartFrame: 0, keepEndFrame: total, totalFrames: total)
+        let untouched = Plan(hasSpeech: true, keepStartFrame: 0, keepEndFrame: total, totalFrames: total, speechEndFrame: total)
         let spans: [Range<Int>]
         switch analyse(profile, config: config) {
-        case .silent: return Plan(hasSpeech: false, keepStartFrame: 0, keepEndFrame: total, totalFrames: total)
+        case .silent: return Plan(hasSpeech: false, keepStartFrame: 0, keepEndFrame: total, totalFrames: total, speechEndFrame: total)
         case .indeterminate: return untouched
         case .speech(let found): spans = found
         }
         guard let first = spans.first, let last = spans.last else { return untouched }
-        guard profile.duration >= config.minClipSeconds else { return untouched }
+        guard profile.duration >= config.minClipSeconds else {
+            return Plan(hasSpeech: true, keepStartFrame: 0, keepEndFrame: total, totalFrames: total, speechEndFrame: last.upperBound)
+        }
 
         let pad = frames(config.padSeconds)
         let minTrim = frames(config.minTrimSeconds)
@@ -88,7 +92,7 @@ enum SilenceTrimmer {
         }
         if start < minTrim { start = 0 }
         if total - end < minTrim { end = total }
-        return Plan(hasSpeech: true, keepStartFrame: start, keepEndFrame: end, totalFrames: total)
+        return Plan(hasSpeech: true, keepStartFrame: start, keepEndFrame: end, totalFrames: total, speechEndFrame: last.upperBound)
     }
 
     static func analyse(_ profile: ClipEnergyProfile, config: Config = .standard) -> Analysis {

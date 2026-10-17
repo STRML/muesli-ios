@@ -202,6 +202,19 @@ final class ClipSilenceGuardTests: XCTestCase {
         XCTAssertEqual(outcome.text, "Thank you.")
     }
 
+    func testAShortRealSignOffKeptByTheMinimumLengthIsNeverDroppedAsATail() async throws {
+        // 0.55 s of speech is cut to the 1.2 s minimum, so the copy ends in 0.4 s of silence beyond its pad that the
+        // trimmer added itself. Flat text cannot say where "Thank you." was spoken, so that silence must not count against it.
+        let directory = try TestAudio.temporaryDirectory(self)
+        let original = try write(
+            Synth.voicedBurst(0.25) + Synth.silence(0.05) + Synth.voicedBurst(0.25) + Synth.silence(3), in: directory
+        )
+        for text in ["Okay. Thank you.", "Okay. Thank you"] {
+            let outcome = try await run(original, recorder: Recorder()) { _ in .init(text: text) }
+            XCTAssertEqual(outcome.text, text)
+        }
+    }
+
     func testFilteringCanBeSwitchedOffAndTheTextPassesThrough() async throws {
         let directory = try TestAudio.temporaryDirectory(self)
         let original = try write(speech + Synth.silence(3), in: directory)
