@@ -9,6 +9,7 @@ enum MuesliPreferences {
     static let keyboardSessionModeKey = "muesli.keyboardSession.enabled"
     static let keyboardMicAutoOffMinutesKey = "muesli.keyboardSession.autoOffMinutes"
     static let keyboardAutocorrectKey = "muesli.keyboard.autocorrect"
+    static let keyboardLiveTypingKey = "muesli.keyboard.liveTyping"
     static let retiredKeyboardSessionModeKey = "muesli.keyboardSession.keepReadyBetweenDictations"
 
     static func migrateKeyboardSessionPreference(in defaults: UserDefaults = .standard) {
@@ -77,6 +78,12 @@ enum MuesliPreferences {
     /// store, which the coordinator fills from here.
     static var keyboardAutocorrectEnabled: Bool {
         bool(for: keyboardAutocorrectKey, defaultValue: true)
+    }
+
+    /// Dictated words appear in the field while you speak. On until the user turns it off; the keyboard reads it
+    /// from the shared store, which the coordinator fills from here.
+    static var keyboardLiveTypingEnabled: Bool {
+        bool(for: keyboardLiveTypingKey, defaultValue: true)
     }
 
     static var keyboardSessionModeEnabled: Bool {

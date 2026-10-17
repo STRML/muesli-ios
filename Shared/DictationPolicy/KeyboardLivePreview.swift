@@ -1,7 +1,8 @@
 import Foundation
 
-/// The keyboard's one-line preview of what the streaming model has heard so far. It is display only: nothing in it
-/// is ever written to the host field.
+/// The keyboard's one-line preview of what the streaming model has heard so far. The strip itself is display
+/// only. With "Type live into the field" on, the same words are also typed into the host field as marked text
+/// (`LiveTypingSession`), and the strip is the fallback view when the host cannot show them.
 struct KeyboardLivePreview: Sendable, Equatable {
     enum Phase: Sendable, Equatable {
         /// Still recording: the newest words, the recording dot and the elapsed time.
