@@ -7824,7 +7824,10 @@ final class DictationCoordinator {
             state = KeyboardHandoffState(requestID: requestID, phase: phase, message: message)
         }
         try? store.saveKeyboardHandoffState(state)
-        KeyboardDiagnosticsLog.record(DiagnosticsEvents.handoffSaved(request: requestID, phase: phase.rawValue))
+        // Progress updates rewrite the same phase many times a second; the log keeps the transitions only.
+        if previous?.requestID != requestID || previous?.phase != phase {
+            KeyboardDiagnosticsLog.record(DiagnosticsEvents.handoffSaved(request: requestID, phase: phase.rawValue))
+        }
     }
 
     private func saveKeyboardLiveTranscript(text: String, isFinal: Bool) {
