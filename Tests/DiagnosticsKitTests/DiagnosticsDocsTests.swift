@@ -52,6 +52,16 @@ final class DiagnosticsDocsTests: XCTestCase {
         XCTAssertTrue(DiagnosticsShippingCopy.toggleDetail.contains("Off by default"))
     }
 
+    /// The remote-transcription warning says "Dictation recordings would leave your network", which is true for that
+    /// feature and false here: a diagnostics log never holds audio.
+    func testThePublicServerWarningTalksAboutTheLogNotRecordings() {
+        let warning = DiagnosticsShippingCopy.publicServerWarning.lowercased()
+        XCTAssertTrue(warning.contains("log"))
+        XCTAssertTrue(warning.contains("private server"))
+        XCTAssertFalse(warning.contains("recording"))
+        XCTAssertFalse(warning.contains("dictation"))
+    }
+
     func testTheDocsLinkTheReceiverGuideTheSettingsRowOpens() throws {
         XCTAssertTrue(DiagnosticsShippingCopy.receiverGuideURL.hasSuffix("/docs/diagnostics-receiver.md"))
         XCTAssertTrue(try read("docs/diagnostics-shipping.md").contains("(diagnostics-receiver.md)"))

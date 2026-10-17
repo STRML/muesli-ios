@@ -19,6 +19,7 @@ enum DiagnosticsShippingCopy {
     static let fromOwnField = "From the Diagnostics server field. " + keyNote
     static let fromAISummaries = "From the Server URL under AI Services. Type an address in Diagnostics server to send diagnostics somewhere else. " + keyNote
     static let invalidOverride = "The Diagnostics server must be an address that starts with https://. Nothing is sent until it is."
+    static let publicServerWarning = "This address doesn't look like a private server. Your event log would leave your network. It never holds what you said."
     static let publicEndpointAcknowledgement = "I trust this server with my diagnostics"
     static let keyRejected = "The server rejected the API key. Fix it under AI Services, then tap Send now."
     static let routeMissing = "The server has no /diagnostics route yet. Tap Send now once it does."
