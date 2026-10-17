@@ -24,13 +24,14 @@ extension TypingSurface {
         layout: KeyboardLayout,
         stored: String?,
         hasPendingSetupVerification: Bool,
-        isDictationActive: Bool
+        phase: TypingPillPhase
     ) -> TypingSurface {
         resolve(
             layout: layout,
             selected: stored.flatMap(TypingSurface.init(storedValue:)) ?? .type,
             hasPendingSetupVerification: hasPendingSetupVerification,
-            isDictationActive: isDictationActive
+            phase: phase,
+            holdsTypePage: false
         )
     }
 }

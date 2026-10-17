@@ -33,11 +33,13 @@ enum TypingSurface: Sendable, Equatable {
         layout: KeyboardLayout,
         selected: TypingSurface,
         hasPendingSetupVerification: Bool,
-        isDictationActive: Bool
+        phase: TypingPillPhase,
+        holdsTypePage: Bool
     ) -> TypingSurface {
-        // Minimal has one page. Full follows the chosen one, except that setup verification needs Dictate.
+        // STUB: the old rule, which ignores the dictation phase and the hold.
         guard layout.offersTypePage else { return .dictate }
-        return hasPendingSetupVerification && !isDictationActive ? .dictate : selected
+        let isActive = [TypingPillPhase.requested, .recording, .transcribing].contains(phase)
+        return hasPendingSetupVerification && !isActive ? .dictate : selected
     }
 }
 

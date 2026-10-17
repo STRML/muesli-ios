@@ -110,8 +110,15 @@ final class KeyboardController {
             layout: layout,
             selected: selectedSurface,
             hasPendingSetupVerification: hasPendingSetupVerification,
-            isDictationActive: showsActiveWaveform
+            phase: pillPhase,
+            holdsTypePage: holdsTypePageThisDictation
         )
+    }
+    /// STUB.
+    private(set) var holdsTypePageThisDictation = false
+    /// STUB: the ABC key.
+    func showTypePage() {
+        selectedSurface = .type
     }
     /// The layout the keyboard is showing: Full until an appearance reads another from the shared store. It
     /// changes only at an appearance, never while the keyboard is up (`loadTypingSettings(appliesLayout:)`).
@@ -132,7 +139,7 @@ final class KeyboardController {
             layout: .fallback,
             stored: surfaceDefaults?.string(forKey: Self.selectedSurfaceDefaultsKey),
             hasPendingSetupVerification: false,
-            isDictationActive: false
+            phase: .idle
         )
         liveTyper = KeyboardLiveTyper(scheduler: liveTypingScheduler)
         self.eventBus = eventBus

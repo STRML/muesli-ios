@@ -7,7 +7,7 @@ final class TypingSurfaceLaunchTests: XCTestCase {
         _ stored: String?, layout: KeyboardLayout = .full, verification: Bool = false, dictating: Bool = false
     ) -> TypingSurface {
         TypingSurface.atLaunch(
-            layout: layout, stored: stored, hasPendingSetupVerification: verification, isDictationActive: dictating)
+            layout: layout, stored: stored, hasPendingSetupVerification: verification, phase: dictating ? .recording : .idle)
     }
 
     func testFirstLaunchOpensOnType() {
@@ -27,10 +27,11 @@ final class TypingSurfaceLaunchTests: XCTestCase {
         XCTAssertEqual(launch(nil, verification: true), .dictate)
     }
 
-    func testARunningDictationNeverForcesAPage() {
-        XCTAssertEqual(launch("type", dictating: true), .type)
+    /// A keyboard that opens while a dictation records shows the Dictate page, whatever page was remembered.
+    func testAKeyboardOpeningMidDictationShowsTheDictatePage() {
+        XCTAssertEqual(launch("type", dictating: true), .dictate)
         XCTAssertEqual(launch("dictate", dictating: true), .dictate)
-        XCTAssertEqual(launch("type", verification: true, dictating: true), .type)
+        XCTAssertEqual(launch("type", verification: true, dictating: true), .dictate)
     }
 
     func testACorruptedStoredValueOpensOnType() {
@@ -69,7 +70,8 @@ final class TypingSurfaceLaunchTests: XCTestCase {
                     XCTAssertEqual(
                         TypingSurface.resolve(
                             layout: .minimal, selected: selected,
-                            hasPendingSetupVerification: verification, isDictationActive: dictating),
+                            hasPendingSetupVerification: verification, phase: dictating ? .recording : .idle,
+                            holdsTypePage: false),
                         .dictate)
                 }
             }
@@ -81,7 +83,7 @@ final class TypingSurfaceLaunchTests: XCTestCase {
         XCTAssertEqual(launch("dictate", layout: .full), .dictate)
         XCTAssertEqual(launch("type", layout: .full), .type)
         XCTAssertEqual(launch("type", layout: .full, verification: true), .dictate)
-        XCTAssertEqual(launch("type", layout: .full, dictating: true), .type)
+        XCTAssertEqual(launch("type", layout: .full, dictating: true), .dictate)
     }
 
     /// N7: only Full has a Type page to show, choose or remember.
