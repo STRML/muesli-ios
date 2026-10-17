@@ -34,6 +34,11 @@ enum MuesliPreferences {
     static let customLLMBaseURLKey = "muesli.meetings.summary.customLLM.baseURL"
     static let customLLMModelKey = "muesli.meetings.summary.customLLM.model"
     static let remoteProcessingEnabledKey = "muesli.transcription.remoteProcessing.enabled"
+    /// Opt-in diagnostics shipping to the user's own server. Off by default.
+    static let diagnosticsShippingEnabledKey = "muesli.diagnostics.shipping.enabled"
+    /// The host the user said they trust although it does not look private. A different host needs a new answer.
+    static let diagnosticsAcknowledgedHostKey = "muesli.diagnostics.shipping.acknowledgedHost"
+    static let diagnosticsDeviceIDKey = "muesli.diagnostics.deviceID"
     static let meetingTemplateKey = "muesli.meetings.template"
     static let iCloudSyncEnabledKey = "muesli.sync.icloud.enabled"
     static let pinnedSectionsKey = "muesli.navigation.pinnedSections"
@@ -174,6 +179,31 @@ enum MuesliPreferences {
     /// Opt-in, off by default. Reads the stored choice only; `isRemoteProcessingActive` also needs an endpoint.
     static var remoteProcessingEnabled: Bool {
         bool(for: remoteProcessingEnabledKey, defaultValue: false)
+    }
+
+    static var diagnosticsShippingEnabled: Bool {
+        bool(for: diagnosticsShippingEnabledKey, defaultValue: false)
+    }
+
+    static var diagnosticsAcknowledgedHost: String? {
+        let host = UserDefaults.standard.string(forKey: diagnosticsAcknowledgedHostKey) ?? ""
+        return host.isEmpty ? nil : host
+    }
+
+    /// A random id for this install, made on first use. Not tied to the Apple ID, the device name or iCloud.
+    static var diagnosticsDeviceID: String {
+        let defaults = UserDefaults.standard
+        if let existing = defaults.string(forKey: diagnosticsDeviceIDKey), UUID(uuidString: existing) != nil {
+            return existing
+        }
+        return resetDiagnosticsDeviceID()
+    }
+
+    @discardableResult
+    static func resetDiagnosticsDeviceID() -> String {
+        let fresh = UUID().uuidString
+        UserDefaults.standard.set(fresh, forKey: diagnosticsDeviceIDKey)
+        return fresh
     }
 
     static var hasCustomLLMEndpoint: Bool {

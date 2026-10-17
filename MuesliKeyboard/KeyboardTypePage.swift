@@ -32,7 +32,6 @@ struct KeyboardTypePage: View {
             stripContent
                 .frame(maxWidth: .infinity)
                 .frame(height: CGFloat(TypingMetrics.stripHeight))
-                .clipped()
             trailingSlot
                 .frame(width: 40, height: CGFloat(TypingMetrics.stripHeight))
         }
@@ -98,9 +97,9 @@ struct KeyboardTypePage: View {
         case .dictationStatus:
             KeyboardDictationStatusView(controller: controller)
         case .undoEdit:
-            KeyboardUndoEditButton(controller: controller)
+            KeyboardUndoEditButton(controller: controller).clipped()
         case .suggestions(let suggestions):
-            KeyboardSuggestionStrip(suggestions: suggestions) { typing.accept($0) }
+            KeyboardSuggestionStrip(suggestions: suggestions) { typing.accept($0) }.clipped()
         case .empty:
             Color.clear
         }

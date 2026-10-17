@@ -88,6 +88,8 @@ struct AboutSettingsContent: View {
                 .padding(MuesliTheme.spacing16)
             }
 
+            DiagnosticsShippingSettings()
+
             VStack(alignment: .leading, spacing: MuesliTheme.spacing8) {
                 Text("OPEN SOURCE LIBRARIES")
                     .font(MuesliTheme.captionMedium())
