@@ -91,12 +91,15 @@ public enum TailKind: Sendable, CaseIterable, CustomStringConvertible {
     case silence(seconds: Double)
     case roomTone(seconds: Double, dB: Double)
     case keyboardTap
+    /// A fan or traffic: loud enough that it is within 18 dB of the speech and the trimmer cannot call it silence.
+    case fan(seconds: Double)
 
     public static let allCases: [TailKind] = [
         .none,
         .silence(seconds: 0.3), .silence(seconds: 1), .silence(seconds: 2), .silence(seconds: 4),
         .roomTone(seconds: 3, dB: -50), .roomTone(seconds: 3, dB: -40),
         .keyboardTap,
+        .fan(seconds: 3),
     ]
 
     public var description: String {
@@ -105,6 +108,7 @@ public enum TailKind: Sendable, CaseIterable, CustomStringConvertible {
         case .silence(let seconds): "silence-\(seconds)s"
         case .roomTone(_, let dB): "roomtone\(Int(dB))dB"
         case .keyboardTap: "tap"
+        case .fan: "fan-30dB"
         }
     }
 
@@ -113,6 +117,7 @@ public enum TailKind: Sendable, CaseIterable, CustomStringConvertible {
         case .none: []
         case .silence(let seconds): Synth.silence(seconds, rate: rate)
         case .roomTone(let seconds, let dB): Synth.roomTone(seconds, rmsDB: dB, rate: rate)
+        case .fan(let seconds): Synth.roomTone(seconds, rmsDB: -30, seed: 11, rate: rate)
         case .keyboardTap: Synth.silence(0.5, rate: rate) + Synth.keyboardTap(rate: rate) + Synth.silence(1.0, rate: rate)
         }
     }

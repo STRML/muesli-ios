@@ -103,7 +103,7 @@ enum HallucinatedTailFilter {
         case .silent: spans = []
         case .speech(let found): spans = found
         }
-        let timing = WordTiming(segments: segments, text: text)
+        let timing = WordTiming(segments: segments, text: text, clipDuration: profile.duration)
 
         var current = text
         var dropped = [Dropped]()
@@ -235,8 +235,12 @@ enum HallucinatedTailFilter {
         private var starts: [TimeInterval] = []
         private var ends: [TimeInterval] = []
 
-        init?(segments: [Segment], text: String) {
-            guard !segments.isEmpty else { return nil }
+        init?(segments: [Segment], text: String, clipDuration: TimeInterval) {
+            // A segment that starts inside the audio and ends well past it is not timing at all (a decode without
+            // timestamps reports a whole 30 s window), and spreading words over it would put the last ones beyond the
+            // clip. One that starts past the end is trusted: there is no audio there.
+            let spansTheEnd = { (segment: Segment) in segment.start < clipDuration && segment.end > clipDuration + 0.5 }
+            guard !segments.isEmpty, !segments.contains(where: spansTheEnd) else { return nil }
             var words = [String]()
             for segment in segments {
                 let segmentWords = HallucinatedTailFilter.tokens(of: segment.text).map(\.word)

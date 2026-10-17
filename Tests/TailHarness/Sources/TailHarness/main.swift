@@ -99,6 +99,22 @@ func generate(into directory: URL) throws {
             manifest.append(Fixture(id: id, speechID: "foreign-\(speech.id)", reference: speech.text, tail: "foreign-\(tail)", path: url.lastPathComponent))
         }
     }
+    // Long clips, to check that decoding without timestamps is not used where a second window is needed.
+    for (id, repeats) in [("long-45s", 3), ("long-90s", 6)] {
+        let parts = SayFixtures.paragraphs
+        var samples = [Float](), reference = [String]()
+        for index in 0..<repeats {
+            let part = parts[index % parts.count]
+            samples += SayFixtures.normalised(try SayFixtures.speech(part.text, in: directory)).samples + Synth.silence(0.6)
+            reference.append(part.text)
+        }
+        for tail in [TailKind.none, .silence(seconds: 4)] {
+            let name = "\(id)__\(tail)"
+            let url = directory.appendingPathComponent("\(name).wav")
+            try WavFile.write(WavFile.Clip(samples: samples + tail.samples()), to: url)
+            manifest.append(Fixture(id: name, speechID: id, reference: reference.joined(separator: " "), tail: "long-\(tail)", path: url.lastPathComponent))
+        }
+    }
     // Pure silence and pure room tone: nothing was said, so any text is a hallucination.
     for (name, samples) in [
         ("only-silence-3s", Synth.silence(3)),
@@ -122,6 +138,7 @@ func decodingOptions(named name: String) -> DecodingOptions? {
     case "compression1.8": return DecodingOptions(compressionRatioThreshold: 1.8)
     case "nofallback": return DecodingOptions(temperatureFallbackCount: 0)
     case "notimestamps": return DecodingOptions(withoutTimestamps: true)
+    case "ship": return nil   // resolved per clip in transcribe(): WhisperKitDecodingOptions.options(forAudioSeconds:)
     case "windowclip0": return DecodingOptions(windowClipTime: 0)
     case "windowclip0.3": return DecodingOptions(windowClipTime: 0.3)
     case "strict":
@@ -176,7 +193,7 @@ func run() async throws {
             for fixture in manifest {
                 let url = fixturesDir.appendingPathComponent(fixture.path)
                 let started = Date()
-                let transcribed = try await transcribe(kit: kit, url: url, options: decodingOptions(named: setting), prep: prep)
+                let transcribed = try await transcribe(kit: kit, url: url, options: decodingOptions(named: setting), prep: prep, shipping: setting == "ship")
                 let row = Row(
                     fixture: fixture.id, speechID: fixture.speechID, tail: fixture.tail, setting: setting, prep: prep,
                     reference: fixture.reference, output: transcribed.raw, filtered: transcribed.filtered,
@@ -218,10 +235,12 @@ final class TextBox: @unchecked Sendable {
 
 /// prep: none = the app before this change; trim = silence trimmed only; filter = post-filter only (untrimmed
 /// audio); guard = trim + filter, exactly what ships.
-func transcribe(kit: WhisperKit, url: URL, options: DecodingOptions?, prep: String) async throws -> Transcribed {
+func transcribe(kit: WhisperKit, url: URL, options: DecodingOptions?, prep: String, shipping: Bool) async throws -> Transcribed {
     let seen = TextBox()
     func hear(_ file: URL) async throws -> ClipSilenceGuard.EngineOutput {
-        let results = try await kit.transcribe(audioPath: file.path, decodeOptions: options)
+        var effective = options
+        if shipping { effective = WhisperKitDecodingOptions.options(forAudioSeconds: try? WavFile.read(file).duration) }
+        let results = try await kit.transcribe(audioPath: file.path, decodeOptions: effective)
         let text = results.map(\.text).joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
         let language = results.first?.language ?? ""
         seen.raw = text

@@ -96,6 +96,18 @@ final class HallucinatedTailFilterTests: XCTestCase {
         XCTAssertEqual(result.text, "Done. Thank you.", "timestamps are rounded; speech within 200 ms is not silence")
     }
 
+    func testTimestampsThatRunPastTheEndOfTheClipAreNotTrusted() {
+        // A decode without timestamps reports one segment spanning a whole 30 s window. Spread over that window, a
+        // real trailing "thank you" would land beyond the 3 s clip and look silent.
+        let profile = TestAudio.profile(speech + Synth.voicedBurst(0.7) + Synth.silence(0.25))
+        let result = apply(
+            "Please send it. Thank you.",
+            segments: [Segment(text: " Please send it. Thank you.", start: 0, end: 30)],
+            profile: profile
+        )
+        XCTAssertEqual(result.text, "Please send it. Thank you.")
+    }
+
     func testSeveralHallucinatedPhrasesInARowAreAllDropped() {
         let profile = profile(tail: Synth.silence(5))
         let result = apply(
