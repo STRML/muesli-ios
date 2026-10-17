@@ -155,4 +155,27 @@ final class PolicyTests: XCTestCase {
         XCTAssertNil(CustomLLMEndpoint.transcriptionsURL(from: "studio.example.ts.net/v1"))
         XCTAssertNil(CustomLLMEndpoint.transcriptionsURL(from: "https://"))
     }
+
+    func testDiagnosticsURLFollowsEveryFormOfTheAddress() {
+        for address in [
+            "https://studio.tail13013.ts.net/v1",
+            "  https://studio.tail13013.ts.net/v1/  ",
+            "https://studio.tail13013.ts.net/v1/chat/completions",
+            "https://studio.tail13013.ts.net/v1/audio/transcriptions",
+            "https://studio.tail13013.ts.net/v1/diagnostics",
+        ] {
+            XCTAssertEqual(
+                CustomLLMEndpoint.diagnosticsURL(from: address)?.absoluteString,
+                "https://studio.tail13013.ts.net/v1/diagnostics",
+                address
+            )
+        }
+    }
+
+    func testDiagnosticsURLRefusesAnythingButHTTPS() {
+        XCTAssertNil(CustomLLMEndpoint.diagnosticsURL(from: ""))
+        XCTAssertNil(CustomLLMEndpoint.diagnosticsURL(from: "http://studio.tail13013.ts.net/v1"))
+        XCTAssertNil(CustomLLMEndpoint.diagnosticsURL(from: "studio.tail13013.ts.net/v1"))
+        XCTAssertNil(CustomLLMEndpoint.diagnosticsURL(from: "https://"))
+    }
 }

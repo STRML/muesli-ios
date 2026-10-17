@@ -1409,7 +1409,7 @@ private struct LivePreviewDownloadRow: View {
     }
 }
 
-private struct SettingsRow: View {
+struct SettingsRow: View {
     let icon: String
     let title: String
     let value: String
@@ -1433,7 +1433,7 @@ private struct SettingsRow: View {
     }
 }
 
-private struct SettingsToggleRow: View {
+struct SettingsToggleRow: View {
     let icon: String
     let title: String
     let detail: String
