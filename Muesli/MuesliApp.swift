@@ -65,7 +65,7 @@ struct MuesliApp: App {
                     if phase == .active, !isUITesting {
                         coordinator.reconcileKeyboardMicActivity()
                         coordinator.reconcileMeetingRuntime(reason: "foreground")
-                        coordinator.prewarmModelIfNeeded(reason: "foreground")
+                        coordinator.prewarmModelIfNeeded(.foreground)
                         coordinator.syncICloudTextIfEnabled(reason: "foreground")
                         coordinator.recoverLongVoiceNotesIfNeeded()
                     }

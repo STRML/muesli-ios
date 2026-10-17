@@ -658,7 +658,7 @@ final class SharedStoreTests: XCTestCase {
         let store = SharedStore(containerURL: directory)
         XCTAssertEqual(try store.resultsHistory(), [])
 
-        XCTAssertEqual(try sqliteInt("PRAGMA user_version", in: directory), 6)
+        XCTAssertEqual(try sqliteInt("PRAGMA user_version", in: directory), 7)
         XCTAssertTrue(try sqliteColumnNames(table: "result_history", in: directory).isSuperset(of: [
             "session_id",
             "text",
@@ -728,7 +728,7 @@ final class SharedStoreTests: XCTestCase {
         XCTAssertEqual(try sqliteString("SELECT text FROM result_history LIMIT 1", in: directory), "migrated dictation")
         XCTAssertEqual(try sqliteString("SELECT engine_identifier FROM result_history LIMIT 1", in: directory), "parakeet-v3")
         XCTAssertEqual(try sqliteString("SELECT replacement FROM custom_words LIMIT 1", in: directory), "Muesli")
-        XCTAssertEqual(try sqliteInt("PRAGMA user_version", in: directory), 6)
+        XCTAssertEqual(try sqliteInt("PRAGMA user_version", in: directory), 7)
     }
 
     func testResultsHistoryPersistsSortedResultsAfterOneOffResultIsCleared() throws {
@@ -2431,7 +2431,7 @@ final class SharedStoreTests: XCTestCase {
         XCTAssertEqual(try store.recordingSessions(), [expectedSession])
         XCTAssertEqual(try store.transcript(for: session.id), transcript)
         XCTAssertEqual(try store.customWords(), [customWord])
-        XCTAssertEqual(try sqliteInt("PRAGMA user_version", in: directory), 6)
+        XCTAssertEqual(try sqliteInt("PRAGMA user_version", in: directory), 7)
         XCTAssertEqual(try sqliteString("SELECT text FROM result_history LIMIT 1", in: directory), "legacy sqlite dictation")
         XCTAssertEqual(try sqliteString("SELECT audio_file_name FROM recording_sessions LIMIT 1", in: directory), "legacy.wav")
         XCTAssertEqual(try sqliteString("SELECT summary_text FROM transcripts LIMIT 1", in: directory), "Legacy notes")
