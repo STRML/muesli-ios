@@ -14,12 +14,6 @@ enum TypingMetrics {
     static let bottomInset: Double = 6
     static let rowCount = 4
 
-    /// A key row's slot: the key and the gap under it. Each row's tap area fills its whole slot.
-    static var rowSlotHeight: Double { keyHeight + rowSpacing }
-    /// The slots above the bottom row: the three letter (or number, or symbol) rows. The recording panel fills
-    /// exactly these, so the bottom row stays where it is.
-    static var panelSlotHeight: Double { Double(rowCount - 1) * rowSlotHeight }
-
     /// 4 + 40 + 6 + 4 x 44 + 3 x 10 + 6 = 262.
     static var preferredHeight: Double {
         let rows = Double(rowCount)
@@ -156,78 +150,5 @@ enum TypingStripPill {
 
     static func isTappable(phase: TypingPillPhase, stopRequested: Bool, cancelRequested: Bool) -> Bool {
         phase == .recording && !stopRequested && !cancelRequested
-    }
-}
-
-/// The large panel that takes the place of the three letter rows while a dictation records, so the whole key area
-/// above the bottom row is one stop target. Only the Full layout's Type page has it: the Dictate page already
-/// has its big pill. It appears when recording begins (not while the start is still requested, so a start that
-/// fails never shows it) and stays through transcribing; then the keys come back.
-enum TypingRecordingPanel: Sendable, Equatable {
-    case hidden
-    /// Recording; the whole panel stops and saves.
-    case recording
-    /// A stop is on its way.
-    case stopping
-    /// A cancel is on its way.
-    case cancelling
-    /// The final pass is running.
-    case transcribing
-
-    static func resolve(
-        layout: KeyboardLayout,
-        surface: TypingSurface,
-        phase: TypingPillPhase,
-        stopRequested: Bool,
-        cancelRequested: Bool
-    ) -> TypingRecordingPanel {
-        guard layout.offersTypePage, surface == .type else { return .hidden }
-        guard phase == .recording || phase == .transcribing else { return .hidden }
-        if cancelRequested { return .cancelling }
-        if TypingStripPill.isTappable(phase: phase, stopRequested: stopRequested, cancelRequested: cancelRequested) {
-            return .recording
-        }
-        return phase == .recording ? .stopping : .transcribing
-    }
-
-    /// The same guard as the strip pill and the Record key, so the three can never disagree.
-    var isTappable: Bool { self == .recording }
-
-    /// The line at the foot of the panel. `isEdit` is a Quill voice edit rather than a dictation.
-    func caption(isEdit: Bool) -> String {
-        switch self {
-        case .hidden: ""
-        case .recording: isEdit ? "Speak your change, then tap anywhere" : "Tap anywhere to stop and save"
-        case .stopping: "Stopping"
-        case .cancelling: "Cancelling"
-        case .transcribing: isEdit ? "Applying your edit" : "Writing your text"
-        }
-    }
-
-    func accessibilityLabel(isEdit: Bool) -> String {
-        switch self {
-        case .hidden: ""
-        case .recording: isEdit ? "Finish voice edit" : "Stop and save dictation"
-        case .stopping: "Stopping dictation"
-        case .cancelling: "Cancelling dictation"
-        case .transcribing: isEdit ? "Applying your edit" : "Writing your text"
-        }
-    }
-
-    /// Only the tappable state is a button, so only it has a hint.
-    func accessibilityHint(isEdit: Bool) -> String? {
-        guard self == .recording else { return nil }
-        return isEdit ? "Stops recording and applies your edit" : "Stops recording and inserts the text"
-    }
-
-    /// The newest words of a long preview, starting on a whole word and led by an ellipsis, so the panel's text
-    /// never grows with the dictation.
-    static func previewTail(_ text: String, limit: Int = 70) -> String {
-        guard text.count > limit else { return text }
-        let start = text.index(text.endIndex, offsetBy: -limit)
-        var tail = text[start...]
-        let cutsAWord = !text[text.index(before: start)].isWhitespace && tail.first?.isWhitespace == false
-        if cutsAWord, let gap = tail.firstIndex(where: \.isWhitespace) { tail = tail[gap...] }
-        return "\u{2026}" + tail.drop(while: \.isWhitespace)
     }
 }

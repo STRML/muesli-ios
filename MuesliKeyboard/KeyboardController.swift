@@ -116,20 +116,6 @@ final class KeyboardController {
     /// The layout the keyboard is showing: Full until an appearance reads another from the shared store. It
     /// changes only at an appearance, never while the keyboard is up (`loadTypingSettings(appliesLayout:)`).
     private(set) var layout: KeyboardLayout = .fallback
-    /// The large panel that replaces the letter rows while a dictation records (Full layout, Type page).
-    var recordingPanel: TypingRecordingPanel {
-        TypingRecordingPanel.resolve(
-            layout: layout,
-            surface: surface,
-            phase: pillPhase,
-            stopRequested: isStopPending,
-            cancelRequested: isCancelPending
-        )
-    }
-    /// The newest heard words for the panel, cut so a long dictation cannot grow it. Nil until words arrive.
-    var recordingPanelPreview: String? {
-        livePreview.map { TypingRecordingPanel.previewTail($0.text) }
-    }
     var recordKeyMode: TypingRecordKey.Mode {
         TypingRecordKey.mode(opensMuesli: opensMuesliFromPrimaryButton, hasLaunchURL: launchURL != nil)
     }

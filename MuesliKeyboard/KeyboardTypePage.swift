@@ -89,16 +89,6 @@ struct KeyboardTypePage: View {
 
     @ViewBuilder
     private var stripContent: some View {
-        if controller.recordingPanel != .hidden {
-            // The panel below carries the timer, the words and the stop target; the strip keeps only the X and Quill.
-            Color.clear
-        } else {
-            suggestionStripContent
-        }
-    }
-
-    @ViewBuilder
-    private var suggestionStripContent: some View {
         switch TypingStripContent.resolve(
             isDictationActive: isActive,
             canUndoRewrite: controller.canUndoRewrite,
@@ -125,35 +115,19 @@ struct KeyboardTypePage: View {
             traits: state.traits,
             showsGlobe: typing.showsGlobe
         )
-        let rowHeight = CGFloat(TypingMetrics.rowSlotHeight)
-        let panel = controller.recordingPanel
+        let rowHeight = CGFloat(TypingMetrics.keyHeight + TypingMetrics.rowSpacing)
         return VStack(spacing: 0) {
-            if panel == .hidden {
-                ForEach(Array(rows.dropLast().enumerated()), id: \.offset) { _, row in
-                    keyRow(row).frame(height: rowHeight)
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                TypingKeyRow(keys: row) { key in
+                    KeyboardTypeKey(key: key, controller: controller)
                 }
-            } else {
-                // While a dictation records the three upper rows give way to one large stop target, exactly as
-                // tall as they were. The bottom row (page, globe, Record, space, return) stays.
-                KeyboardRecordingPanelView(controller: controller, panel: panel)
-                    .padding(.horizontal, KeyboardTypeKey.faceInset)
-                    .padding(.vertical, CGFloat(TypingMetrics.rowSpacing) / 2)
-                    .frame(height: CGFloat(TypingMetrics.panelSlotHeight))
-            }
-            if let bottom = rows.last {
-                keyRow(bottom).frame(height: rowHeight)
+                .frame(height: rowHeight)
             }
         }
         // Each row is a full row plus a gap tall so no tap lands between keys; the first and last overhang the
         // strip gap and bottom inset by half a gap.
         .frame(height: CGFloat(TypingMetrics.rowCount) * CGFloat(TypingMetrics.keyHeight)
                + CGFloat(TypingMetrics.rowCount - 1) * CGFloat(TypingMetrics.rowSpacing))
-    }
-
-    private func keyRow(_ row: [TypingKey]) -> some View {
-        TypingKeyRow(keys: row) { key in
-            KeyboardTypeKey(key: key, controller: controller)
-        }
     }
 }
 

@@ -183,15 +183,13 @@ final class KeyboardSnapshotTests: XCTestCase {
             Scene(name: "type-landscape", setup: .ready, rewriteAvailable: true, surface: .type, before: "See you at the offi",
                   width: 852),
             Scene(name: "dictate-landscape", setup: .ready, rewriteAvailable: true, width: 852),
-            // The layout setting and the large recording panel.
+            // The layout setting, and the Full keyboard showing the Dictate page while a dictation runs.
             Scene(name: "full-idle", setup: .ready, rewriteAvailable: true, surface: .type,
                   before: "See you tomorrow at the offi"),
             Scene(name: "full-recording", setup: .listening, rewriteAvailable: true, surface: .type),
             Scene(name: "full-recording-words", setup: .listening, rewriteAvailable: true,
                   liveText: "so the plan for tomorrow is to pick up the parts first and then head over to the shop",
                   surface: .type),
-            Scene(name: "full-recording-long", setup: .listening, rewriteAvailable: true,
-                  liveText: (1...80).map { "word\($0)" }.joined(separator: " "), surface: .type),
             Scene(name: "full-recording-landscape", setup: .listening, rewriteAvailable: true,
                   liveText: "so the plan for tomorrow is to pick up the parts first", surface: .type, width: 852),
             Scene(name: "full-recording-edit", setup: .editListening, rewriteAvailable: true, surface: .type),
