@@ -98,7 +98,8 @@ final class KeyboardController {
     /// launch opens on the page it was left on. Only a chosen page is stored, never one forced by setup verification.
     var selectedSurface: TypingSurface {
         didSet {
-            guard selectedSurface != oldValue else { return }
+            // Minimal has no Type page to choose, so it must not overwrite the page Full remembered.
+            guard selectedSurface != oldValue, layout.offersTypePage else { return }
             surfaceDefaults?.set(selectedSurface.storedValue, forKey: Self.selectedSurfaceDefaultsKey)
         }
     }
@@ -112,11 +113,23 @@ final class KeyboardController {
             isDictationActive: showsActiveWaveform
         )
     }
-    /// STUB: the layout the keyboard is showing.
+    /// The layout the keyboard is showing: Full until an appearance reads another from the shared store. It
+    /// changes only at an appearance, never while the keyboard is up (`loadTypingSettings(appliesLayout:)`).
     private(set) var layout: KeyboardLayout = .fallback
-    /// STUB: the recording panel.
-    var recordingPanel: TypingRecordingPanel { .hidden }
-    var recordingPanelPreview: String? { nil }
+    /// The large panel that replaces the letter rows while a dictation records (Full layout, Type page).
+    var recordingPanel: TypingRecordingPanel {
+        TypingRecordingPanel.resolve(
+            layout: layout,
+            surface: surface,
+            phase: pillPhase,
+            stopRequested: isStopPending,
+            cancelRequested: isCancelPending
+        )
+    }
+    /// The newest heard words for the panel, cut so a long dictation cannot grow it. Nil until words arrive.
+    var recordingPanelPreview: String? {
+        livePreview.map { TypingRecordingPanel.previewTail($0.text) }
+    }
     var recordKeyMode: TypingRecordKey.Mode {
         TypingRecordKey.mode(opensMuesli: opensMuesliFromPrimaryButton, hasLaunchURL: launchURL != nil)
     }
@@ -1579,12 +1592,17 @@ final class KeyboardController {
         typing.engine.noteExternalInsertion()
     }
 
-    /// Reads the typing settings the app published. Unreadable (Full Access off) or never published means the
-    /// default: autocorrect on.
+    /// Reads the typing settings the app published. Unreadable (Full Access off), never published or corrupted
+    /// means the defaults: autocorrect and live typing on, the full layout.
+    ///
+    /// Autocorrect and live typing follow at once. The layout is applied only when the keyboard appears
+    /// (`appliesLayout`), before its first frame, so a change in Settings never re-lays out a keyboard under
+    /// the user's thumbs; it shows the next time the keyboard opens.
     func loadTypingSettings(appliesLayout: Bool = false) {
-        let settings = (try? store.keyboardTypingSettings()) ?? nil
-        typing.autocorrectEnabled = (settings ?? .default).autocorrect
-        liveTyper.isEnabled = (settings ?? .default).liveTyping
+        let settings = ((try? store.keyboardTypingSettings()) ?? nil) ?? .default
+        typing.autocorrectEnabled = settings.autocorrect
+        liveTyper.isEnabled = settings.liveTyping
+        if appliesLayout { layout = settings.layout }
     }
 
     private func insertText(_ text: String) {

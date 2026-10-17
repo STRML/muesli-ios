@@ -222,7 +222,7 @@ enum TypingRecordingPanel: Sendable, Equatable {
 
     /// The newest words of a long preview, starting on a whole word and led by an ellipsis, so the panel's text
     /// never grows with the dictation.
-    static func previewTail(_ text: String, limit: Int = 140) -> String {
+    static func previewTail(_ text: String, limit: Int = 70) -> String {
         guard text.count > limit else { return text }
         let start = text.index(text.endIndex, offsetBy: -limit)
         var tail = text[start...]

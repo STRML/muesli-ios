@@ -156,6 +156,7 @@ final class KeyboardLayoutSettingTests: XCTestCase {
         try publish(.full)
         let first = makeController()
         first.loadTypingSettings(appliesLayout: true)
+        first.selectedSurface = .dictate
         first.selectedSurface = .type
         XCTAssertEqual(rememberedPage, "type")
 
@@ -163,11 +164,12 @@ final class KeyboardLayoutSettingTests: XCTestCase {
         let second = makeController()
         second.loadTypingSettings(appliesLayout: true)
         XCTAssertEqual(second.surface, .dictate)
+        XCTAssertEqual(rememberedPage, "type")
 
         try publish(.full)
         let third = makeController()
         third.loadTypingSettings(appliesLayout: true)
-        XCTAssertEqual(third.surface, .type)
+        XCTAssertEqual(third.surface, .type, "Full lost the page it remembered while Minimal was on")
     }
 
     // A8b: the same, inside one long-lived keyboard process that sees the layout change between appearances.

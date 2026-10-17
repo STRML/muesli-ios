@@ -182,7 +182,7 @@ final class KeyboardRecordingPanelTests: XCTestCase {
         let long = (1...600).map { "word\($0)" }.joined(separator: " ")
         try d.hear(long)
         let preview = try XCTUnwrap(controller.recordingPanelPreview)
-        XCTAssertLessThanOrEqual(preview.count, 141)
+        XCTAssertLessThanOrEqual(preview.count, 71)
         XCTAssertTrue(preview.hasSuffix("word600"))
         XCTAssertEqual(controller.recordingPanel, .recording)
     }
