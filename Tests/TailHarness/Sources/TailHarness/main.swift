@@ -122,6 +122,8 @@ func decodingOptions(named name: String) -> DecodingOptions? {
     case "compression1.8": return DecodingOptions(compressionRatioThreshold: 1.8)
     case "nofallback": return DecodingOptions(temperatureFallbackCount: 0)
     case "notimestamps": return DecodingOptions(withoutTimestamps: true)
+    case "windowclip0": return DecodingOptions(windowClipTime: 0)
+    case "windowclip0.3": return DecodingOptions(windowClipTime: 0.3)
     case "strict":
         return DecodingOptions(
             suppressBlank: true, compressionRatioThreshold: 2.0, logProbThreshold: -0.6,

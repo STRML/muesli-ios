@@ -116,6 +116,23 @@ final class SilenceTrimmerTests: XCTestCase {
         XCTAssertTrue(plan.isNoOp, "a 0.35 s clip is too short to trim safely: \(plan)")
     }
 
+    func testATrimmedCopyIsNeverShorterThanWhatWhisperKitWillDecode() {
+        // WhisperKit decodes a window only while more than windowClipTime (1 s) of audio remains, so a copy of 1 s
+        // or less comes back empty: a spoken "thank you" of 0.6 s plus a pad must not be cut down to that.
+        let word = Synth.voicedBurst(0.6)
+        let plan = plan(word + Synth.silence(3))
+        let kept = Double(plan.keepEndFrame - plan.keepStartFrame) * ClipEnergyProfile.frameSeconds
+        XCTAssertGreaterThanOrEqual(kept, 1.2, "kept \(kept) s")
+        XCTAssertEqual(plan.keepStartFrame, 0)
+        XCTAssertGreaterThan(plan.trailingTrimSeconds, 1.5, "the long tail is still mostly cut")
+
+        let both = self.plan(Synth.silence(2) + word + Synth.silence(2))
+        let keptBoth = Double(both.keepEndFrame - both.keepStartFrame) * ClipEnergyProfile.frameSeconds
+        XCTAssertGreaterThanOrEqual(keptBoth, 1.2)
+        XCTAssertLessThanOrEqual(Double(both.keepStartFrame) * 0.01, 1.76, "the word, with its pad, is inside the kept range")
+        XCTAssertGreaterThanOrEqual(Double(both.keepEndFrame) * 0.01, 2.6 + 0.24)
+    }
+
     func testAShortSilentClipStillHasNoSpeech() {
         XCTAssertFalse(plan(Synth.silence(0.3)).hasSpeech)
     }

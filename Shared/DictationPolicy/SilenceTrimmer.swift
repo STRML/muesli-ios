@@ -25,6 +25,9 @@ enum SilenceTrimmer {
         var padSeconds: Double = 0.25
         /// A cut smaller than this is not worth rewriting the file for.
         var minTrimSeconds: Double = 0.2
+        /// A trimmed copy is never shorter than this. WhisperKit decodes a window only while more than its
+        /// `windowClipTime` (1 s) of audio remains, so a copy of 1 s or less transcribes to nothing at all.
+        var minKeptSeconds: Double = 1.2
         /// Clips shorter than this are never trimmed; they are too short to tell speech from noise safely.
         var minClipSeconds: Double = 0.5
         /// A clip whose loud and quiet frames differ by less than this has no syllables: it is a hum, room tone, or
@@ -77,6 +80,12 @@ enum SilenceTrimmer {
         let minTrim = frames(config.minTrimSeconds)
         var start = max(0, first.lowerBound - pad)
         var end = min(total, last.upperBound + pad)
+        let deficit = frames(config.minKeptSeconds) - (end - start)
+        if deficit > 0 {
+            let forward = min(deficit, total - end)
+            end += forward
+            start = max(0, start - (deficit - forward))
+        }
         if start < minTrim { start = 0 }
         if total - end < minTrim { end = total }
         return Plan(hasSpeech: true, keepStartFrame: start, keepEndFrame: end, totalFrames: total)

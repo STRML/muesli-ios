@@ -11,7 +11,7 @@ public enum SayFixtures {
     /// transcript can be scored against it. Every one is rendered by each voice in `voices`.
     public static let phrases: [(id: String, text: String)] = [
         ("p1-report", "Please send the report by Friday afternoon"),
-        ("p2-meeting", "Let's move the meeting to Tuesday at 10"),
+        ("p2-meeting", "Let's move the meeting to Tuesday morning"),
         ("p3-reminder", "Remind me to call the dentist tomorrow morning"),
         ("p4-short", "I will be there soon"),
         ("p5-groceries", "We need milk, eggs and some bread from the store"),
