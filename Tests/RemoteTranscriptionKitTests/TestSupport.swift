@@ -324,4 +324,22 @@ final class Gate: @unchecked Sendable {
             if isOpen { lock.unlock(); continuation.resume() } else { parked.append(continuation); lock.unlock() }
         }
     }
+
+    /// Waits for the gate to open and fails the test, instead of hanging it, if that takes 30 s. Event-driven: the
+    /// opening resumes the waiter directly, so there is no poll to starve and no state change to miss. On timeout the
+    /// watchdog opens the gate itself, because a continuation parked in `wait()` ignores task cancellation.
+    func waitOrFail(_ what: String, file: StaticString = #filePath, line: UInt = #line) async {
+        let timedOut = Flag()
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { await self.wait() }
+            group.addTask {
+                guard (try? await Task.sleep(for: .seconds(30))) != nil else { return }
+                timedOut.set()
+                self.open()
+            }
+            await group.next()
+            group.cancelAll()
+        }
+        if timedOut.value { XCTFail("timed out waiting for \(what)", file: file, line: line) }
+    }
 }
