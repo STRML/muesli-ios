@@ -192,6 +192,16 @@ struct SharedStore: Sendable {
         try database().value(KeyboardTranscriptionModelCatalog.self, key: .keyboardModelCatalog)
     }
 
+    /// What the Muesli keyboard needs from Settings to type: today only Autocorrect.
+    func saveKeyboardTypingSettings(_ settings: KeyboardTypingSettings) throws {
+        try database().saveValue(settings, key: .keyboardTypingSettings)
+        eventPoster.post(.typingSettingsChanged)
+    }
+
+    func keyboardTypingSettings() throws -> KeyboardTypingSettings? {
+        try database().value(KeyboardTypingSettings.self, key: .keyboardTypingSettings)
+    }
+
     func saveKeyboardModelSelectionRequest(
         _ request: KeyboardTranscriptionModelSelectionRequest
     ) throws {
@@ -613,6 +623,7 @@ private enum SharedStoreKey: String {
     case keyboardRuntimeStatus = "keyboard_runtime_status"
     case keyboardLiveTranscript = "keyboard_live_transcript"
     case keyboardModelCatalog = "keyboard_model_catalog"
+    case keyboardTypingSettings = "keyboard_typing_settings"
     case keyboardModelSelectionRequest = "keyboard_model_selection_request"
     case legacyJSONMigrated = "legacy_json_migrated_v1"
     case customWordsInitialized = "custom_words_initialized"

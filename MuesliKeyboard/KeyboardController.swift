@@ -31,6 +31,9 @@ final class KeyboardController {
     private var completedClipboardRequestIDs = Set<UUID>()
     private var cancelledRequestIDs = Set<UUID>()
     private var pendingCancellationIDs = Set<UUID>()
+    /// The request whose stop is on its way to the app, so a second tap on the pill or the Record key sends no
+    /// second stop. It names a request, so the next dictation is unaffected.
+    private var pendingStopID: UUID?
     private var isBlockedByAppVoiceNote = false
     /// Tracked separately from `latestHandoffState`, which `refreshLatestDictation`
     /// overwrites before `apply(handoffState:)` runs -- comparing against it
@@ -44,6 +47,8 @@ final class KeyboardController {
     var hasLatestDictation = false
     var dictationPhase: DictationPhase = .idle {
         didSet {
+            // A running dictation owns the strip, so suggestions stop being computed or tappable.
+            typing.setSuggestionsSuspended(showsActiveWaveform)
             // The preview's elapsed time counts from when this keyboard saw recording begin.
             if dictationPhase == .recording, oldValue != .recording {
                 recordingStartedAt = Date()
@@ -70,6 +75,22 @@ final class KeyboardController {
     private var lastInsertedCharacterCount = 0
     private var canUseRuntimeStart = false
 
+    /// Typing (layout, shift, suggestions). Dictation state stays here; the Type page only reads it.
+    let typing = KeyboardTypingModel()
+    /// The page the user chose. It lives here, not in a view, so a reopened keyboard and its launch snapshot come
+    /// up on the page it was left on, and switching pages never touches a running dictation.
+    var selectedSurface: TypingSurface = .type
+    var surface: TypingSurface {
+        TypingSurface.resolve(
+            selected: selectedSurface,
+            hasPendingSetupVerification: hasPendingSetupVerification,
+            isDictationActive: showsActiveWaveform
+        )
+    }
+    var recordKeyMode: TypingRecordKey.Mode {
+        TypingRecordKey.mode(opensMuesli: opensMuesliFromPrimaryButton, hasLaunchURL: launchURL != nil)
+    }
+
     init(
         store: SharedStore? = nil,
         eventBus: any CrossProcessEventStreaming = DarwinCrossProcessEventBus.shared,
@@ -78,6 +99,8 @@ final class KeyboardController {
         self.eventBus = eventBus
         self.store = store ?? SharedStore(eventPoster: eventBus)
         self.setupVerificationStore = setupVerificationStore
+        typing.document.inserter = { [weak self] in self?.insertTypedText($0) }
+        typing.document.backspacer = { [weak self] in self?.deleteTypedBackward() }
     }
 
     static let unreachableAppMessage = "Couldn't reach Muesli. Open the app."
@@ -228,6 +251,44 @@ final class KeyboardController {
             && !(activeRequestID.map { pendingCancellationIDs.contains($0) } ?? false)
     }
 
+    private var isStopPending: Bool {
+        activeRequestID != nil && pendingStopID == activeRequestID
+    }
+
+    private var isCancelPending: Bool {
+        activeRequestID.map { pendingCancellationIDs.contains($0) } ?? false
+    }
+
+    private static let settledPillPhases: [KeyboardHandoffPhase: TypingPillPhase] = [
+        .copyRequired: .copyRequired,
+        .cancelled: .cancelled,
+    ]
+
+    private var pillPhase: TypingPillPhase {
+        switch dictationPhase {
+        case .idle:
+            Self.settledPillPhases[latestHandoffState?.phase ?? .idle] ?? .idle
+        case .requested: .requested
+        case .recording: .recording
+        case .transcribing: .transcribing
+        case .finished: .inserting
+        case .failed: .failed
+        }
+    }
+
+    /// Whether the wide pill in the strip stops and saves the dictation right now: while it records, and not
+    /// once a stop or a cancel is on its way.
+    var canStopFromStatusPill: Bool {
+        TypingStripPill.isTappable(phase: pillPhase, stopRequested: isStopPending, cancelRequested: isCancelPending)
+    }
+
+    /// A tap on the strip's pill: the Record key's stop, behind the pill's own guard.
+    func stopFromStatusPill() {
+        refreshLatestDictation()
+        guard canStopFromStatusPill else { return }
+        stopActiveDictation()
+    }
+
     var selectedTranscriptionModel: KeyboardTranscriptionModelOption? {
         modelCatalog?.selectedModel
     }
@@ -310,7 +371,7 @@ final class KeyboardController {
             }
 
             guard textInserter != nil else { return }
-            insertText(result.text)
+            insertDictatedText(result.text)
             insertedRequestIDs.insert(result.requestID)
             try store.acknowledgeKeyboardDelivery(for: result.requestID)
             latestResultID = result.id
@@ -432,6 +493,7 @@ final class KeyboardController {
             prepareLaunchRequestIfNeeded()
             return
         }
+        guard !isStopPending, !isCancelPending else { return }
 
         MuesliHaptics.dictationStop()
         KeyboardDiagnosticsLog.record("intent.stop", [
@@ -445,6 +507,7 @@ final class KeyboardController {
                 message: "Stopping"
             ))
             try store.saveCommand(.init(requestID: activeRequestID, action: .stop))
+            pendingStopID = activeRequestID
             dictationPhase = .recording
             statusText = "Stopping"
             awaitCommandAcknowledgement(
@@ -455,6 +518,18 @@ final class KeyboardController {
         } catch {
             statusText = sharedStoreFailureMessage()
         }
+    }
+
+    /// A key typed on the Type page. It retires an Undo edit like any typing, but leaves the status text alone.
+    func insertTypedText(_ text: String) {
+        lastRewrite = nil
+        insertText(text)
+    }
+
+    func deleteTypedBackward() {
+        lastRewrite = nil
+        textDeleter?(1)
+        lastInsertedCharacterCount = 0
     }
 
     func insertSpace() {
@@ -571,6 +646,8 @@ final class KeyboardController {
                     self.refreshLiveTranscript()
                 case .handoffStatusChanged, .resultChanged, .ownershipChanged:
                     self.refreshLatestDictation()
+                case .typingSettingsChanged:
+                    self.loadTypingSettings()
                 case .commandChanged, .modelSelectionRequested:
                     break
                 }
@@ -1284,6 +1361,7 @@ final class KeyboardController {
             try? self.store.saveKeyboardHandoffState(recovery)
             self.latestHandoffState = recovery
             self.canUseRuntimeStart = false
+            if self.pendingStopID == requestID { self.pendingStopID = nil }
             self.recoveryRequestID = requestID
             self.activeRequestID = nil
             self.dictationPhase = .failed
@@ -1339,7 +1417,7 @@ final class KeyboardController {
             return
         }
         textDeleter?(deleteCount)
-        insertText(text)
+        insertDictatedText(text)
         statusText = "Undone"
     }
 
@@ -1350,24 +1428,38 @@ final class KeyboardController {
     private func deliver(_ result: DictationResult) -> Bool {
         guard let rewrite = result.rewrite else {
             lastRewrite = nil
-            insertText(result.text)
+            insertDictatedText(result.text)
             return true
         }
         let current = textContextProvider?() ?? KeyboardTextContext()
         switch RewritePlanner.plan(context: rewrite, current: current, rewritten: result.text) {
         case .replaceSelection(let text):
-            insertText(text)
+            insertDictatedText(text)
             lastRewrite = RewriteUndo(original: rewrite.original, rewritten: text)
             return true
         case .replaceBeforeCursor(let deleteCount, let text):
             textDeleter?(deleteCount)
-            insertText(text)
+            insertDictatedText(text)
             lastRewrite = RewriteUndo(original: rewrite.original, rewritten: text)
             return true
         case .stale:
             KeyboardDiagnosticsLog.record("rewrite.skipped", ["reason": "fieldChanged"])
             return false
         }
+    }
+
+    /// Text Muesli writes itself (a transcript, a rewrite, an Undo edit): never autocorrected, and a pending
+    /// autocorrect undo is retired.
+    func insertDictatedText(_ text: String) {
+        insertText(text)
+        typing.engine.noteExternalInsertion()
+    }
+
+    /// Reads the typing settings the app published. Unreadable (Full Access off) or never published means the
+    /// default: autocorrect on.
+    func loadTypingSettings() {
+        let settings = (try? store.keyboardTypingSettings()) ?? nil
+        typing.autocorrectEnabled = (settings ?? .default).autocorrect
     }
 
     private func insertText(_ text: String) {

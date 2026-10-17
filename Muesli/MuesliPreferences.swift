@@ -8,6 +8,7 @@ enum MuesliPreferences {
 
     static let keyboardSessionModeKey = "muesli.keyboardSession.enabled"
     static let keyboardMicAutoOffMinutesKey = "muesli.keyboardSession.autoOffMinutes"
+    static let keyboardAutocorrectKey = "muesli.keyboard.autocorrect"
     static let retiredKeyboardSessionModeKey = "muesli.keyboardSession.keepReadyBetweenDictations"
 
     static func migrateKeyboardSessionPreference(in defaults: UserDefaults = .standard) {
@@ -33,6 +34,11 @@ enum MuesliPreferences {
     static let customLLMBaseURLKey = "muesli.meetings.summary.customLLM.baseURL"
     static let customLLMModelKey = "muesli.meetings.summary.customLLM.model"
     static let remoteProcessingEnabledKey = "muesli.transcription.remoteProcessing.enabled"
+    /// Opt-in diagnostics shipping to the user's own server. Off by default.
+    static let diagnosticsShippingEnabledKey = "muesli.diagnostics.shipping.enabled"
+    /// The host the user said they trust although it does not look private. A different host needs a new answer.
+    static let diagnosticsAcknowledgedHostKey = "muesli.diagnostics.shipping.acknowledgedHost"
+    static let diagnosticsDeviceIDKey = "muesli.diagnostics.deviceID"
     static let meetingTemplateKey = "muesli.meetings.template"
     static let iCloudSyncEnabledKey = "muesli.sync.icloud.enabled"
     static let pinnedSectionsKey = "muesli.navigation.pinnedSections"
@@ -65,6 +71,12 @@ enum MuesliPreferences {
     static var keyboardMicAutoOffMinutes: Int {
         let stored = UserDefaults.standard.object(forKey: keyboardMicAutoOffMinutesKey) as? Int
         return KeyboardMicAutoOff.resolved(minutes: stored ?? KeyboardMicAutoOff.defaultMinutes)
+    }
+
+    /// Autocorrect on the Muesli keyboard. On until the user turns it off; the keyboard reads it from the shared
+    /// store, which the coordinator fills from here.
+    static var keyboardAutocorrectEnabled: Bool {
+        bool(for: keyboardAutocorrectKey, defaultValue: true)
     }
 
     static var keyboardSessionModeEnabled: Bool {
@@ -167,6 +179,31 @@ enum MuesliPreferences {
     /// Opt-in, off by default. Reads the stored choice only; `isRemoteProcessingActive` also needs an endpoint.
     static var remoteProcessingEnabled: Bool {
         bool(for: remoteProcessingEnabledKey, defaultValue: false)
+    }
+
+    static var diagnosticsShippingEnabled: Bool {
+        bool(for: diagnosticsShippingEnabledKey, defaultValue: false)
+    }
+
+    static var diagnosticsAcknowledgedHost: String? {
+        let host = UserDefaults.standard.string(forKey: diagnosticsAcknowledgedHostKey) ?? ""
+        return host.isEmpty ? nil : host
+    }
+
+    /// A random id for this install, made on first use. Not tied to the Apple ID, the device name or iCloud.
+    static var diagnosticsDeviceID: String {
+        let defaults = UserDefaults.standard
+        if let existing = defaults.string(forKey: diagnosticsDeviceIDKey), UUID(uuidString: existing) != nil {
+            return existing
+        }
+        return resetDiagnosticsDeviceID()
+    }
+
+    @discardableResult
+    static func resetDiagnosticsDeviceID() -> String {
+        let fresh = UUID().uuidString
+        UserDefaults.standard.set(fresh, forKey: diagnosticsDeviceIDKey)
+        return fresh
     }
 
     static var hasCustomLLMEndpoint: Bool {
