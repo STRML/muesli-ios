@@ -3,11 +3,18 @@
 An opt-in way to send Muesli's event log to **your own server**, so a dictation that did not save can be traced
 after the fact. Off by default. No third-party service. No content.
 
+To run the server side, see [diagnostics-receiver.md](diagnostics-receiver.md). Settings > About > Diagnostics links
+to it ("How to set up a receiver").
+
 ## What it is and is not
 
 - **Off by default.** Settings > About > Diagnostics > "Send diagnostics to my server".
-- **Only to the address you set.** It reuses the Server URL and API key from Settings > AI Summaries (the Custom LLM
-  server) and posts to `<Server URL>/diagnostics`, for example `https://studio.tail13013.ts.net/v1/diagnostics`.
+- **Only to the address you set.** Settings > About > Diagnostics shows the full address the batches post to, for
+  example `https://studio.tail13013.ts.net/v1/diagnostics`, and says where it came from. It is the **Diagnostics
+  server** field when that is filled in, otherwise the Server URL under Settings > AI Summaries (the Custom LLM
+  server). Either way the route is `<address>/diagnostics`: a base such as `https://host/v1`, or a pasted full path,
+  gives the same URL. A Diagnostics server that is not an https address is shown as an error and is never replaced by
+  the AI Summaries server. The API key is always the one under AI Summaries.
   HTTPS only. Redirects are refused, so the key cannot be forwarded to another host. If the address does not look
   private (not loopback, LAN, Tailscale or `.local`), nothing is sent until you confirm that you trust that host,
   and the confirmation is for that host only.
@@ -163,7 +170,7 @@ Headers: `Authorization: Bearer <API key>` (omitted when the key is empty), `Con
   this phone's log (the newest 600) that have not been sent, including ones from before you turned this on, and tries
   once even if the uploader is waiting or stopped.
 - **Turning it off** deletes the queue and every trace of progress. Removing the server address does the same.
-- **Changing the server address** discards the queue (it was gathered for the old server) and starts from now at the
+- **Changing the server address** (in either field) discards the queue (it was gathered for the old server) and starts from now at the
   new one. Changing only the key keeps the queue and lifts a stop.
 - **Reset device ID** makes a new random ID, restarts `seq` at 1 and discards unsent events.
 - The log file is read with a hash per line, so the app and the keyboard can write it while it is read; a half-written

@@ -40,6 +40,8 @@ enum MuesliPreferences {
     static let diagnosticsShippingEnabledKey = "muesli.diagnostics.shipping.enabled"
     /// The host the user said they trust although it does not look private. A different host needs a new answer.
     static let diagnosticsAcknowledgedHostKey = "muesli.diagnostics.shipping.acknowledgedHost"
+    /// Where diagnostics go when the user does not want the AI Summaries server. Empty means use that one.
+    static let diagnosticsEndpointURLKey = "muesli.diagnostics.shipping.endpointURL"
     static let diagnosticsDeviceIDKey = "muesli.diagnostics.deviceID"
     static let meetingTemplateKey = "muesli.meetings.template"
     static let iCloudSyncEnabledKey = "muesli.sync.icloud.enabled"
@@ -196,6 +198,11 @@ enum MuesliPreferences {
 
     static var diagnosticsShippingEnabled: Bool {
         bool(for: diagnosticsShippingEnabledKey, defaultValue: false)
+    }
+
+    static var diagnosticsEndpointURL: String {
+        (UserDefaults.standard.string(forKey: diagnosticsEndpointURLKey) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     static var diagnosticsAcknowledgedHost: String? {

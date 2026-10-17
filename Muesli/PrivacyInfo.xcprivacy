@@ -4,7 +4,7 @@
 <!--
 	Diagnostics shipping (off by default, opt-in in Settings > About): the app can send its event log, with a random
 	per-install device ID, the app and iOS version, the hardware model and the thermal state, to the single server
-	address the user sets under AI Summaries, over HTTPS. It is never sent to the developer or any third party, and
+	address the user sets (a Diagnostics server field, or the AI Summaries server), over HTTPS. It is never sent to the developer or any third party, and
 	it contains no transcripts, text, audio, contacts or device name. Details: docs/diagnostics-shipping.md.
 	The OtherDiagnosticData entry below already covers diagnostic data; no new collected data type is declared
 	because nothing reaches a server the developer controls.
