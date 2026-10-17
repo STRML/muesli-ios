@@ -27,7 +27,8 @@ enum TypingSurface: Sendable, Equatable {
     case type
     case dictate
 
-    /// Minimal always shows the Dictate page. Setup verification needs the Dictate page's Verify row, whichever page was last chosen. A running
+    /// Minimal always shows the Dictate page; Full shows it too while a dictation records or transcribes, unless
+    /// the user took the Type page back for it (`holdsTypePage`). Setup verification needs the Dictate page's Verify row, whichever page was last chosen. A running
     /// dictation shows on both pages, so it never forces one.
     static func resolve(
         layout: KeyboardLayout,
@@ -36,10 +37,19 @@ enum TypingSurface: Sendable, Equatable {
         phase: TypingPillPhase,
         holdsTypePage: Bool
     ) -> TypingSurface {
-        // STUB: the old rule, which ignores the dictation phase and the hold.
+        // Minimal has one page.
         guard layout.offersTypePage else { return .dictate }
         let isActive = [TypingPillPhase.requested, .recording, .transcribing].contains(phase)
-        return hasPendingSetupVerification && !isActive ? .dictate : selected
+        // Setup verification needs the Dictate page's Verify row at rest. A start still being requested shows the
+        // page the user was on.
+        if hasPendingSetupVerification && !isActive { return .dictate }
+        // While the mic is live or the final pass runs, Full shows the familiar Dictate page. This is derived from
+        // the phase, never stored, so the user's chosen page is untouched and comes back when the dictation ends.
+        // Not on `requested`, so a start that fails never flashes it, and not once the user took the Type page
+        // back (ABC) for this dictation.
+        let showsDictation = phase == .recording || phase == .transcribing
+        if selected == .type, showsDictation, !holdsTypePage { return .dictate }
+        return selected
     }
 }
 

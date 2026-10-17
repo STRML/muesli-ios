@@ -39,6 +39,8 @@ final class KeyboardSnapshotTests: XCTestCase {
         var lockCaps = false
         var width: CGFloat = 393
         var layout: KeyboardLayout = .full
+        /// ABC was tapped during the dictation.
+        var takesTypePageBack = false
     }
 
 
@@ -105,6 +107,7 @@ final class KeyboardSnapshotTests: XCTestCase {
             field = KeyboardTextContext()
         }
         controller.selectedSurface = scene.surface
+        if scene.takesTypePageBack { controller.showTypePage() }
         if let before = scene.before { controller.typing.document.beforeReader = { before } }
         controller.typing.setDocumentLanguage("en-US")
         controller.typing.engine.apply(traits: scene.traits)
@@ -192,6 +195,8 @@ final class KeyboardSnapshotTests: XCTestCase {
                   surface: .type),
             Scene(name: "full-recording-landscape", setup: .listening, rewriteAvailable: true,
                   liveText: "so the plan for tomorrow is to pick up the parts first", surface: .type, width: 852),
+            Scene(name: "full-recording-abc", setup: .listening, rewriteAvailable: true, surface: .type,
+                  takesTypePageBack: true),
             Scene(name: "full-recording-edit", setup: .editListening, rewriteAvailable: true, surface: .type),
             Scene(name: "full-transcribing", setup: .transcribing, rewriteAvailable: true,
                   liveText: "so the plan for tomorrow is to pick up the parts first and then head over to the shop",

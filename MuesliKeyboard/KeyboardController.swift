@@ -50,6 +50,8 @@ final class KeyboardController {
         didSet {
             // A running dictation owns the strip, so suggestions stop being computed or tappable.
             typing.setSuggestionsSuspended(showsActiveWaveform)
+            // Taking the Type page back lasts for one dictation.
+            if dictationPhase != .recording, dictationPhase != .transcribing { holdsTypePageThisDictation = false }
             // The preview's elapsed time counts from when this keyboard saw recording begin.
             if dictationPhase == .recording, oldValue != .recording {
                 recordingStartedAt = Date()
@@ -114,11 +116,16 @@ final class KeyboardController {
             holdsTypePage: holdsTypePageThisDictation
         )
     }
-    /// STUB.
+    /// The user tapped ABC while Full was showing the Dictate page for a dictation: the Type page stays for the rest
+    /// of that dictation and the next one switches again. Never written anywhere; it ends with the dictation.
     private(set) var holdsTypePageThisDictation = false
-    /// STUB: the ABC key.
+
+    /// The ABC key on the Dictate page. A plain page choice (remembered like any), and when a dictation is on
+    /// screen it is also held for the rest of that dictation, so the page does not jump back under the thumb.
     func showTypePage() {
+        guard layout.offersTypePage else { return }
         selectedSurface = .type
+        if dictationPhase == .recording || dictationPhase == .transcribing { holdsTypePageThisDictation = true }
     }
     /// The layout the keyboard is showing: Full until an appearance reads another from the shared store. It
     /// changes only at an appearance, never while the keyboard is up (`loadTypingSettings(appliesLayout:)`).

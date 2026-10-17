@@ -181,17 +181,25 @@ final class KeyboardDictationSurfaceTests: XCTestCase {
         XCTAssertEqual(rememberedPage, "type")
     }
 
-    // C8: setup verification forces Dictate before, during and after a dictation.
+    // C8: setup verification forces Dictate before, during and after a dictation. (The presentation refresh reads the
+    // challenge back from its own store, which this test does not fill, so it is set again after each step.)
     func testSetupVerificationShowsTheDictatePageThroughout() throws {
-        let now = Date()
-        controller.setupVerificationChallenge = KeyboardSetupVerificationChallenge(
-            id: UUID(), createdAt: now, expiresAt: now.addingTimeInterval(600))
+        func verify() {
+            let now = Date()
+            controller.setupVerificationChallenge = KeyboardSetupVerificationChallenge(
+                id: UUID(), createdAt: now, expiresAt: now.addingTimeInterval(600))
+        }
+        verify()
         XCTAssertEqual(controller.surface, .dictate)
         try requestStart()
+        verify()
+        XCTAssertEqual(controller.surface, .type, "a start still being requested is not forced")
         try enter(.recordingStarted, runtime: .recording)
+        verify()
         XCTAssertEqual(controller.surface, .dictate)
         try store.saveResult(.init(requestID: requestID, text: "Hello.", engineIdentifier: "test"))
         try enter(.inserted, runtime: .idle)
+        verify()
         XCTAssertEqual(controller.surface, .dictate)
         XCTAssertNil(rememberedPage)
     }

@@ -372,7 +372,7 @@ struct KeyboardRootView: View {
 
                 // Minimal has no typing keyboard to go back to; the space key takes the width.
                 if controller.layout.offersTypePage {
-                    KeyboardTextKey("ABC") { controller.selectedSurface = .type }
+                    KeyboardTextKey("ABC") { controller.showTypePage() }
                         .frame(maxWidth: 66)
                         .accessibilityHint("Back to the typing keyboard")
                 }
