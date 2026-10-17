@@ -111,6 +111,9 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         appearanceGuard.beginAppearance()
+        // The layout is chosen here, before the launch snapshot is drawn, and nowhere else: a change in Settings
+        // shows the next time the keyboard opens. Without Full Access this read fails and the keyboard is Full.
+        controller.loadTypingSettings(appliesLayout: true)
         controller.isLaunchSettled = false
         controller.prepareInitialPresentationState()
         refreshLaunchSnapshot()
@@ -119,7 +122,6 @@ final class KeyboardViewController: UIInputViewController {
         super.viewWillAppear(animated)
 
         refreshTypingTraits()
-        controller.loadTypingSettings()
         controller.typing.loadLexicon(from: self)
 
         isKeyboardPresented = true

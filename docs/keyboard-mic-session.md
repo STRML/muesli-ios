@@ -196,6 +196,42 @@ Partials come from Parakeet Realtime EOU 120M (`LivePreviewEnginePolicy`):
 - Its text is only ever the preview and the short-dictation fallback. A long voice note
   streamed by it still gets the selected model's pass, as before.
 
+## Keyboard layout and the Dictate page during a dictation
+
+Settings, Keyboard has a "Keyboard layout" row: **Full** (default) or **Minimal**. It is stored as
+`muesli.keyboard.layout` and published in `KeyboardTypingSettings.layout` through the shared store,
+like Autocorrect and live typing.
+
+- **Full**: the Type page (QWERTY, suggestion strip, autocorrect, Record and Fix) and the Dictate page,
+  which a 3 s hold on the Record key opens. The last page chosen is remembered.
+- **Minimal**: the Dictate page only. No Type page, no hold, no suggestion strip, no ABC key, and the
+  remembered page is neither read nor written, so switching back to Full finds it as it was.
+- Both keep the 262 pt shared height. Setup verification forces the Dictate page in both layouts.
+- The keyboard reads the layout once per appearance (`viewWillAppear`, before the launch snapshot), so a
+  change in Settings shows the next time the keyboard opens. The `typingSettingsChanged` event still
+  updates autocorrect and live typing at once, but never the layout.
+- Without Full Access the shared store is unreachable, the read fails, and the keyboard is Full. The
+  same holds for a missing, unknown or wrongly typed value; a bad layout value does not cost the user
+  their autocorrect or live-typing choice.
+
+While a dictation records or transcribes in Full, the keyboard shows the Dictate page (the view Minimal always
+shows: big pill, stop key, punctuation, globe), and the Type page returns when the dictation ends (inserted,
+failed, cancelled, copy required). `TypingSurface.resolve` decides it from the dictation phase.
+
+- It is derived, never stored: the remembered page (`keyboard.selectedSurface`) is untouched, so the page the
+  user chose is the page they get back.
+- It starts on `recording`, not `requested`, so a start that fails never flashes the Dictate page. It stays
+  through `transcribing`, which includes the live-typing final replacement (`resultReady` is mapped to
+  transcribing).
+- A user who holds the Dictate page by choice is not moved.
+- ABC on the Dictate page (Full only) is honoured: the Type page stays for the rest of that dictation (letters
+  are there again, and a typed letter yields the live words as in PR 18) and the next dictation switches again.
+  This flag lives in memory and ends with the dictation; a keyboard recreated mid-dictation shows the Dictate page.
+
+While the Dictate page is up for a dictation, letters and shift do not exist, so the live-typing rows that start
+from a typed letter apply only after ABC. Its space, return, punctuation and delete keys still take the live words
+out of the field and the dictation continues strip-only (`KeyboardDictationSurfaceTypingTests`).
+
 ## Live typing
 
 With "Type live into the field" on (Settings, Keyboard; on by default; stored as
