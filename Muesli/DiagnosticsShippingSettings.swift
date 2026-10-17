@@ -6,14 +6,18 @@ struct DiagnosticsShippingSettings: View {
     @AppStorage(MuesliPreferences.diagnosticsShippingEnabledKey) private var enabled = false
     @AppStorage(MuesliPreferences.diagnosticsAcknowledgedHostKey) private var acknowledgedHost = ""
     @AppStorage(MuesliPreferences.customLLMBaseURLKey) private var baseURL = ""
+    @AppStorage(MuesliPreferences.diagnosticsEndpointURLKey) private var endpointOverride = ""
     @ObservedObject private var shipper = DiagnosticsShipper.shared
 
-    private var endpointHost: String? {
-        CustomLLMEndpoint.diagnosticsURL(from: baseURL)?.host?.lowercased()
+    private var resolution: DiagnosticsServerResolution {
+        DiagnosticsServerResolver.resolve(override: endpointOverride, aiSummariesBaseURL: baseURL)
     }
 
+    private var server: ResolvedDiagnosticsServer? { resolution.server }
+
     private var publicWarning: String? {
-        endpointHost == nil ? nil : RemoteTranscriptionPolicy.publicEndpointWarning(baseURL: baseURL)
+        guard let server, !server.looksPrivate else { return nil }
+        return RemoteTranscriptionPolicy.publicEndpointWarningText
     }
 
     var body: some View {
@@ -34,18 +38,18 @@ struct DiagnosticsShippingSettings: View {
                     )
                     .accessibilityIdentifier("settings.diagnostics.toggle")
 
-                    SettingsRow(
+                    SettingsTextFieldRow(
                         icon: "link",
-                        title: "Server",
-                        value: endpointHost ?? "Not set"
+                        title: DiagnosticsShippingCopy.serverFieldTitle,
+                        placeholder: DiagnosticsShippingCopy.serverFieldPlaceholder,
+                        text: $endpointOverride
                     )
-                    .accessibilityIdentifier("settings.diagnostics.endpoint")
+                    .keyboardType(.URL)
+                    .accessibilityIdentifier("settings.diagnostics.endpointField")
 
-                    if endpointHost == nil {
-                        note(DiagnosticsShippingCopy.noEndpoint)
-                    }
+                    destination
 
-                    if let publicWarning, let host = endpointHost {
+                    if let publicWarning, let host = server?.host {
                         Label(publicWarning, systemImage: "exclamationmark.triangle")
                             .font(MuesliTheme.caption())
                             .foregroundStyle(MuesliTheme.destructive)
@@ -58,6 +62,13 @@ struct DiagnosticsShippingSettings: View {
                             isOn: acknowledgementBinding(for: host)
                         )
                         .accessibilityIdentifier("settings.diagnostics.acknowledge")
+                    }
+
+                    if let guide = URL(string: DiagnosticsShippingCopy.receiverGuideURL) {
+                        Link(destination: guide) {
+                            rowLabel(DiagnosticsShippingCopy.receiverGuideTitle, icon: "book", trailing: nil)
+                        }
+                        .accessibilityIdentifier("settings.diagnostics.receiverGuide")
                     }
 
                     if enabled {
@@ -76,6 +87,36 @@ struct DiagnosticsShippingSettings: View {
         }
         .onChange(of: enabled) { _, _ in shipper.settingsChanged() }
         .onChange(of: baseURL) { _, _ in shipper.settingsChanged() }
+        .onChange(of: endpointOverride) { _, _ in shipper.settingsChanged() }
+    }
+
+    /// The full address the batches are posted to, and where it came from. Never just a host.
+    @ViewBuilder
+    private var destination: some View {
+        switch resolution {
+        case .resolved(let server):
+            VStack(alignment: .leading, spacing: MuesliTheme.spacing4) {
+                Text(DiagnosticsShippingCopy.sendsToTitle)
+                    .font(MuesliTheme.caption())
+                    .foregroundStyle(MuesliTheme.textSecondary)
+                Text(server.url.absoluteString)
+                    .font(MuesliTheme.callout())
+                    .foregroundStyle(MuesliTheme.textPrimary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("settings.diagnostics.endpoint")
+                note(server.source == .ownField ? DiagnosticsShippingCopy.fromOwnField : DiagnosticsShippingCopy.fromAISummaries)
+            }
+        case .invalidOverride:
+            Label(DiagnosticsShippingCopy.invalidOverride, systemImage: "exclamationmark.circle")
+                .font(MuesliTheme.caption())
+                .foregroundStyle(MuesliTheme.destructive)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("settings.diagnostics.invalidOverride")
+        case .none:
+            note(DiagnosticsShippingCopy.noEndpoint)
+                .accessibilityIdentifier("settings.diagnostics.endpoint")
+        }
     }
 
     @ViewBuilder
