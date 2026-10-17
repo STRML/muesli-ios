@@ -17,6 +17,7 @@ struct MuesliApp: App {
     init() {
         _coordinator = State(initialValue: DictationCoordinator())
         AppTelemetry.configure()
+        DiagnosticsSystemObservers.install()
     }
 
     var body: some Scene {
@@ -33,6 +34,7 @@ struct MuesliApp: App {
                 #endif
             }
                 .task {
+                    DiagnosticsShipper.shared.settingsChanged()
                     #if DEBUG && targetEnvironment(simulator)
                     coordinator.startLiveActivityWaveformPreviewIfRequested()
                     #endif
@@ -56,6 +58,7 @@ struct MuesliApp: App {
                 }
                 .onChange(of: scenePhase) { _, phase in
                     coordinator.recordCaptureLifecycle("scene.\(phase)")
+                    if phase == .background { DiagnosticsShipper.shared.sceneDidEnterBackground() }
                     if phase == .active {
                         coordinator.copyPendingDictationIfActive()
                         #if DEBUG && targetEnvironment(simulator)

@@ -17,6 +17,10 @@ import os
 /// **Never record transcript text.** Phases, identifiers, and timings only. A
 /// diagnostics buffer full of what people dictated is a liability the moment a
 /// tester pastes it into a chat.
+///
+/// With "Ship diagnostics" on, the app uploads this file to the user's own server, line by line, through an
+/// allowlist (`DiagnosticsVocabulary`). A new event name has to be added there or it is never uploaded, and the
+/// file format is owned by `DiagnosticsLogFormat`, which the uploader reads back.
 enum KeyboardDiagnosticsLog {
     /// Roughly a few dictation sessions' worth of history -- enough to see how a
     /// session got into a bad state, small enough to stay cheap to rewrite.
@@ -44,15 +48,17 @@ enum KeyboardDiagnosticsLog {
         var detail = detail
         if let captureRequestID { detail["capture_request"] = captureRequestID }
         if let intentInvocationID { detail["intent_invocation"] = intentInvocationID }
-        let rendered = detail
-            .sorted { $0.key < $1.key }
-            .map { "\($0.key)=\(sanitize($0.value))" }
-            .joined(separator: " ")
+        let rendered = DiagnosticsLogFormat.renderDetail(detail)
 
         logger.debug("\(event, privacy: .public) \(rendered, privacy: .public)")
 
-        let fields = [process, event, rendered].filter { !$0.isEmpty }
-        queue.async { append(fields: fields, at: date) }
+        let line = DiagnosticsLogFormat.line(date: date, process: process, event: event, detail: detail)
+        queue.async { append(line: line) }
+    }
+
+    /// Records one of the stop-to-save events built by `DiagnosticsEvents`.
+    static func record(_ record: DiagnosticsRecord) {
+        self.record(record.name, record.fields)
     }
 
     /// The buffer as text, oldest first, for export or a debug screen.
@@ -84,15 +90,13 @@ enum KeyboardDiagnosticsLog {
     /// Appends, then trims to the newest `entryLimit` lines. Rewriting a
     /// bounded file is cheaper than the bookkeeping needed to avoid it, and
     /// this runs off the main thread.
-    private static func append(fields: [String], at date: Date) {
+    ///
+    /// The app, the keyboard and the intents each have their own `queue`, so this read-modify-write is not
+    /// serialized across processes and one can overwrite the other's newest line (known limit). A cross-process
+    /// `flock` would fix that, but holding a file lock in the app-group container across a suspension is a known
+    /// 0xdead10cc kill, so it is deliberately not used.
+    private static func append(line: String) {
         guard let url = fileURL() else { return }
-
-        // Built here rather than held as shared state: ISO8601DateFormatter is
-        // not Sendable, and this is the only context that touches it.
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let line = ([formatter.string(from: date)] + fields).joined(separator: "\t")
-
         var lines = (try? String(contentsOf: url, encoding: .utf8))?
             .split(separator: "\n", omittingEmptySubsequences: true)
             .map(String.init) ?? []
@@ -125,12 +129,5 @@ enum KeyboardDiagnosticsLog {
             try? Data((lines.joined(separator: "\n") + "\n").utf8).write(to: mirror, options: .atomic)
         }
         #endif
-    }
-
-    private static func sanitize(_ value: String) -> String {
-        let collapsed = value
-            .replacingOccurrences(of: "\n", with: " ")
-            .replacingOccurrences(of: "\t", with: " ")
-        return collapsed.count <= 64 ? collapsed : String(collapsed.prefix(64)) + "..."
     }
 }

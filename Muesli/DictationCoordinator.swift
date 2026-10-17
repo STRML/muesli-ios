@@ -35,6 +35,8 @@ private enum RecordingStartOutcome: Sendable, Equatable {
 @Observable
 final class DictationCoordinator {
     private var recordingStartupInProgress = false
+    /// Who last cancelled a dictation, so the task that finds its request gone can say why.
+    private var lastDictationCancel: (request: UUID, source: DictationCancelSource)?
     private static let onboardingCompletedKey = "muesli.onboarding.completed"
     private static let userNameKey = "muesli.onboarding.userName"
     private static let useCaseKey = "muesli.onboarding.useCase"
@@ -1500,7 +1502,7 @@ final class DictationCoordinator {
                 phase: .cancelled,
                 message: "Cancelled"
             )
-            cancelRecording(requestID: requestID)
+            cancelRecording(requestID: requestID, source: .keyboardCommand)
             return
         }
         if action == MuesliAppConstants.stopAction {
@@ -2633,7 +2635,7 @@ final class DictationCoordinator {
         guard let request = activeRequest else { return }
         let source = isKeyboardHandoffActive ? "keyboard" : "app"
         MuesliHaptics.dictationStop()
-        cancelRecording(requestID: request.id)
+        cancelRecording(requestID: request.id, source: .appUser)
         AppTelemetry.signal("dictation_cancelled", parameters: ["source": source])
     }
 
@@ -5357,7 +5359,13 @@ final class DictationCoordinator {
     ) {
         beginTranscriptionBackgroundTask()
         let task = Task {
-            defer { endTranscriptionBackgroundTask() }
+            let trace = DictationExitTrace(requestID: request.id) { KeyboardDiagnosticsLog.record($0) }
+            trace.reach(.transcribing)
+            let transcriptionStartedAt = ContinuousClock.now
+            defer {
+                endTranscriptionBackgroundTask()
+                trace.closeIfOpen()
+            }
 
             do {
                 await engine.selectModel(selectedTranscriptionModel)
@@ -5365,7 +5373,13 @@ final class DictationCoordinator {
                     sessionID: session.id,
                     requestID: request.id,
                     runnerID: lifecycleRunnerID
-                ) else { return }
+                ) else {
+                    finishLifecycleLost(trace)
+                    return
+                }
+                KeyboardDiagnosticsLog.record(DiagnosticsEvents.transcriptionStarted(
+                    request: request.id, model: engine.identifier, audioMs: nil
+                ))
                 saveKeyboardHandoff(
                     requestID: request.id,
                     phase: .transcribingStarted,
@@ -5404,9 +5418,20 @@ final class DictationCoordinator {
                     sessionID: session.id,
                     requestID: request.id,
                     runnerID: lifecycleRunnerID
-                ) else { return }
+                ) else {
+                    finishLifecycleLost(trace)
+                    return
+                }
                 let text = postProcessTranscript(rawText)
+                KeyboardDiagnosticsLog.record(DiagnosticsEvents.transcriptionFinished(
+                    request: request.id,
+                    model: engine.identifier,
+                    durationMs: Self.milliseconds(since: transcriptionStartedAt),
+                    source: .onDevice,
+                    characters: text.count
+                ))
                 let delivery = try await finalDeliveryText(for: request, transcript: text)
+                trace.reach(.persisting)
                 let savedTranscript = Transcript(
                     sessionID: session.id,
                     text: text,
@@ -5444,9 +5469,15 @@ final class DictationCoordinator {
                     rewrite: delivery.rewrite
                 )
                 try store.saveResult(result)
+                KeyboardDiagnosticsLog.record(DiagnosticsEvents.resultPersisted(
+                    request: request.id, historyID: completedSession.id, characters: delivery.text.count
+                ))
                 scheduleICloudSyncAfterLocalChange(reason: "dictation_completed")
+                trace.reach(.delivering)
                 deliverKeyboardTranscript(delivery.text, requestID: request.id)
                 try store.clearPendingRequest(matching: request.id)
+                trace.reach(.completed)
+                trace.finish(.saved)
                 activeRequest = nil
                 activeSession = nil
                 transitionKeyboardSession(.requestFinished)
@@ -5473,8 +5504,12 @@ final class DictationCoordinator {
                     sessionID: session.id,
                     requestID: request.id,
                     runnerID: lifecycleRunnerID
-                ) else { return }
+                ) else {
+                    finishLifecycleLost(trace)
+                    return
+                }
                 let failureReason = voiceNoteFailureReason(for: error)
+                finishFailedDictation(trace, error: error, failure: failureReason, startedAt: transcriptionStartedAt)
                 _ = await persistVoiceNoteFailure(
                     session,
                     reason: failureReason,
@@ -5523,7 +5558,13 @@ final class DictationCoordinator {
     }
 
     private func stopRecording(requestID: UUID) {
-        guard !rejectConflictingKeyboardCommand(requestID: requestID, action: .stop) else { return }
+        KeyboardDiagnosticsLog.record(DiagnosticsEvents.stopReceived(
+            request: requestID, source: isKeyboardHandoffActive ? "keyboard" : "app"
+        ))
+        guard !rejectConflictingKeyboardCommand(requestID: requestID, action: .stop) else {
+            KeyboardDiagnosticsLog.record(DiagnosticsEvents.stopIgnored(request: requestID, reason: .conflictingCommand))
+            return
+        }
 
         // A Stop delivered after relaunch has no live recorder to stop. Resolve
         // persisted work before adopting its ID; otherwise adoption itself makes
@@ -5531,8 +5572,10 @@ final class DictationCoordinator {
         if !isRecording && !recordingStartupInProgress {
             let request = (try? store.pendingRequest()).flatMap { $0.id == requestID ? $0 : nil }
                 ?? DictationRequest(id: requestID)
-            if refreshActiveKeyboardRequestIfNeeded(request) { return }
-            if recoverKeyboardRequestIfNeeded(request) { return }
+            if refreshActiveKeyboardRequestIfNeeded(request) || recoverKeyboardRequestIfNeeded(request) {
+                KeyboardDiagnosticsLog.record(DiagnosticsEvents.stopIgnored(request: requestID, reason: .recoveredFromStorage))
+                return
+            }
             let message = "Recording was interrupted. Start a new dictation."
             try? store.saveStatus(.init(requestID: requestID, phase: .failed, message: message))
             saveKeyboardHandoff(requestID: requestID, phase: .failed, message: message)
@@ -5552,13 +5595,17 @@ final class DictationCoordinator {
             session = try? store.recordingSession(requestID: requestID)
         } else {
             let message = "No active recording found. Start a new voice note."
+            KeyboardDiagnosticsLog.record(DiagnosticsEvents.stopIgnored(request: requestID, reason: .noActiveRequest))
             statusText = message
             try? store.saveStatus(.init(requestID: requestID, phase: .failed, message: message))
             saveKeyboardHandoff(requestID: requestID, phase: .failed, message: message)
             return
         }
 
-        guard isRecording else { return }
+        guard isRecording else {
+            KeyboardDiagnosticsLog.record(DiagnosticsEvents.stopIgnored(request: requestID, reason: .notRecording))
+            return
+        }
 
         if let thresholdSession = session,
            !thresholdSession.isLongForm,
@@ -5575,7 +5622,10 @@ final class DictationCoordinator {
                   runner.sessionID == session.id,
                   runner.requestID == request.id,
                   transitionVoiceNoteLifecycle(.stopRequested(session.id))
-            else { return }
+            else {
+                KeyboardDiagnosticsLog.record(DiagnosticsEvents.stopIgnored(request: requestID, reason: .lifecycleRejected))
+                return
+            }
             lifecycleRunnerID = runner.id
             stopVoiceNoteRecordingTasks(sessionID: session.id)
             if session.isLongForm {
@@ -5590,6 +5640,7 @@ final class DictationCoordinator {
         } else {
             lifecycleRunnerID = nil
         }
+        let elapsedAtStop = currentRecordingElapsedTime()
         isRecording = false
         stopMetering()
         stopRecordingTimer()
@@ -5631,11 +5682,17 @@ final class DictationCoordinator {
             ? Result { try keyboardSessionKeeper.finishSegment() } : nil
         beginTranscriptionBackgroundTask()
         let transcriptionTask = Task {
+            // One `dictation.exit` event per request, whichever way this task leaves: see DictationExitTrace.
+            let trace = DictationExitTrace(requestID: request.id) { KeyboardDiagnosticsLog.record($0) }
+            trace.reach(.stopping)
+            var transcriptionStartedAt: ContinuousClock.Instant?
             defer {
                 endTranscriptionBackgroundTask()
+                trace.closeIfOpen()
             }
 
             do {
+                trace.reach(.finalizingAudio)
                 let usesCheckpointingRecorder = realtimeDictationRecorder != nil
                 let audioURL: URL
                 var finalCheckpoint: MeetingAudioChunk?
@@ -5660,6 +5717,14 @@ final class DictationCoordinator {
                 } else {
                     audioURL = try recorder.stop()
                 }
+                let audioFacts = AudioFileFacts.read(audioURL)
+                KeyboardDiagnosticsLog.record(DiagnosticsEvents.recordingStopped(
+                    request: request.id,
+                    durationMs: Int(elapsedAtStop * 1_000),
+                    samples: audioFacts?.frames ?? 0,
+                    bytes: audioFacts?.bytes ?? 0,
+                    fileWritten: audioFacts != nil
+                ))
                 // Both recorders have stopped feeding the pipe; finish whichever engine streamed.
                 let stream = try await endRealtimeDictationStream()
                 realtimeText = stream.text
@@ -5676,7 +5741,10 @@ final class DictationCoordinator {
                               requestID: request.id,
                               runnerID: lifecycleRunnerID
                           )
-                    else { return }
+                    else {
+                        finishLifecycleLost(trace)
+                        return
+                    }
                     longVoiceNoteCheckpointCount = manifest.entries.count
                     let checkpointFinalizationFailed = finalWriterFailure == .checkpointWrite
                         || finalWriterFailure == .checkpointRotation
@@ -5729,7 +5797,10 @@ final class DictationCoordinator {
                               requestID: request.id,
                               runnerID: lifecycleRunnerID
                           )
-                    else { return }
+                    else {
+                        finishLifecycleLost(trace)
+                        return
+                    }
                     currentSession.phase = .transcribing
                     currentSession.lastTranscriptionAttemptAt = .now
                     activeSession = currentSession
@@ -5739,6 +5810,11 @@ final class DictationCoordinator {
                     }
                 }
                 statusText = "Transcribing"
+                trace.reach(.transcribing)
+                transcriptionStartedAt = ContinuousClock.now
+                KeyboardDiagnosticsLog.record(DiagnosticsEvents.transcriptionStarted(
+                    request: request.id, model: engine.identifier, audioMs: audioFacts?.durationMs
+                ))
                 if startedFromKeyboard {
                     saveKeyboardHandoff(
                         requestID: request.id,
@@ -5796,6 +5872,17 @@ final class DictationCoordinator {
                     )
                 }
                 let text = decision.text
+                let textSource: TextSource = switch decision.source {
+                case .streaming: .streaming
+                case .finalPass(let isRemote): isRemote ? .remote : .onDevice
+                }
+                KeyboardDiagnosticsLog.record(DiagnosticsEvents.transcriptionFinished(
+                    request: request.id,
+                    model: engine.identifier,
+                    durationMs: Self.milliseconds(since: transcriptionStartedAt),
+                    source: textSource,
+                    characters: text.count
+                ))
                 let transcriptEngineIdentifier = decision.source == .finalPass(isRemote: true)
                     ? RemoteTranscriptionService.engineIdentifier
                     : engine.identifier
@@ -5809,10 +5896,14 @@ final class DictationCoordinator {
                               requestID: request.id,
                               runnerID: lifecycleRunnerID
                           )
-                    else { return }
+                    else {
+                        finishLifecycleLost(trace)
+                        return
+                    }
                 }
                 liveDictationTranscript = text
                 guard !isRecordingSessionCancelled(requestID: request.id) else {
+                    trace.finish(.cancelled, detail: cancelDetail(for: request.id))
                     if startedFromKeyboard {
                         saveKeyboardHandoff(requestID: request.id, phase: .cancelled, message: "Cancelled")
                         saveKeyboardRuntimeStatus(
@@ -5832,6 +5923,7 @@ final class DictationCoordinator {
                     transitionKeyboardSession(.transcribing(request.id))
                 }
                 let delivery = try await finalDeliveryText(for: request, transcript: text)
+                trace.reach(.persisting)
                 let completedSession = activeSession ?? session
                 let transcript: Transcript?
                 let resultCreatedAt: Date
@@ -5874,11 +5966,17 @@ final class DictationCoordinator {
                     rewrite: delivery.rewrite
                 )
                 try store.saveResult(result)
+                KeyboardDiagnosticsLog.record(DiagnosticsEvents.resultPersisted(
+                    request: request.id, historyID: completedSession?.id, characters: delivery.text.count
+                ))
                 scheduleICloudSyncAfterLocalChange(reason: "dictation_completed")
+                trace.reach(.delivering)
                 if startedFromKeyboard {
                     deliverKeyboardTranscript(delivery.text, requestID: request.id)
                 }
                 try store.clearPendingRequest(matching: request.id)
+                trace.reach(.completed)
+                trace.finish(.saved)
                 refreshHistory()
                 lastTranscript = text
                 activeRequest = nil
@@ -5934,10 +6032,14 @@ final class DictationCoordinator {
                               requestID: request.id,
                               runnerID: lifecycleRunnerID
                           )
-                    else { return }
+                    else {
+                        finishLifecycleLost(trace)
+                        return
+                    }
                 }
                 var failedVoiceNoteSession: RecordingSession?
                 let failureReason = voiceNoteFailureReason(for: error)
+                finishFailedDictation(trace, error: error, failure: failureReason, startedAt: transcriptionStartedAt)
                 if var session = activeSession ?? session {
                     session = await persistVoiceNoteFailure(
                         session,
@@ -7517,7 +7619,7 @@ final class DictationCoordinator {
                 phase: .cancelled,
                 message: "Cancelled"
             )
-            cancelRecording(requestID: command.requestID)
+            cancelRecording(requestID: command.requestID, source: .keyboardCommand)
             try? store.clearPendingCommand(ifMatching: command)
             return
         }
@@ -7736,6 +7838,10 @@ final class DictationCoordinator {
             state = KeyboardHandoffState(requestID: requestID, phase: phase, message: message)
         }
         try? store.saveKeyboardHandoffState(state)
+        // Progress updates rewrite the same phase many times a second; the log keeps the transitions only.
+        if previous?.requestID != requestID || previous?.phase != phase {
+            KeyboardDiagnosticsLog.record(DiagnosticsEvents.handoffSaved(request: requestID, phase: phase.rawValue))
+        }
     }
 
     private func saveKeyboardLiveTranscript(text: String, isFinal: Bool) {
@@ -7820,9 +7926,15 @@ final class DictationCoordinator {
         let extensionStatus = try? store.keyboardExtensionStatus()
         let session = try? store.recordingSession(requestID: requestID)
         let copiesActionButtonText = ActionButtonCaptureSource.isActionButton(session?.source)
-        let keyboardCanInsertDirectly = extensionStatus?.hasOpenAccess == true
-            && extensionStatus?.isVisible == true
-            && extensionStatus.map { Date.now.timeIntervalSince($0.lastSeenAt) < 3.5 } == true
+        let heartbeatAge = extensionStatus.map { Date.now.timeIntervalSince($0.lastSeenAt) }
+        let delivery = KeyboardDeliveryPolicy.decide(extensionStatus.map {
+            KeyboardExtensionPresence(
+                hasOpenAccess: $0.hasOpenAccess,
+                isVisible: $0.isVisible,
+                lastSeenAge: Date.now.timeIntervalSince($0.lastSeenAt)
+            )
+        })
+        let keyboardCanInsertDirectly = delivery.canInsertDirectly
 
         if keyboardCanInsertDirectly {
             // Shortcuts copies the returned result in the background. Copy here
@@ -7839,6 +7951,9 @@ final class DictationCoordinator {
                 phase: .resultReady,
                 message: "Ready to insert"
             )
+            KeyboardDiagnosticsLog.record(DiagnosticsEvents.deliveryOutcome(
+                request: requestID, route: .insertDirect, reason: delivery.reason, heartbeatAge: heartbeatAge
+            ))
         } else {
             let didCopy = copyTranscriptToPasteboard(text)
             clearKeyboardLiveTranscript()
@@ -7850,6 +7965,9 @@ final class DictationCoordinator {
             KeyboardDiagnosticsLog.record("dictation.delivery", [
                 "destination": didCopy ? "clipboard" : "foregroundCopyRequired"
             ])
+            KeyboardDiagnosticsLog.record(DiagnosticsEvents.deliveryOutcome(
+                request: requestID, route: didCopy ? .copied : .copyRequired, reason: delivery.reason, heartbeatAge: heartbeatAge
+            ))
         }
     }
 
@@ -7919,9 +8037,18 @@ final class DictationCoordinator {
                 self?.handleTranscriptionBackgroundTaskExpiration()
             }
         }
+        KeyboardDiagnosticsLog.record(DiagnosticsEvents.backgroundTask(
+            request: activeRequest?.id,
+            state: transcriptionBackgroundTask == .invalid ? .denied : .begin,
+            remaining: UIApplication.shared.backgroundTimeRemaining
+        ))
     }
 
     private func handleTranscriptionBackgroundTaskExpiration() {
+        // The OS is about to suspend the app. A dictation still transcribing at this point is the usual way one is lost.
+        KeyboardDiagnosticsLog.record(DiagnosticsEvents.backgroundTask(
+            request: activeRequest?.id, state: .expired, remaining: UIApplication.shared.backgroundTimeRemaining
+        ))
         defer { endTranscriptionBackgroundTask() }
         guard case .transcribing(let sessionID) = meetingLifecycleState.phase,
               let operationID = meetingLifecycleRunner?.id
@@ -7956,9 +8083,16 @@ final class DictationCoordinator {
         guard transcriptionBackgroundTask != .invalid else { return }
         UIApplication.shared.endBackgroundTask(transcriptionBackgroundTask)
         transcriptionBackgroundTask = .invalid
+        KeyboardDiagnosticsLog.record(DiagnosticsEvents.backgroundTask(
+            request: activeRequest?.id, state: .end, remaining: UIApplication.shared.backgroundTimeRemaining
+        ))
     }
 
-    private func cancelRecording(requestID: UUID) {
+    private func cancelRecording(requestID: UUID, source: DictationCancelSource) {
+        lastDictationCancel = (requestID, source)
+        KeyboardDiagnosticsLog.record(DiagnosticsEvents.cancelled(
+            request: requestID, by: source, stage: currentDictationStage(for: requestID)
+        ))
         guard activeRequest?.id == requestID else {
             if let pendingRequest = try? store.pendingRequest(), pendingRequest.id == requestID {
                 try? store.clearPendingRequest(matching: requestID)
@@ -8041,6 +8175,62 @@ final class DictationCoordinator {
         try? store.saveStatus(.idle)
         saveKeyboardHandoff(requestID: requestID, phase: .cancelled, message: "Cancelled")
         clearKeyboardLiveTranscript()
+    }
+
+    // MARK: Stop-to-save diagnostics
+
+    /// Where a request is in its life, for the `dictation.cancelled` event.
+    private func currentDictationStage(for requestID: UUID) -> DictationStage {
+        guard activeRequest?.id == requestID else { return .requested }
+        if recordingStartupInProgress && activeSession == nil { return .startup }
+        if isRecording { return .recording }
+        if statusText == "Transcribing" || voiceNoteLifecycleState.isWorkActive { return .transcribing }
+        return .requested
+    }
+
+    private func cancelDetail(for requestID: UUID) -> [String: String] {
+        let source = lastDictationCancel.flatMap { $0.request == requestID ? $0.source : nil } ?? .unknown
+        return ["cancel_by": source.rawValue]
+    }
+
+    /// The task found it no longer owns the request: a cancel took it, or something newer did.
+    private func finishLifecycleLost(_ trace: DictationExitTrace) {
+        if let cancel = lastDictationCancel, cancel.request == trace.requestID {
+            trace.finish(.cancelled, detail: ["cancel_by": cancel.source.rawValue])
+        } else {
+            trace.finish(.superseded)
+        }
+    }
+
+    private func finishFailedDictation(
+        _ trace: DictationExitTrace,
+        error: Error,
+        failure: VoiceNoteTranscriptionFailureReason,
+        startedAt: ContinuousClock.Instant?
+    ) {
+        if error is CancellationError {
+            let known = lastDictationCancel?.request == trace.requestID
+            trace.finish(.cancelled, detail: known ? cancelDetail(for: trace.requestID) : ["cancel_by": DictationCancelSource.taskCancelled.rawValue])
+            return
+        }
+        let nsError = error as NSError
+        let code = FailureCode(rawValue: failure.rawValue) ?? .unknown
+        if trace.lastStage == .transcribing {
+            KeyboardDiagnosticsLog.record(DiagnosticsEvents.transcriptionFailed(
+                request: trace.requestID,
+                model: engine.identifier,
+                durationMs: Self.milliseconds(since: startedAt),
+                failure: code,
+                domain: nsError.domain,
+                code: nsError.code
+            ))
+        }
+        trace.finish(.failed, detail: ["failure": code.rawValue, "domain": nsError.domain, "code": String(nsError.code)])
+    }
+
+    private static func milliseconds(since start: ContinuousClock.Instant?) -> Int {
+        guard let start else { return 0 }
+        return Int((ContinuousClock.now - start).totalSeconds * 1_000)
     }
 
     private func isRecordingSessionCancelled(requestID: UUID) -> Bool {
