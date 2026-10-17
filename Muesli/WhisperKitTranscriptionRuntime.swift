@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 @preconcurrency import WhisperKit
 
@@ -71,15 +72,37 @@ actor WhisperKitTranscriptionRuntime {
         ])
     }
 
-    func transcribe(audioURL: URL) async throws -> String {
+    /// What WhisperKit heard in one file, with the language it decoded in and the segment timing the silence guard
+    /// needs to tell a phrase the speaker said from one the model invented over silence.
+    struct Transcription: Sendable {
+        let text: String
+        let language: String
+        let segments: [HallucinatedTailFilter.Segment]
+    }
+
+    func transcribe(audioURL: URL) async throws -> Transcription {
         guard let whisperKit else {
             throw WhisperKitRuntimeError.notLoaded
         }
-        let results = try await whisperKit.transcribe(audioPath: audioURL.path)
-        return results
-            .map(\.text)
-            .joined(separator: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let seconds = Self.duration(of: audioURL)
+        let options = WhisperKitDecodingOptions.options(forAudioSeconds: seconds)
+        let results = try await whisperKit.transcribe(audioPath: audioURL.path, decodeOptions: options)
+        return Transcription(
+            text: results
+                .map(\.text)
+                .joined(separator: " ")
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+            language: results.first?.language ?? "en",
+            // Without timestamp tokens a segment's times are the window's, not the speech's.
+            segments: options.withoutTimestamps ? [] : results.flatMap(\.segments).map {
+                HallucinatedTailFilter.Segment(text: $0.text, start: TimeInterval($0.start), end: TimeInterval($0.end))
+            }
+        )
+    }
+
+    private static func duration(of audioURL: URL) -> TimeInterval? {
+        guard let file = try? AVAudioFile(forReading: audioURL), file.fileFormat.sampleRate > 0 else { return nil }
+        return Double(file.length) / file.fileFormat.sampleRate
     }
 
     func unload() async {

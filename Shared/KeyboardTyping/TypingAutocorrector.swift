@@ -15,13 +15,18 @@ final class TypingAutocorrector: TypingWordCompletionHandling {
     private let traits: () -> TypingTraits
     private let isEnabled: () -> Bool
     private let ignoreWord: (String) -> Void
+    private let tuning: TypingAutocorrectTuning
+    private let poolOptions: TypingCandidatePool.Options
 
     /// The user's contact names and shortcut inputs, lowercased. Kept apart from the strip's capped list so a
     /// contact past its cap is still never corrected.
     private var knownWords = Set<String>()
     private var replacements: [String: String] = [:]
-    /// Words the user took back. The truth for this session; the checker's own ignore list is per instance.
-    private var rejected = Set<String>()
+    /// Words the user took back and words they keep typing as they are, kept across launches. The checker's own
+    /// ignore list is per instance, so these are replayed into it.
+    private var learned: TypingLearnedWords
+    private let store: TypingLearnedWordsStoring?
+    private let learnWord: (String) -> Void
 
     /// Only English has been measured, so only English is corrected.
     private static let correctedLanguage = "en"
@@ -31,13 +36,26 @@ final class TypingAutocorrector: TypingWordCompletionHandling {
         languageCandidates: @escaping () -> [String],
         traits: @escaping () -> TypingTraits,
         isEnabled: @escaping () -> Bool,
-        ignoreWord: @escaping (String) -> Void = { _ in }
+        ignoreWord: @escaping (String) -> Void = { _ in },
+        tuning: TypingAutocorrectTuning = .standard,
+        poolOptions: TypingCandidatePool.Options = .init(),
+        learnedWords: TypingLearnedWordsStoring? = nil,
+        learnWord: @escaping (String) -> Void = { _ in }
     ) {
         self.checker = checker
         self.languageCandidates = languageCandidates
         self.traits = traits
         self.isEnabled = isEnabled
         self.ignoreWord = ignoreWord
+        self.tuning = tuning
+        var options = poolOptions
+        options.weights = tuning.weights
+        options.usageDepth = tuning.usageDepth
+        self.poolOptions = options
+        store = learnedWords
+        self.learnWord = learnWord
+        learned = learnedWords?.load() ?? TypingLearnedWords()
+        (learned.rejected + learned.learned).forEach(ignoreWord)
     }
 
     /// Contacts and text replacements from `UILexicon`. No cap here.
@@ -56,14 +74,15 @@ final class TypingAutocorrector: TypingWordCompletionHandling {
     }
 
     func replacementWasRejected(_ undo: TypingReplacementUndo) {
-        rejected.insert(undo.originalWord.lowercased())
+        learned.reject(undo.originalWord)
+        store?.save(learned)
         ignoreWord(undo.originalWord)
     }
 
     func wordCompleted(_ event: TypingWordCompletedEvent) -> TypingEditPlan? {
         guard isEnabled(), isCorrectableField(), let boundary = Boundary(event.boundary) else { return nil }
         let word = event.word
-        guard !rejected.contains(word.lowercased()),
+        guard !learned.isRejected(word), !learned.isLearned(word),
               TypingTokenContext.isStandaloneWord(word, contextBefore: event.contextBefore)
         else { return nil }
         if boundary.expandsShortcuts, let expansion = replacements[word.lowercased()] {
@@ -90,11 +109,26 @@ final class TypingAutocorrector: TypingWordCompletionHandling {
         if capitalized, !TypingTokenContext.startsSentence(word: word, contextBefore: event.contextBefore) { return nil }
         let checker = checker()
         guard checker.isMisspelled(word, language: language) else { return nil }
-        let guesses = checker.guesses(forWord: word, language: language)
-        guard let guess = TypingAutocorrectRule.correction(for: word, guesses: guesses, strict: boundary.isStrict)
-        else { return nil }
+        let pool = TypingCandidatePool(checker: checker, language: language, options: poolOptions)
+        let candidates = pool.candidates(for: word, excluding: Set(learned.rejected))
+        guard let guess = TypingAutocorrectRule.correction(
+            for: word, candidates: candidates, strict: boundary.isStrict, tuning: tuning
+        ) else {
+            noteLeftAsTyped(word)
+            return nil
+        }
         guard capitalized else { return guess }
         return guess.prefix(1).uppercased() + guess.dropFirst()
+    }
+
+    /// A word the checker flags was typed and left alone. The third time, the user clearly means it: the checker
+    /// is told to stop flagging it, here and in the system's learned words, and it is never corrected again.
+    private func noteLeftAsTyped(_ word: String) {
+        let becameLearned = learned.noteLeftAsTyped(word)
+        store?.save(learned)
+        guard becameLearned else { return }
+        ignoreWord(word)
+        learnWord(word)
     }
 
     private func plan(replacing word: String, with fixed: String, boundary: Boundary) -> TypingEditPlan {

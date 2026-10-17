@@ -73,4 +73,22 @@ final class TypingContractionsTests: XCTestCase {
         XCTAssertNil(TypingContractions.correction(for: "april", strict: true))
         XCTAssertEqual(TypingContractions.correction(for: "june", strict: false), "June")
     }
+
+    // Review-free additions measured against the generated corpus: the contractions people type without an
+    // apostrophe that are not words themselves.
+    func testMoreContractionsAreFixedFromAnExplicitTable() {
+        for (typed, fixed) in ["itll": "it'll", "theyd": "they'd", "youd": "you'd", "mightve": "might've", "mustve": "must've",
+                               "whod": "who'd", "aint": "ain't", "yall": "y'all", "oclock": "o'clock", "wheres": "where's"] {
+            XCTAssertEqual(TypingContractions.correction(for: typed), fixed, typed)
+        }
+    }
+
+    func testALowercaseIBeforeAnApostropheIsThePronoun() {
+        for (typed, fixed) in ["i'm": "I'm", "i'll": "I'll", "i've": "I've", "i'd": "I'd"] {
+            XCTAssertEqual(TypingContractions.correction(for: typed), fixed, typed)
+            XCTAssertEqual(TypingContractions.correction(for: typed, strict: true), fixed, "no host name has an apostrophe: \(typed)")
+        }
+        XCTAssertNil(TypingContractions.correction(for: "I'm"), "already right")
+        XCTAssertNil(TypingContractions.correction(for: "ski'm"), "only the pronoun")
+    }
 }

@@ -1,7 +1,7 @@
 import Foundation
 
 /// Edit distance counting an adjacent swap as one edit (optimal string alignment), compared without regard to
-/// case. "teh" to "the" is one edit, which is what lets a three-letter word be fixed at all.
+/// case. "teh" to "the" is one edit.
 enum TypingEditDistance {
     static func between(_ a: String, _ b: String) -> Int {
         let s = Array(a.lowercased())
@@ -26,83 +26,123 @@ enum TypingEditDistance {
     }
 }
 
-/// Whether a spell-checker guess is safe to type over what the user wrote. Conservative on purpose: a wrong
-/// correction is worse than a missed one, so every doubt returns nil. Each rule below exists because the corpus
-/// run (AutocorrectCorpusTests) showed the real checker proposing "Jason" for "json" or "oath" for "oauth".
-enum TypingAutocorrectRule {
-    /// How many of the checker's guesses are compared.
-    static let lookahead = 3
+/// Everything the rule weighs, in one place so the corpus can tune it and a test can pin each piece.
+struct TypingAutocorrectTuning: Sendable, Equatable {
+    /// Tuned on the tuning half of the generated corpus (see `TuningHarnessTests`); the held-out half and the
+    /// hand-made list are only ever used to report.
+    var weights = TypingEditWeights()
 
-    /// Two letters or fewer are never corrected, up to seven take one edit, eight and more two: at most a
-    /// quarter of the word may change.
-    static func maximumDistance(forWordLength length: Int) -> Int {
+    /// The most a correction may cost, by the length of the typed word. Two letters or fewer are never corrected,
+    /// and a three-letter word only takes a swap of two letters that makes one of the most used words ("teh" for
+    /// "the"; "cto" for "cot" is not a typo): "npm" and "faq" are not typos, and "wel"
+    /// for "well" and "ide" for "idea" cost more wrong fixes than they gain (measured on the generated corpus).
+    var budgetFourOrFive = 1.0
+    var budgetSixOrSeven = 1.0
+    var budgetEightOrMore = 1.3
+
+    /// What a candidate's use costs it: per extra letter of prefix before the checker's completions list it, per
+    /// place down that list, and when they never list it.
+    var usageStepPerLetter = 0.1
+    var usageStepPerPosition = 0.005
+    var usageMiss = 1.4
+    /// How many prefix letters count; a word first listed past this is treated as unlisted.
+    var usageDepth = 2
+
+    /// What the checker's own ranking adds: per place down its guesses, and for a word it did not guess.
+    var guessStepPerPosition = 0.0
+    var notGuessed = 1.0
+
+    /// The best score may be at most this.
+    var maximumScore = 2.2
+    /// The best must beat the second best by this much, plus `marginPerExtraCost` for each unit of cost over one.
+    var margin = 0.6
+    var marginPerExtraCost = 0.0
+
+    func budget(forWordLength length: Int) -> Double {
         switch length {
         case ..<3: 0
-        case 3..<8: 1
-        default: 2
+        case 3: weights.transposition + weights.firstLetter
+        case 4...5: budgetFourOrFive
+        case 6...7: budgetSixOrSeven
+        default: budgetEightOrMore
         }
+    }
+
+    static let standard = TypingAutocorrectTuning()
+}
+
+/// Whether the best candidate for a flagged word is safe to type over what the user wrote. Conservative on
+/// purpose: a wrong correction is worse than a missed one, so every doubt returns nil. A candidate is scored by
+/// what the slip would have cost a thumb, how used the word is, and where the checker ranked it; the best one wins
+/// only if it is close enough to what was typed, scores low enough, and beats the runner-up by a margin.
+enum TypingAutocorrectRule {
+    struct Scored: Equatable {
+        let word: String
+        let cost: Double
+        let score: Double
+    }
+
+    /// What each candidate would cost, in the order given. Kept apart so the corpus tuning can reuse the costs
+    /// while it moves the knobs that do not change them.
+    static func costs(for typed: String, candidates: [TypingCandidate], weights: TypingEditWeights) -> [Double] {
+        let word = typed.lowercased()
+        return candidates.map { TypingEditCost.between(word, $0.word, weights: weights) }
+    }
+
+    static func scored(for typed: String, candidates: [TypingCandidate], tuning: TypingAutocorrectTuning) -> [Scored] {
+        scored(for: typed, candidates: candidates, costs: costs(for: typed, candidates: candidates, weights: tuning.weights), tuning: tuning)
+    }
+
+    static func scored(
+        for typed: String, candidates: [TypingCandidate], costs: [Double], tuning: TypingAutocorrectTuning
+    ) -> [Scored] {
+        let word = typed.lowercased()
+        let limit = tuning.budget(forWordLength: word.count)
+        return zip(candidates, costs).compactMap { candidate, cost in
+            guard candidate.word != word, abs(candidate.word.count - word.count) <= 2, cost <= limit else { return nil }
+            guard word.count != 3 || (isAdjacentSwap(word, candidate.word) && candidate.usage.first.map({ $0 >= 0 }) == true) else { return nil }
+            return Scored(word: candidate.word, cost: cost, score: cost + prior(candidate, tuning: tuning))
+        }.sorted { ($0.score, $0.word) < ($1.score, $1.word) }
     }
 
     /// The guess to type instead of `typed`, or nil. `strict` is for a word that may be the start of a host name
     /// or a URL scheme ("github" before a "."), where only a single edit is accepted.
-    static func correction(for typed: String, guesses: [String], strict: Bool = false) -> String? {
-        let limit = min(maximumDistance(forWordLength: typed.count), strict ? 1 : 2)
-        guard limit > 0 else { return nil }
-        let candidates = Array(guesses.lazy.filter { isUsable($0, for: typed) }.prefix(lookahead))
-        guard let top = candidates.first else { return nil }
-        let distance = TypingEditDistance.between(typed, top)
-        guard distance <= limit, isSlip(from: typed, to: top) else { return nil }
-        let isSwap = isAdjacentSwap(typed, top)
-        // With three letters only a swap is trusted ("teh"); "npm" and "faq" are words.
-        if typed.count == 3, !isSwap { return nil }
-        let rivals = candidates.dropFirst().map { TypingEditDistance.between(typed, $0) }
-        guard rivals.allSatisfy({ $0 >= distance }) else { return nil }
-        // A tie is ambiguous ("wich": "which" or "wish"), unless the top guess just swaps two letters typed.
-        if rivals.contains(distance), !isSwap { return nil }
-        return top
+    static func correction(
+        for typed: String, candidates: [TypingCandidate], strict: Bool = false,
+        tuning: TypingAutocorrectTuning = .standard
+    ) -> String? {
+        correction(
+            for: typed, scored: scored(for: typed, candidates: candidates, tuning: tuning), strict: strict, tuning: tuning
+        )
     }
 
-    /// A single word of letters that keeps the first letter, is not just the typed word in another case, and
-    /// does not turn lowercase typing into a proper noun or an acronym (the checker offers "Jason" for "json").
-    private static func isUsable(_ guess: String, for typed: String) -> Bool {
-        guard !guess.isEmpty, guess.allSatisfy(\.isLetter) else { return false }
-        guard guess.lowercased() != typed.lowercased() else { return false }
-        guard guess.first?.lowercased() == typed.first?.lowercased() else { return false }
-        let typedHasCapital = typed.contains(where: { $0.isUppercase })
-        return typedHasCapital || !guess.contains(where: { $0.isUppercase })
+    static func correction(for typed: String, scored ranked: [Scored], strict: Bool, tuning: TypingAutocorrectTuning) -> String? {
+        guard let best = ranked.first, best.score <= tuning.maximumScore else { return nil }
+        if strict, TypingEditDistance.between(typed, best.word) > 1 { return nil }
+        if let runnerUp = ranked.dropFirst().first {
+            let required = tuning.margin + tuning.marginPerExtraCost * max(0, best.cost - 1)
+            guard runnerUp.score - best.score >= required else { return nil }
+        }
+        return best.word
     }
 
     static func isAdjacentSwap(_ a: String, _ b: String) -> Bool {
-        let x = a.lowercased(), y = b.lowercased()
-        return x.count == y.count && x != y && x.sorted() == y.sorted() && TypingEditDistance.between(x, y) == 1
+        a.count == b.count && a != b && a.sorted() == b.sorted() && TypingEditDistance.between(a, b) == 1
     }
 
-    /// An edit that looks like a slip of the fingers or of the spelling: any insertion, deletion or swap, and a
-    /// single replaced letter only when it is a vowel for a vowel or the key next to it.
-    private static func isSlip(from typed: String, to guess: String) -> Bool {
-        let a = Array(typed.lowercased()), b = Array(guess.lowercased())
-        guard a.count == b.count, TypingEditDistance.between(typed, guess) == 1, !isAdjacentSwap(typed, guess)
-        else { return true }
-        return zip(a, b).allSatisfy { $0 == $1 || isSlip(replacing: $0, with: $1) }
+    private static func prior(_ candidate: TypingCandidate, tuning: TypingAutocorrectTuning) -> Double {
+        usagePenalty(candidate.usage, tuning: tuning) + guessPenalty(candidate.guessPosition, tuning: tuning)
     }
 
-    private static func isSlip(replacing typed: Character, with guess: Character) -> Bool {
-        if vowels.contains(typed), vowels.contains(guess) { return true }
-        guard let from = keyPositions[typed], let to = keyPositions[guess] else { return false }
-        let dy = abs(from.row - to.row), dx = abs(from.x - to.x)
-        return (dy == 0 && dx <= 1.0) || (dy == 1 && dx < 1.0)
-    }
-
-    private static let vowels: Set<Character> = ["a", "e", "i", "o", "u"]
-
-    /// Where each letter sits on a QWERTY keyboard, rows staggered the way the keys are.
-    private static let keyPositions: [Character: (row: Int, x: Double)] = {
-        let rows = ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
-        let offsets = [0.0, 0.25, 0.75]
-        var positions: [Character: (row: Int, x: Double)] = [:]
-        for (row, letters) in rows.enumerated() {
-            for (column, letter) in letters.enumerated() { positions[letter] = (row, Double(column) + offsets[row]) }
+    private static func usagePenalty(_ usage: [Int], tuning: TypingAutocorrectTuning) -> Double {
+        guard let hit = usage.prefix(tuning.usageDepth).enumerated().first(where: { $0.element >= 0 }) else {
+            return tuning.usageMiss
         }
-        return positions
-    }()
+        return tuning.usageStepPerLetter * Double(hit.offset) + tuning.usageStepPerPosition * Double(hit.element)
+    }
+
+    private static func guessPenalty(_ position: Int?, tuning: TypingAutocorrectTuning) -> Double {
+        guard let position else { return tuning.notGuessed }
+        return tuning.guessStepPerPosition * Double(position)
+    }
 }

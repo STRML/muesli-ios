@@ -32,6 +32,8 @@ final class KeyboardTypingModelTests: XCTestCase {
 
     override func setUp() async throws {
         try await super.setUp()
+        // The model keeps taken-back words in the app's defaults across launches; start each test with none.
+        UserDefaults.standard.removeObject(forKey: TypingLearnedWordsDefaults.defaultKey)
         directory = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("kb-typing-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let bus = StubEventBus()

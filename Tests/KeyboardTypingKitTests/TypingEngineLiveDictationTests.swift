@@ -15,6 +15,9 @@ final class TypingEngineLiveDictationTests: XCTestCase {
         checker = FakeSpellChecker()
         checker.misspelled = ["teh", "adn", "recieve"]
         checker.guessTable = ["teh": ["the"], "adn": ["and"], "recieve": ["receive"]]
+        // The corrector ranks with the checker's own completions as a usage prior (PR 20); without them a
+        // lone guess has no prior and is left alone.
+        checker.listGuessesAsUsed()
         engine = TypingEngine(document: document, suggestionSource: FakeSuggestionSource(), now: { 0 })
         let corrector = TypingAutocorrector(
             checker: { [unowned self] in self.checker },

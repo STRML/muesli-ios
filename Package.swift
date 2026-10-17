@@ -27,9 +27,14 @@ let package = Package(
             name: "DictationPolicyKit",
             path: "Shared/DictationPolicy"
         ),
+        // Synthetic and `say`-generated test audio; nothing here is a recording of a person.
+        .target(
+            name: "ClipFixtureKit",
+            path: "Tests/ClipFixtureKit"
+        ),
         .testTarget(
             name: "DictationPolicyKitTests",
-            dependencies: ["DictationPolicyKit"],
+            dependencies: ["DictationPolicyKit", "ClipFixtureKit"],
             path: "Tests/DictationPolicyKitTests"
         ),
         .target(
@@ -39,7 +44,8 @@ let package = Package(
         .testTarget(
             name: "KeyboardTypingKitTests",
             dependencies: ["KeyboardTypingKit"],
-            path: "Tests/KeyboardTypingKitTests"
+            path: "Tests/KeyboardTypingKitTests",
+            exclude: ["Corpus/README.md"]
         ),
         .target(
             name: "DiagnosticsKit",
