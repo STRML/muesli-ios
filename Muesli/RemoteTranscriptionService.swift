@@ -54,9 +54,11 @@ actor RemoteTranscriptionService {
         )
     }
 
-    /// The endpoint hears the same trimmed copy the on-device model does, and its text goes through the same
-    /// hallucinated-tail filter: Qwen3-ASR and Granite are not immune to inventing a sign-off over silence. Guarding
-    /// the upload, not the whole race, keeps each side to one analysis and one `transcribe.trimmed` event.
+    /// The endpoint hears the same trimmed copy the on-device model does, so Qwen3-ASR and Granite no longer get a
+    /// silent tail to invent a sign-off over, and a clip with no speech is not uploaded. Their text has no segment
+    /// timing, so the filter's only live check on it is a lone phrase over a silent clip; the flat-text tail check
+    /// cannot fire behind the trimmer by design. Guarding the upload, not the whole race, keeps each side to one
+    /// analysis and one `transcribe.trimmed` event.
     private static func guardedUpload(_ client: RemoteTranscriptionClient, audioURL: URL) async throws -> String {
         let outcome = try await ClipSilenceGuard.run(
             audioURL: audioURL,
