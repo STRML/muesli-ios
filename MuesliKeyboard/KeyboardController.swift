@@ -63,6 +63,11 @@ final class KeyboardController {
     var textDeleter: (@MainActor (Int) -> Void)?
     /// What the host field holds around the cursor, read when Quill is tapped and again before a rewrite is applied.
     var textContextProvider: (@MainActor () -> KeyboardTextContext)?
+    /// The host field as live typing writes to it. Without one, the streaming words only show in the strip.
+    var liveTypingHost: LiveTypingHost? {
+        get { liveTyper.host }
+        set { liveTyper.host = newValue }
+    }
     var inputModeSwitcher: (@MainActor () -> Void)?
     var keyboardDismisser: (@MainActor () -> Void)?
     var liveTranscript = ""
@@ -74,6 +79,10 @@ final class KeyboardController {
     var setupVerificationChallenge: KeyboardSetupVerificationChallenge?
     private var lastInsertedCharacterCount = 0
     private var canUseRuntimeStart = false
+    /// Types the streaming words into the host field as marked text while recording, when the host allows it.
+    @ObservationIgnored let liveTyper: KeyboardLiveTyper
+    /// Why a delivered result left the field as it was, for the status line.
+    private var deliveryNote: String?
 
     /// Typing (layout, shift, suggestions). Dictation state stays here; the Type page only reads it.
     let typing = KeyboardTypingModel()
@@ -94,8 +103,10 @@ final class KeyboardController {
     init(
         store: SharedStore? = nil,
         eventBus: any CrossProcessEventStreaming = DarwinCrossProcessEventBus.shared,
-        setupVerificationStore: SetupVerificationStore = SetupVerificationStore()
+        setupVerificationStore: SetupVerificationStore = SetupVerificationStore(),
+        liveTypingScheduler: LiveTypingScheduler = .system
     ) {
+        liveTyper = KeyboardLiveTyper(scheduler: liveTypingScheduler)
         self.eventBus = eventBus
         self.store = store ?? SharedStore(eventPoster: eventBus)
         self.setupVerificationStore = setupVerificationStore
@@ -123,8 +134,8 @@ final class KeyboardController {
 
     var showsLiveTranscript: Bool { livePreview != nil }
 
-    /// The streaming words shown while recording, dimmed while the final pass runs. Display only:
-    /// only a delivered result is ever handed to `textInserter`.
+    /// The streaming words shown while recording, dimmed while the final pass runs. Display only: live typing into
+    /// the field is `liveTyper`'s job, and only a delivered result is ever handed to `textInserter`.
     var livePreview: KeyboardLivePreview? {
         guard activeRequestID != nil else { return nil }
         return KeyboardLivePreview.make(
@@ -453,6 +464,7 @@ final class KeyboardController {
         recoveryRequestID = nil
         launchURL = makeLaunchURL(for: request)
         lastRewrite = nil
+        liveTyper.reset()
         activeRequestID = request.id
         activeRewrite = request.rewrite
         liveTranscript = ""
@@ -528,7 +540,7 @@ final class KeyboardController {
 
     func deleteTypedBackward() {
         lastRewrite = nil
-        textDeleter?(1)
+        deleteFromHost(1)
         lastInsertedCharacterCount = 0
     }
 
@@ -557,14 +569,14 @@ final class KeyboardController {
 
     func clearInsertedText() {
         let deleteCount = max(lastInsertedCharacterCount, 1)
-        textDeleter?(deleteCount)
+        deleteFromHost(deleteCount)
         lastInsertedCharacterCount = 0
         statusText = deleteCount > 1 ? "Cleared" : "Deleted"
     }
 
     func deleteBackward() {
         lastRewrite = nil
-        textDeleter?(1)
+        deleteFromHost(1)
         lastInsertedCharacterCount = 0
         statusText = "Deleted"
     }
@@ -593,6 +605,8 @@ final class KeyboardController {
             ))
             try store.saveCommand(.init(requestID: activeRequestID, action: .cancel))
             pendingCancellationIDs.insert(activeRequestID)
+            // The words come out now; a late partial from the app is ignored.
+            liveTyper.cancel(requestID: activeRequestID)
             latestHandoffState = .init(requestID: activeRequestID, phase: .cancelRequested, message: "Cancelling")
             dictationPhase = .recording
             statusText = "Cancelling"
@@ -688,6 +702,9 @@ final class KeyboardController {
         // app's published status if a recording is still running.
         inputLevel = 0
         liveTranscript = ""
+        // While the proxy is still there: take the marked words out, so none dangles and a recreated keyboard that
+        // replays the delivery cannot insert them a second time.
+        liveTyper.yield(.hidden)
 
         KeyboardDiagnosticsLog.record("keyboard.disappeared", [
             "localPhase": dictationPhase.rawValue,
@@ -718,6 +735,7 @@ final class KeyboardController {
         // Inserting the nonce response through UITextDocumentProxy proves that
         // this keyboard is both installed and active. It deliberately bypasses
         // insertText(_:), whose character count belongs to transcript replacement.
+        liveTyper.yield(.yielded)
         textInserter?(challenge.responseToken)
         if hasOpenAccessForSetup {
             setupVerificationStore.saveKeyboardReceipt(
@@ -793,7 +811,8 @@ final class KeyboardController {
             } else if activeRequestID == nil,
                       !isBlockedByAppVoiceNote,
                       statusText != "Inserted",
-                      statusText != Self.staleRewriteMessage {
+                      statusText != Self.staleRewriteMessage,
+                      statusText != Self.keptWordsMessage {
                 statusText = "Latest ready"
             }
         } catch {
@@ -836,6 +855,7 @@ final class KeyboardController {
 
     private func apply(handoffState: KeyboardHandoffState) {
         guard let requestID = handoffState.requestID else { return }
+        settleLiveTyping(for: handoffState.phase, requestID: requestID)
 
         if let activeRequestID, activeRequestID != requestID {
             // A resumed extension must follow the durable owner, even if the
@@ -1165,6 +1185,44 @@ final class KeyboardController {
 
         liveTranscript = transcript.text
         liveTranscriptIsFinal = transcript.isFinal
+        typeLive(transcript)
+    }
+
+    /// Hands a streaming partial to live typing. The final text is never a partial: it arrives as a result.
+    private func typeLive(_ transcript: KeyboardLiveTranscript) {
+        guard !transcript.isFinal,
+              !isCancelPending,
+              !cancelledRequestIDs.contains(transcript.requestID),
+              !insertedRequestIDs.contains(transcript.requestID),
+              [.requested, .recording, .transcribing].contains(dictationPhase)
+        else { return }
+        liveTyper.receive(
+            partial: transcript.text,
+            requestID: transcript.requestID,
+            updatedAt: transcript.updatedAt,
+            isRewrite: activeRewrite != nil
+        )
+    }
+
+    /// How the app's verdict on a dictation changes the words typed live. A cancel removes them, a recovery takes
+    /// them out so the later result is inserted as usual, and a failure or a clipboard copy leaves them as text.
+    private func settleLiveTyping(for phase: KeyboardHandoffPhase, requestID: UUID) {
+        guard liveTyper.sessionRequestID == requestID else { return }
+        switch phase {
+        case .cancelled:
+            liveTyper.cancel(requestID: requestID)
+        case .recoveryRequested:
+            liveTyper.yield(.yielded)
+        case .failed, .copyRequired, .inserted:
+            liveTyper.endWithoutResult(requestID: requestID)
+        default:
+            break
+        }
+    }
+
+    /// The host reported that the field changed (`textDidChange`, `selectionDidChange`).
+    func liveTypingHostDidChange() {
+        liveTyper.hostDidChange()
     }
 
     private func markForRecoveryIfStale(_ status: DictationStatus, requestID: UUID) -> Bool {
@@ -1281,7 +1339,10 @@ final class KeyboardController {
             "request": String(shortID),
             "characters": String(result.text.count)
         ])
+        deliveryNote = nil
         let replacedStaleField = !deliver(result)
+        let note = deliveryNote
+        deliveryNote = nil
         insertedRequestIDs.insert(result.requestID)
         latestResultID = result.id
         hasLatestDictation = true
@@ -1289,6 +1350,7 @@ final class KeyboardController {
         // Acknowledging A must not clear B's command, transcript, or UI.
         guard activeRequestID == result.requestID else {
             if replacedStaleField { statusText = Self.staleRewriteMessage }
+            else if let note { statusText = note }
             return
         }
         activeRequestID = nil
@@ -1297,7 +1359,7 @@ final class KeyboardController {
         recoveryRequestID = nil
         launchURL = nil
         dictationPhase = .idle
-        statusText = replacedStaleField ? Self.staleRewriteMessage : "Latest ready"
+        statusText = replacedStaleField ? Self.staleRewriteMessage : (note ?? "Latest ready")
         try? store.clearPendingRequest(matching: result.requestID)
         try? store.clearPendingCommand(matching: result.requestID)
         prepareLaunchRequestIfNeeded()
@@ -1416,7 +1478,7 @@ final class KeyboardController {
             statusText = "Text changed. Can't undo"
             return
         }
-        textDeleter?(deleteCount)
+        deleteFromHost(deleteCount)
         insertDictatedText(text)
         statusText = "Undone"
     }
@@ -1428,7 +1490,7 @@ final class KeyboardController {
     private func deliver(_ result: DictationResult) -> Bool {
         guard let rewrite = result.rewrite else {
             lastRewrite = nil
-            insertDictatedText(result.text)
+            deliverDictation(result)
             return true
         }
         let current = textContextProvider?() ?? KeyboardTextContext()
@@ -1438,13 +1500,29 @@ final class KeyboardController {
             lastRewrite = RewriteUndo(original: rewrite.original, rewritten: text)
             return true
         case .replaceBeforeCursor(let deleteCount, let text):
-            textDeleter?(deleteCount)
+            deleteFromHost(deleteCount)
             insertDictatedText(text)
             lastRewrite = RewriteUndo(original: rewrite.original, rewritten: text)
             return true
         case .stale:
             KeyboardDiagnosticsLog.record("rewrite.skipped", ["reason": "fieldChanged"])
             return false
+        }
+    }
+
+    static let keptWordsMessage = "Kept what was typed. Full text is in Muesli"
+
+    /// A dictation's text: it replaces the words typed live in place, or goes in at the cursor as it always did.
+    private func deliverDictation(_ result: DictationResult) {
+        switch liveTyper.final(result.text, requestID: result.requestID) {
+        case .replacedInPlace:
+            lastInsertedCharacterCount = result.text.count
+            typing.engine.noteExternalInsertion()
+        case .insertPlain(let text):
+            insertDictatedText(text)
+        case .withheld(let reason):
+            deliveryNote = Self.keptWordsMessage
+            KeyboardDiagnosticsLog.record("live_typing.final_withheld", ["reason": reason])
         }
     }
 
@@ -1460,11 +1538,19 @@ final class KeyboardController {
     func loadTypingSettings() {
         let settings = (try? store.keyboardTypingSettings()) ?? nil
         typing.autocorrectEnabled = (settings ?? .default).autocorrect
+        liveTyper.isEnabled = (settings ?? .default).liveTyping
     }
 
     private func insertText(_ text: String) {
+        liveTyper.yield(.yielded)
         textInserter?(text)
         lastInsertedCharacterCount = text.count
+    }
+
+    /// Every deletion the keyboard makes goes through here, so words typed live never sit under an edit.
+    private func deleteFromHost(_ count: Int) {
+        liveTyper.yield(.yielded)
+        textDeleter?(count)
     }
 }
 

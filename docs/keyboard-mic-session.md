@@ -166,11 +166,14 @@ attempt. Full recording cancellation still removes the checkpoint directory.
 
 When the streaming model produces partials, the keyboard shows them in a one-line
 preview in the status line under the controls: gray, truncated from the left so the
-newest words stay visible, with the recording dot and elapsed time. The preview is
-never written to the host field.
+newest words stay visible, with the recording dot and elapsed time. With "Type live
+into the field" on (the default) the same words are also typed into the host field as
+marked text; see "Live typing" below. With it off, or in a host that cannot show marked
+text, the preview is never written to the host field.
 
 On release the full-clip pass always runs (`runKeyboardTranscriptionJob`: on-device
-beside the remote endpoint inside its budget), and only its text is inserted, once.
+beside the remote endpoint inside its budget), and only its text is inserted, once:
+it replaces the live words, or goes in at the cursor when nothing was typed live.
 The preview dims with a shimmer meanwhile and clears when the result lands.
 `FinalTextPolicy` falls back to the streaming text when that pass fails, times out
 or comes back empty. When both are empty nothing is inserted. Cancellation never
@@ -192,3 +195,52 @@ Partials come from Parakeet Realtime EOU 120M (`LivePreviewEnginePolicy`):
   the model, or removing EOU, releases the dedicated copy.
 - Its text is only ever the preview and the short-dictation fallback. A long voice note
   streamed by it still gets the selected model's pass, as before.
+
+## Live typing
+
+With "Type live into the field" on (Settings, Keyboard; on by default; stored as
+`muesli.keyboard.liveTyping` and read by the keyboard from `KeyboardTypingSettings.liveTyping`
+in the shared store), the streaming words appear in the host field as the user speaks,
+the way system dictation does, and the final text replaces them.
+
+API: `UITextDocumentProxy.setMarkedText(_:selectedRange:)` and `unmarkText()`
+(`UIInputViewController.h`, iOS 13.0; "Setting marked text either replaces the existing
+marked text or, if none is present, inserts it in place of the current input location").
+Every update replaces the whole marked range (no diffing); the cursor goes at the end
+(`selectedRange` counts UTF-16 units). The pure logic is `LiveTypingSession`
+(Shared/DictationPolicy); `KeyboardLiveTyper` performs it on the main actor, and
+`ProxyLiveTypingHost` is the proxy adapter.
+
+- Updates are coalesced to about six writes a second (`LiveTypingThrottle`); only the newest
+  text is written, in order, and only when it changed. Empty partials never erase the words.
+- A capability probe runs on the first words: the proxy must show them at the end of
+  `documentContextBeforeInput` (compared ignoring case, smart punctuation and non-breaking
+  spaces) with `documentContextAfterInput` unchanged, then the same words are marked again and
+  the context must not grow. The proxy is an out-of-process snapshot, so the probe waits for
+  `textDidChange` or 0.35 s. A host that fails is cleared with `setMarkedText("")` and
+  `unmarkText()` (never `deleteBackward`, which would eat the user's own text on a host that
+  ignored the marking) and the dictation falls back to strip-only with
+  `live_typing.unsupported reason=...` in the diagnostics log.
+- The final text replaces the marked range and unmarks in one step. If the final pass failed
+  the result is the streaming text, so the same path unmarks it.
+- Cancel (the X, or the app) removes the marked words. A failed dictation or a result that
+  went to the clipboard leaves them as plain text.
+- Measured on a real `UITextView` (iOS 27 simulator): `insertText` over marked text replaces
+  it and `deleteBackward` over it removes the whole range. So before any other edit (a typed
+  key, backspace, an older queued insertion, setup verification) the keyboard takes the words
+  out and the dictation continues strip-only; the final then goes in at the cursor, after
+  whatever the user typed.
+- Hiding the keyboard takes the words out too, so none dangles and a recreated keyboard that
+  replays the delivery cannot insert them a second time.
+- If the cursor moves, the selection changes, the field changes or the host edits the words
+  (seen after the fact, so they cannot be removed), the words stay as plain text and the final
+  is withheld instead of inserted next to them. The status line says so; the full text is in
+  Muesli.
+- A selection at the start of the dictation keeps live typing off for that dictation.
+- Past 1,500 characters of marked text (above anything a 60 s dictation produces), finished
+  sentences are committed as plain text so the host does not re-lay-out a huge range. The final
+  then replaces only the marked tail when it extends the committed text, and otherwise deletes
+  and retypes it when the field still ends with exactly that text (up to 3,000 characters),
+  and is withheld if not.
+- Voice edits (Quill) are not typed live.
+- Autocorrect never sees the words: it only judges a word typed key by key.
