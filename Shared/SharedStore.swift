@@ -651,7 +651,10 @@ private enum SharedStoreDatabaseError: Error, LocalizedError {
 
 private struct SharedStoreDatabase {
     private static let databaseFileName = "Muesli.sqlite"
-    private static let schemaVersion = 6
+    /// The `PRAGMA user_version` this build brings a store to. The normalized-column backfill runs once for each
+    /// value below it, so raise this whenever a change needs existing rows rewritten. 7 re-runs the backfill once
+    /// on installs that were at 6, which until now ran it on every launch.
+    private static let schemaVersion = 7
 
     private static let syncMeetingLookupColumns = """
     s.cloud_record_name, s.title, s.created_at, s.started_at, s.ended_at,
@@ -1880,8 +1883,7 @@ private struct SharedStoreDatabase {
         try exec(Self.schemaSQL, db: db)
         try migrateSchemaIfNeeded(db)
         try migrateLegacyJSONIfNeeded(db)
-        try backfillNormalizedColumns(db)
-        try setUserVersion(Self.schemaVersion, db: db)
+        try backfillNormalizedColumnsIfNeeded(db)
 
         Self.initializedDatabasePaths.insert(databaseURL.path)
     }
@@ -1981,6 +1983,25 @@ private struct SharedStoreDatabase {
             }
         }
         return columns
+    }
+
+    /// Rewrites the normalized columns from each row's payload, once per schema version.
+    ///
+    /// The backfill decodes every payload and updates every row, which on a store with years of history is tens of
+    /// milliseconds of CPU and a write to the file. The app paid it on every cold launch and the keyboard on every
+    /// relaunch. Every write path since keeps the columns and the payload together, so after one pass there is
+    /// nothing left for it to repair. The version is stored in the same transaction as the rewrite, so an
+    /// interrupted pass rolls back whole and runs again next time. A store from a newer build is left alone and is
+    /// never given a lower version.
+    private func backfillNormalizedColumnsIfNeeded(_ db: OpaquePointer) throws {
+        // A plain read: the common case takes no write lock and writes nothing.
+        guard try userVersion(db) < Self.schemaVersion else { return }
+        try transaction(db: db) {
+            // The app and the keyboard can both start on an old store. Whoever gets the lock second finds it done.
+            guard try userVersion(db) < Self.schemaVersion else { return }
+            try backfillNormalizedColumns(db)
+            try setUserVersion(Self.schemaVersion, db: db)
+        }
     }
 
     private func backfillNormalizedColumns(_ db: OpaquePointer) throws {
