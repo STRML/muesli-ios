@@ -6,12 +6,16 @@ import Foundation
 /// to run on every launch and every foreground. A load that fails was also retried on the next foreground with no
 /// delay, and a load that compiled for minutes was no reason to stop. This policy replaces that with three rules:
 ///
-/// - **Opening the app warms the model only until it has loaded once.** After that a launch or foreground does not
-///   load it. The load happens at the moment it is needed (see ``Trigger``).
+/// - **Opening the app warms the model only until it has loaded once under this build and OS.** After that a
+///   launch or foreground does not load it. The load happens at the moment it is needed (see ``Trigger``). An
+///   app update or an OS update is a cold load again, so the first launch after one warms the model: the compile
+///   that took 935 s must not run inside the first dictation.
 /// - **A failed load, or one slower than ``slowLoadSeconds``, starts a wait** that doubles with each repeat up to
 ///   ``maxBackoffSeconds``. The wait is stored, so a relaunch respects it. Every prewarm trigger honors it.
 /// - **The lazy load at transcription time is never gated.** Dictation and meeting transcription load the model on
 ///   their own when it is missing, so a wait only ever delays the head start, never the feature.
+/// - **A load the user asked for is never refused by the wait**, and a success clears it. The wait exists to stop
+///   automatic retries, not to second-guess a person who is looking at a Loading screen.
 ///
 /// The policy is pure: the caller supplies the clock reading and the load duration.
 enum ModelPrewarmPolicy {
@@ -24,15 +28,19 @@ enum ModelPrewarmPolicy {
         case keyboardSession = "keyboard_session"
         case recordingStart = "recording_start"
         case meetingRecording = "meeting_recording"
+        case userRequested = "user_requested"
 
         /// Launch and foreground happen whether or not the user is about to dictate. The others mean the model is
         /// about to be used: a keyboard session was armed, a recording is starting, onboarding just finished.
         var isOpportunistic: Bool {
             switch self {
             case .launch, .launchScreen, .foreground: true
-            case .onboardingCompleted, .keyboardSession, .recordingStart, .meetingRecording: false
+            case .onboardingCompleted, .keyboardSession, .recordingStart, .meetingRecording, .userRequested: false
             }
         }
+
+        /// A request from the user is not an automatic retry, so the wait does not apply to it.
+        var bypassesBackoff: Bool { self == .userRequested }
     }
 
     enum Decision: Sendable, Equatable {
@@ -48,7 +56,7 @@ enum ModelPrewarmPolicy {
         case loadInFlight
         /// A recent load failed or was slow, and its wait is not over.
         case backingOff
-        /// The model has loaded on this install before, so opening the app does not load it again.
+        /// The model has loaded under this app build and OS before, so opening the app does not load it again.
         case alreadyWarmedOnce
     }
 
@@ -71,28 +79,42 @@ enum ModelPrewarmPolicy {
         isLoaded: Bool,
         loadInFlight: Bool,
         history: ModelPrewarmHistory,
+        stamp: String,
         now: Date
     ) -> Decision {
         if loadInFlight { return .skip(.loadInFlight) }
         if isLoaded { return .skip(.alreadyLoaded) }
         if !isDownloaded { return .download }
-        if history.remainingBackoff(now: now) > 0 { return .skip(.backingOff) }
-        if trigger.isOpportunistic, history.hasLoadedSuccessfully { return .skip(.alreadyWarmedOnce) }
+        if !trigger.bypassesBackoff, history.remainingBackoff(now: now) > 0 { return .skip(.backingOff) }
+        if trigger.isOpportunistic, history.isWarm(for: stamp) { return .skip(.alreadyWarmedOnce) }
         return .load
     }
 }
 
 /// What the app has learned about loading one model on this install.
 struct ModelPrewarmHistory: Codable, Sendable, Equatable {
+    /// A load that started and has not reported back. If the next boot finds it, the app died during the load.
+    struct LoadMarker: Codable, Sendable, Equatable {
+        var bootID: UUID
+        var startedAt: Date
+    }
+
     var modelID: String
-    /// The model has loaded at least once, however slowly.
-    var hasLoadedSuccessfully = false
-    /// Failed or slow loads in a row. A fast load sets it back to zero.
+    /// The app build and OS the model last loaded under (``ReadinessBuildStamp/loadKey``). The compiled model is
+    /// only good under that pair, so a different pair is a cold load again.
+    var loadedStamp: String?
+    /// Failed, slow or interrupted loads in a row. A fast load sets it back to zero.
     var strikes = 0
     var lastStrikeAt: Date?
+    var loadMarker: LoadMarker?
 
     init(modelID: String) {
         self.modelID = modelID
+    }
+
+    /// The model has loaded, however slowly, under this app build and OS.
+    func isWarm(for stamp: String) -> Bool {
+        loadedStamp == stamp
     }
 
     /// Seconds left of the wait. A clock that moved backwards, or a record with strikes but no timestamp, reads as
@@ -109,14 +131,35 @@ struct ModelPrewarmHistory: Codable, Sendable, Equatable {
         lastStrikeAt = now
     }
 
-    mutating func recordLoad(seconds: TimeInterval, now: Date) {
-        hasLoadedSuccessfully = true
-        guard seconds > ModelPrewarmPolicy.slowLoadSeconds else {
+    /// A load finished. A fast one clears the strikes; a slow one is a strike, unless the user asked for it: a
+    /// person who watched the Loading screen to the end has not caused anything the wait should guard against.
+    mutating func recordLoad(seconds: TimeInterval, now: Date, stamp: String, userInitiated: Bool = false) {
+        loadedStamp = stamp
+        loadMarker = nil
+        guard seconds > ModelPrewarmPolicy.slowLoadSeconds, !userInitiated else {
             strikes = 0
             lastStrikeAt = nil
             return
         }
         recordFailure(now: now)
+    }
+
+    mutating func markLoadStarted(boot: UUID, now: Date) {
+        loadMarker = LoadMarker(bootID: boot, startedAt: now)
+    }
+
+    mutating func markLoadFinished() {
+        loadMarker = nil
+    }
+
+    /// Call once per boot. A marker from another boot is a load that never finished (a crash, a kill, a suspension
+    /// that never resumed), and counts as a strike, so a launch loop backs off instead of retrying forever.
+    @discardableResult
+    mutating func recoverInterruptedLoad(currentBoot: UUID, now: Date) -> Bool {
+        guard let marker = loadMarker, marker.bootID != currentBoot else { return false }
+        loadMarker = nil
+        recordFailure(now: now)
+        return true
     }
 }
 
@@ -148,10 +191,31 @@ struct ModelPrewarmHistoryStore {
         save(history)
     }
 
-    func recordLoad(modelID: String, seconds: TimeInterval, now: Date) {
+    func recordLoad(modelID: String, seconds: TimeInterval, now: Date, stamp: String, userInitiated: Bool = false) {
         var history = history(for: modelID)
-        history.recordLoad(seconds: seconds, now: now)
+        history.recordLoad(seconds: seconds, now: now, stamp: stamp, userInitiated: userInitiated)
         save(history)
+    }
+
+    func markLoadStarted(modelID: String, boot: UUID, now: Date) {
+        var history = history(for: modelID)
+        history.markLoadStarted(boot: boot, now: now)
+        save(history)
+    }
+
+    func markLoadFinished(modelID: String) {
+        var history = history(for: modelID)
+        guard history.loadMarker != nil else { return }
+        history.markLoadFinished()
+        save(history)
+    }
+
+    @discardableResult
+    func recoverInterruptedLoad(modelID: String, currentBoot: UUID, now: Date) -> Bool {
+        var history = history(for: modelID)
+        guard history.recoverInterruptedLoad(currentBoot: currentBoot, now: now) else { return false }
+        save(history)
+        return true
     }
 
     func reset(modelID: String) {
