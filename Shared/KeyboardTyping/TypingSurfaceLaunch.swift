@@ -36,16 +36,12 @@ extension TypingSurface {
     }
 }
 
-/// How the globe key reacts to a touch. Apple's sample hands every touch to `handleInputModeList(from:with:)`,
-/// which switches on a tap and shows the keyboard list on a long press. That is only for a keyboard the system
-/// draws no globe for; otherwise the system's own globe has the list, and ours advances on a plain tap.
+/// Whether our own globe key is drawn. Apple's rule: a keyboard draws its next-keyboard key only when
+/// `needsInputModeSwitchKey` is true (the system provides none). When it is false the system draws a globe under
+/// the keyboard, which also has the keyboard list, and a second one of ours would be a duplicate. Unknown counts
+/// as false: the key appears once the system has said it is needed.
 enum TypingGlobeKey {
-    enum Route: Sendable, Equatable {
-        case systemTracking
-        case advanceOnTap
-    }
-
-    static func route(needsInputModeSwitchKey: Bool?) -> Route {
-        needsInputModeSwitchKey == true ? .systemTracking : .advanceOnTap
+    static func isShown(needsInputModeSwitchKey: Bool?) -> Bool {
+        needsInputModeSwitchKey == true
     }
 }

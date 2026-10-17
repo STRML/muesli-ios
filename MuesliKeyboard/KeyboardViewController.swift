@@ -65,7 +65,6 @@ final class KeyboardViewController: UIInputViewController {
         controller.inputModeSwitcher = { [weak self] in
             self?.advanceToNextInputMode()
         }
-        controller.needsInputModeSwitchKey = { [weak self] in self?.needsInputModeSwitchKey ?? false }
         controller.inputModeListPresenter = { [weak self] view, event in
             guard let event else { return }
             self?.handleInputModeList(from: view, with: event)
@@ -144,6 +143,17 @@ final class KeyboardViewController: UIInputViewController {
         }
     }
 
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        refreshSystemGlobeNeed()
+    }
+
+    /// `needsInputModeSwitchKey` can change with a hardware keyboard, rotation or a new device state.
+    override func viewWillLayoutSubviews() {
+        super.viewWillLayoutSubviews()
+        refreshSystemGlobeNeed()
+    }
+
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
 
@@ -200,6 +210,14 @@ private extension KeyboardViewController {
         case .unspecified: .unspecified
         }
         hostingController?.overrideUserInterfaceStyle = style
+        refreshSystemGlobeNeed()
+    }
+
+    /// Our globe appears only when the system says it draws none. The value is only reliable once the view is in
+    /// a window, so it is read from appearance on, and the launch snapshot is redrawn when the answer moves it.
+    func refreshSystemGlobeNeed() {
+        guard isViewLoaded, controller.typing.setNeedsInputModeSwitchKey(needsInputModeSwitchKey) else { return }
+        if isKeyboardPresented, !launchSnapshotView.isHidden { refreshLaunchSnapshot() }
     }
 
     static let settledHeightTolerance: CGFloat = 1
