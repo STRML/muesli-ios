@@ -10,7 +10,9 @@ struct SettingsView: View {
 
     @AppStorage(MuesliPreferences.liveActivitiesForDictationsKey) private var liveActivitiesForDictations = true
     @AppStorage(MuesliPreferences.liveActivitiesForMeetingsKey) private var liveActivitiesForMeetings = true
+    @AppStorage(MuesliPreferences.liveActivitiesForKeyboardMicKey) private var liveActivitiesForKeyboardMic = KeyboardMicCardPolicy.keyboardMicSwitchDefault
     @AppStorage(MuesliPreferences.keyboardSessionModeKey) private var keyboardSessionMode = true
+    @AppStorage(MuesliPreferences.keyboardLayoutKey) private var keyboardLayout = KeyboardLayout.fallback.storedValue
     @AppStorage(MuesliPreferences.keyboardAutocorrectKey) private var keyboardAutocorrect = true
     @AppStorage(MuesliPreferences.keyboardLiveTypingKey) private var keyboardLiveTyping = true
     @AppStorage(MuesliPreferences.keyboardMicAutoOffMinutesKey) private var keyboardMicAutoOffMinutes = KeyboardMicAutoOff.defaultMinutes
@@ -79,6 +81,9 @@ struct SettingsView: View {
                     )
                 }
                 .onChange(of: liveActivitiesForDictations) { _, _ in
+                    coordinator.applyLiveActivityPreferences()
+                }
+                .onChange(of: liveActivitiesForKeyboardMic) { _, _ in
                     coordinator.applyLiveActivityPreferences()
                 }
                 .onChange(of: liveActivitiesForMeetings) { _, _ in
@@ -299,10 +304,12 @@ struct SettingsView: View {
 
             MuesliSurface {
                 VStack(alignment: .leading, spacing: MuesliTheme.spacing12) {
+                    SettingsKeyboardLayoutRow(selection: keyboardLayoutBinding)
+                    Divider().overlay(MuesliTheme.surfaceBorder)
                     SettingsToggleRow(
                         icon: "textformat.abc",
                         title: "Autocorrect",
-                        detail: "Fix typos when you type a space or punctuation on the Muesli keyboard. Backspace right after a fix puts your word back. Needs Allow Full Access to follow this switch; without it, autocorrect stays on.",
+                        detail: "Fix typos when you type a space or punctuation on the full Muesli keyboard. Backspace right after a fix puts your word back. Needs Allow Full Access to follow this switch; without it, autocorrect stays on.",
                         isOn: keyboardAutocorrectBinding
                     )
                     Divider().overlay(MuesliTheme.surfaceBorder)
@@ -341,6 +348,13 @@ struct SettingsView: View {
                     )
                     Divider().overlay(MuesliTheme.surfaceBorder)
                     SettingsToggleRow(
+                        icon: "mic.circle",
+                        title: "Keyboard mic card on the Lock Screen",
+                        detail: "Shows a card with a Turn mic off button while the keyboard mic is on. It is off by default, and needs Voice Note Live Activities on too.",
+                        isOn: $liveActivitiesForKeyboardMic
+                    )
+                    Divider().overlay(MuesliTheme.surfaceBorder)
+                    SettingsToggleRow(
                         icon: "waveform.circle",
                         title: "Save Voice Note Audio",
                         detail: "Keep original voice note audio locally on this iPhone for playback and troubleshooting. Audio does not sync.",
@@ -361,6 +375,16 @@ struct SettingsView: View {
         Binding(get: { !keyboardSessionMode }, set: { stopAfterEach in
             coordinator.setKeyboardSessionModeEnabled(!stopAfterEach)
         })
+    }
+
+    private var keyboardLayoutBinding: Binding<KeyboardLayout> {
+        Binding(
+            get: { KeyboardLayout(storedValue: keyboardLayout) ?? .fallback },
+            set: { layout in
+                keyboardLayout = layout.storedValue
+                coordinator.setKeyboardLayout(layout)
+            }
+        )
     }
 
     private var keyboardAutocorrectBinding: Binding<Bool> {
@@ -1461,6 +1485,40 @@ struct SettingsToggleRow: View {
             Toggle(title, isOn: $isOn)
                 .labelsHidden()
                 .tint(MuesliTheme.accent)
+        }
+    }
+}
+
+/// Full or minimal keyboard. A row of its own: two choices with a line each, and when it takes effect.
+private struct SettingsKeyboardLayoutRow: View {
+    @Binding var selection: KeyboardLayout
+
+    var body: some View {
+        HStack(alignment: .top, spacing: MuesliTheme.spacing12) {
+            Image(systemName: "keyboard")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(MuesliTheme.accent)
+                .frame(width: 22)
+
+            VStack(alignment: .leading, spacing: MuesliTheme.spacing8) {
+                Text("Keyboard layout")
+                    .font(MuesliTheme.headline())
+                    .foregroundStyle(MuesliTheme.textPrimary)
+                Picker("Keyboard layout", selection: $selection) {
+                    Text("Full").tag(KeyboardLayout.full)
+                    Text("Minimal").tag(KeyboardLayout.minimal)
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("settings.keyboardLayout")
+                VStack(alignment: .leading, spacing: MuesliTheme.spacing4) {
+                    Text("Full: a typing keyboard with suggestions and autocorrect, and the dictation panel one 3 second hold on the Record key away.")
+                    Text("Minimal: the dictation panel only, with no typing keys.")
+                    Text("Takes effect the next time the keyboard opens. Needs Allow Full Access to follow this choice; without it, the keyboard stays Full.")
+                }
+                .font(MuesliTheme.caption())
+                .foregroundStyle(MuesliTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 }

@@ -5,11 +5,13 @@ enum MuesliPreferences {
     static let accentThemeKey = "muesli.appearance.accent"
     static let liveActivitiesForDictationsKey = "muesli.liveActivities.dictations"
     static let liveActivitiesForMeetingsKey = "muesli.liveActivities.meetings"
+    static let liveActivitiesForKeyboardMicKey = "muesli.liveActivities.keyboardMic"
 
     static let keyboardSessionModeKey = "muesli.keyboardSession.enabled"
     static let keyboardMicAutoOffMinutesKey = "muesli.keyboardSession.autoOffMinutes"
     static let keyboardAutocorrectKey = "muesli.keyboard.autocorrect"
     static let keyboardLiveTypingKey = "muesli.keyboard.liveTyping"
+    static let keyboardLayoutKey = "muesli.keyboard.layout"
     static let retiredKeyboardSessionModeKey = "muesli.keyboardSession.keepReadyBetweenDictations"
 
     static func migrateKeyboardSessionPreference(in defaults: UserDefaults = .standard) {
@@ -39,6 +41,8 @@ enum MuesliPreferences {
     static let diagnosticsShippingEnabledKey = "muesli.diagnostics.shipping.enabled"
     /// The host the user said they trust although it does not look private. A different host needs a new answer.
     static let diagnosticsAcknowledgedHostKey = "muesli.diagnostics.shipping.acknowledgedHost"
+    /// Where diagnostics go when the user does not want the AI Summaries server. Empty means use that one.
+    static let diagnosticsEndpointURLKey = "muesli.diagnostics.shipping.endpointURL"
     static let diagnosticsDeviceIDKey = "muesli.diagnostics.deviceID"
     static let meetingTemplateKey = "muesli.meetings.template"
     static let iCloudSyncEnabledKey = "muesli.sync.icloud.enabled"
@@ -64,6 +68,11 @@ enum MuesliPreferences {
         bool(for: liveActivitiesForDictationsKey, defaultValue: true)
     }
 
+    /// Off unless the user turns it on, including for people who had the card before this switch existed.
+    static var liveActivitiesForKeyboardMicEnabled: Bool {
+        bool(for: liveActivitiesForKeyboardMicKey, defaultValue: KeyboardMicCardPolicy.keyboardMicSwitchDefault)
+    }
+
     static var liveActivitiesForMeetingsEnabled: Bool {
         bool(for: liveActivitiesForMeetingsKey, defaultValue: true)
     }
@@ -84,6 +93,14 @@ enum MuesliPreferences {
     /// from the shared store, which the coordinator fills from here.
     static var keyboardLiveTypingEnabled: Bool {
         bool(for: keyboardLiveTypingKey, defaultValue: true)
+    }
+
+    /// Full or minimal keyboard. Full until the user picks Minimal; a stored value this build does not know is Full
+    /// too. The keyboard reads it from the shared store, which the coordinator fills from here.
+    static var keyboardLayout: KeyboardLayout { keyboardLayout(in: .standard) }
+
+    static func keyboardLayout(in defaults: UserDefaults) -> KeyboardLayout {
+        defaults.string(forKey: keyboardLayoutKey).flatMap(KeyboardLayout.init(storedValue:)) ?? .fallback
     }
 
     static var keyboardSessionModeEnabled: Bool {
@@ -190,6 +207,11 @@ enum MuesliPreferences {
 
     static var diagnosticsShippingEnabled: Bool {
         bool(for: diagnosticsShippingEnabledKey, defaultValue: false)
+    }
+
+    static var diagnosticsEndpointURL: String {
+        (UserDefaults.standard.string(forKey: diagnosticsEndpointURLKey) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     static var diagnosticsAcknowledgedHost: String? {

@@ -302,11 +302,8 @@ private struct KeyboardTypeKey: View {
                 .holdToRepeat { typing.perform(.backspace) }
                 .accessibilityLabel("Delete")
         case .globe:
-            button(fill: TypingKeyPalette.specialFill) { controller.switchInputMode() } label: {
-                Image(systemName: "globe").font(.system(size: 19, weight: .medium))
-            }
-            .accessibilityLabel("Next keyboard")
-            .accessibilityIdentifier("keyboard.globe")
+            face(Image(systemName: "globe").font(.system(size: 19, weight: .medium)), fill: TypingKeyPalette.specialFill)
+                .overlay(KeyboardGlobeTouchOverlay(controller: controller))
         case .shift:
             button(fill: typing.state.shift == .off ? TypingKeyPalette.specialFill : TypingKeyPalette.letterFill) {
                 typing.perform(.shift)

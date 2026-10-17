@@ -117,13 +117,16 @@ final class DiagnosticsShipper: ObservableObject {
     // MARK: Inputs
 
     static func currentSettings() -> DiagnosticsRunSettings {
-        let base = MuesliPreferences.customLLMBaseURL
         var endpoint: DiagnosticsEndpoint?
-        if let url = CustomLLMEndpoint.diagnosticsURL(from: base), let host = url.host?.lowercased() {
+        let resolution = DiagnosticsServerResolver.resolve(
+            override: MuesliPreferences.diagnosticsEndpointURL,
+            aiSummariesBaseURL: MuesliPreferences.customLLMBaseURL
+        )
+        if let server = resolution.server {
             endpoint = DiagnosticsEndpoint(
-                url: url.absoluteString,
-                host: host,
-                looksPrivate: RemoteTranscriptionPolicy.publicEndpointWarning(baseURL: base) == nil,
+                url: server.url.absoluteString,
+                host: server.host,
+                looksPrivate: server.looksPrivate,
                 keyFingerprint: DiagnosticsKeyFingerprint.of(MeetingSummaryClient.storedCustomLLMAPIKey())
             )
         }

@@ -56,6 +56,11 @@ final class KeyboardSnapshotTests: XCTestCase {
         var page: TypingPage = .letters
         var lockCaps = false
         var width: CGFloat = 393
+        /// The system asked for our globe (`needsInputModeSwitchKey` true). Off by default, as on a Face ID iPhone.
+        var globe = false
+        var layout: KeyboardLayout = .full
+        /// ABC was tapped during the dictation.
+        var takesTypePageBack = false
     }
 
 
@@ -87,8 +92,11 @@ final class KeyboardSnapshotTests: XCTestCase {
         let bus = StubEventBus()
         let store = SharedStore(containerURL: temp, eventPoster: bus, bootID: LiveAppFixture.boot)
         publishApp(scene.record, to: store)
+        // The layout goes through the store and the appearance read, the way the keyboard gets it.
+        try store.saveKeyboardTypingSettings(KeyboardTypingSettings(autocorrect: true, layout: scene.layout))
         let controller = KeyboardController(store: store, eventBus: bus)
         controller.currentFullAccess = { scene.fullAccess }
+        controller.loadTypingSettings(appliesLayout: true)
         var field = KeyboardTextContext(selectedText: nil, textBeforeCursor: editText)
         controller.textContextProvider = { field }
         controller.textInserter = { _ in }
@@ -147,6 +155,8 @@ final class KeyboardSnapshotTests: XCTestCase {
             field = KeyboardTextContext()
         }
         controller.selectedSurface = scene.surface
+        controller.typing.setNeedsInputModeSwitchKey(scene.globe)
+        if scene.takesTypePageBack { controller.showTypePage() }
         if let before = scene.before { controller.typing.document.beforeReader = { before } }
         controller.typing.setDocumentLanguage("en-US")
         controller.typing.engine.apply(traits: scene.traits)
@@ -222,6 +232,8 @@ final class KeyboardSnapshotTests: XCTestCase {
             Scene(name: "type-transcribing", setup: .transcribing, rewriteAvailable: true, surface: .type),
             Scene(name: "type-edit-listening", setup: .editListening, rewriteAvailable: true, surface: .type),
             Scene(name: "type-undo", setup: .undoAvailable, rewriteAvailable: true, surface: .type),
+            Scene(name: "type-empty-globe", setup: .ready, rewriteAvailable: true, surface: .type, globe: true),
+            Scene(name: "ready-globe", setup: .ready, rewriteAvailable: true, globe: true),
             Scene(name: "type-landscape", setup: .ready, rewriteAvailable: true, surface: .type, before: "See you at the offi",
                   width: 852),
             Scene(name: "dictate-landscape", setup: .ready, rewriteAvailable: true, width: 852),
@@ -245,6 +257,25 @@ final class KeyboardSnapshotTests: XCTestCase {
             Scene(name: "type-readiness-failed", record: .model(.failed(.loadFailed)), setup: .ready, rewriteAvailable: true, surface: .type),
             Scene(name: "readiness-full-access-off", record: .none, fullAccess: false, setup: .ready, rewriteAvailable: true),
             Scene(name: "type-readiness-full-access-off", record: .none, fullAccess: false, setup: .ready, rewriteAvailable: true, surface: .type),
+            // The layout setting, and the Full keyboard showing the Dictate page while a dictation runs.
+            Scene(name: "full-idle", setup: .ready, rewriteAvailable: true, surface: .type,
+                  before: "See you tomorrow at the offi"),
+            Scene(name: "full-recording", setup: .listening, rewriteAvailable: true, surface: .type),
+            Scene(name: "full-recording-words", setup: .listening, rewriteAvailable: true,
+                  liveText: "so the plan for tomorrow is to pick up the parts first and then head over to the shop",
+                  surface: .type),
+            Scene(name: "full-recording-landscape", setup: .listening, rewriteAvailable: true,
+                  liveText: "so the plan for tomorrow is to pick up the parts first", surface: .type, width: 852),
+            Scene(name: "full-recording-abc", setup: .listening, rewriteAvailable: true, surface: .type,
+                  takesTypePageBack: true),
+            Scene(name: "full-recording-edit", setup: .editListening, rewriteAvailable: true, surface: .type),
+            Scene(name: "full-transcribing", setup: .transcribing, rewriteAvailable: true,
+                  liveText: "so the plan for tomorrow is to pick up the parts first and then head over to the shop",
+                  surface: .type),
+            Scene(name: "minimal-idle", setup: .ready, rewriteAvailable: true, layout: .minimal),
+            Scene(name: "minimal-recording", setup: .listening, rewriteAvailable: true,
+                  liveText: "so the plan for tomorrow is to pick up the parts first", layout: .minimal),
+            Scene(name: "minimal-transcribing", setup: .transcribing, rewriteAvailable: true, layout: .minimal),
         ]
         for scene in scenes {
             for (suffix, style) in [("light", UIUserInterfaceStyle.light), ("dark", .dark)] {
@@ -267,6 +298,7 @@ final class KeyboardSnapshotTests: XCTestCase {
                 let image = UIGraphicsImageRenderer(size: size, format: format).image { _ in
                     host.view.drawHierarchy(in: CGRect(origin: .zero, size: size), afterScreenUpdates: true)
                 }
+                XCTAssertEqual(image.size.height, CGFloat(TypingMetrics.preferredHeight), "\(scene.name) height")
                 try XCTUnwrap(image.pngData()).write(to: directory.appendingPathComponent("\(scene.name)-\(suffix).png"))
                 window.isHidden = true
             }

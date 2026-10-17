@@ -90,18 +90,20 @@ final class KeyboardTypingModelTests: XCTestCase {
 
     // MARK: Pages and dictation
 
-    /// Matrix row: switching pages mid-dictation keeps the recording and shows it on both.
+    /// Matrix row: switching pages mid-dictation keeps the recording and shows it on both. The Full keyboard shows
+    /// the Dictate page for a dictation; ABC takes the Type page back for it.
     func testSwitchingPagesMidDictationKeepsTheRecording() throws {
         try startListening()
         XCTAssertEqual(controller.dictationPhase, .recording)
+        XCTAssertEqual(controller.surface, .dictate)
+        XCTAssertTrue(controller.showsActiveWaveform)
+        controller.showTypePage()
         XCTAssertEqual(controller.surface, .type)
+        XCTAssertEqual(controller.dictationPhase, .recording)
+        XCTAssertTrue(controller.showsActiveWaveform)
         controller.selectedSurface = .dictate
         XCTAssertEqual(controller.surface, .dictate)
         XCTAssertEqual(controller.dictationPhase, .recording)
-        XCTAssertTrue(controller.showsActiveWaveform)
-        controller.selectedSurface = .type
-        XCTAssertEqual(controller.dictationPhase, .recording)
-        XCTAssertTrue(controller.showsActiveWaveform)
     }
 
     func testTheTypePageIsTheDefault() {

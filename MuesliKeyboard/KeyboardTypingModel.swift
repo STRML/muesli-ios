@@ -40,9 +40,18 @@ private final class AutocorrectSwitch {
 @Observable
 final class KeyboardTypingModel {
     private(set) var state = TypingState()
-    /// Apple asks keyboards to show a globe only when `needsInputModeSwitchKey` says the system draws none; Sam
-    /// asked for the key always, so this stays true. One place to change that.
-    var showsGlobe = true
+    /// Our globe key, shown only when `needsInputModeSwitchKey` says the system draws none. Hidden until the
+    /// view controller has read it.
+    private(set) var showsGlobe = false
+    /// The view controller's `needsInputModeSwitchKey`, read once the view is in a window and again when it can
+    /// change. Returns whether the globe appeared or went away.
+    @discardableResult
+    func setNeedsInputModeSwitchKey(_ value: Bool?) -> Bool {
+        let shown = TypingGlobeKey.isShown(needsInputModeSwitchKey: value)
+        guard shown != showsGlobe else { return false }
+        showsGlobe = shown
+        return true
+    }
     /// The Autocorrect switch in Settings, as the shared store last said. On until told otherwise.
     var autocorrectEnabled: Bool {
         get { autocorrectSwitch.isOn }
