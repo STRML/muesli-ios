@@ -117,13 +117,46 @@ enum TypingAutocorrectRule {
     }
 
     static func correction(for typed: String, scored ranked: [Scored], strict: Bool, tuning: TypingAutocorrectTuning) -> String? {
-        guard let best = ranked.first, best.score <= tuning.maximumScore else { return nil }
-        if strict, TypingEditDistance.between(typed, best.word) > 1 { return nil }
+        if case .correct(let word) = decision(for: typed, scored: ranked, strict: strict, tuning: tuning) { return word }
+        return nil
+    }
+
+    /// What the rule decided, and when it left the word alone, the first check that stopped it. For diagnostics:
+    /// the thresholds and scoring are those of `correction`.
+    enum Decision: Equatable {
+        case correct(String)
+        case declined(TypingDeclineReason)
+    }
+
+    static func decision(
+        for typed: String, candidates: [TypingCandidate], strict: Bool = false, tuning: TypingAutocorrectTuning = .standard
+    ) -> Decision {
+        let ranked = scored(for: typed, candidates: candidates, tuning: tuning)
+        guard ranked.isEmpty else { return decision(for: typed, scored: ranked, strict: strict, tuning: tuning) }
+        return .declined(whyNothingWasScored(for: typed, candidates: candidates, tuning: tuning))
+    }
+
+    static func decision(for typed: String, scored ranked: [Scored], strict: Bool, tuning: TypingAutocorrectTuning) -> Decision {
+        guard let best = ranked.first else { return .declined(.noGuesses) }
+        guard best.score <= tuning.maximumScore else { return .declined(.maxScore) }
+        if strict, TypingEditDistance.between(typed, best.word) > 1 { return .declined(.strictEdit) }
         if let runnerUp = ranked.dropFirst().first {
             let required = tuning.margin + tuning.marginPerExtraCost * max(0, best.cost - 1)
-            guard runnerUp.score - best.score >= required else { return nil }
+            guard runnerUp.score - best.score >= required else { return .declined(.margin) }
         }
-        return best.word
+        return .correct(best.word)
+    }
+
+    /// The same filters as `scored`, read for the one that stopped the nearest candidate.
+    private static func whyNothingWasScored(
+        for typed: String, candidates: [TypingCandidate], tuning: TypingAutocorrectTuning
+    ) -> TypingDeclineReason {
+        let word = typed.lowercased()
+        let limit = tuning.budget(forWordLength: word.count)
+        let near = candidates.filter { $0.word != word && abs($0.word.count - word.count) <= 2 }
+        guard !near.isEmpty else { return candidates.isEmpty ? .noGuesses : .lengthDiff }
+        let affordable = near.filter { TypingEditCost.between(word, $0.word, weights: tuning.weights) <= limit }
+        return affordable.isEmpty ? .budget : .shortWord
     }
 
     static func isAdjacentSwap(_ a: String, _ b: String) -> Bool {

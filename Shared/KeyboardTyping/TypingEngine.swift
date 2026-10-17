@@ -66,6 +66,8 @@ final class TypingEngine {
     private var published = TypingState()
     var onChange: (@MainActor (TypingState) -> Void)?
     var completionHandler: TypingWordCompletionHandling?
+    /// Where autocorrect declines that happen here (a proxy that disagrees, a field that forbids it) are noted.
+    var diagnostics: TypingAutocorrectDiagnostics?
 
     private var machine = TypingShiftMachine()
     private var hasAppliedTraits = false
@@ -126,7 +128,10 @@ final class TypingEngine {
         state.traits = traits
         if variantChanged { state.page = traits.initialPage }
         // The host echoes the same traits after every keystroke; only a real change re-evaluates auto-capitalize.
-        if changed { lastAutocapKey = nil }
+        if changed {
+            lastAutocapKey = nil
+            noteTraitsGate(traits)
+        }
         syncWithHost()
         refresh()
     }
@@ -347,7 +352,10 @@ final class TypingEngine {
         let before = document.contextBefore
         let after = document.contextAfter
         // Only a word typed here, and seen by the proxy exactly as typed.
-        guard case .partial(let word) = TypingWordExtractor.word(before: before, after: after), word == TypingWordExtractor.withoutLeadingJoiners(typedWord) else { return }
+        guard case .partial(let word) = TypingWordExtractor.word(before: before, after: after), word == TypingWordExtractor.withoutLeadingJoiners(typedWord) else {
+            noteProxyMismatch(boundary: boundary)
+            return
+        }
         let event = TypingWordCompletedEvent(
             word: word, boundary: boundary, contextBefore: before, documentIdentifier: document.documentIdentifier
         )
@@ -357,6 +365,25 @@ final class TypingEngine {
         undoContextAfter = after ?? ""
         apply(plan)
         pendingUndo = plan.undo
+    }
+
+    /// A word was typed here and the proxy does not end with it, so autocorrect cannot act. Nothing typed
+    /// (a second space, punctuation after punctuation) is not a mismatch.
+    private func noteProxyMismatch(boundary: TypingBoundary) {
+        let typed = TypingWordExtractor.withoutLeadingJoiners(typedWord)
+        guard let diagnostics, !typed.isEmpty else { return }
+        diagnostics.note(TypingAutocorrectDiagnostic(
+            reason: .proxyMismatch, boundary: TypingAutocorrectDiagnostic.boundaryName(boundary),
+            wordLength: typed.count, completionsEmpty: nil, traits: state.traits
+        ))
+    }
+
+    /// Autocorrect is off for this field. Noted when the traits change, not per keystroke.
+    private func noteTraitsGate(_ traits: TypingTraits) {
+        guard let diagnostics, !traits.allowsSuggestions || traits.variant != .standard else { return }
+        diagnostics.note(TypingAutocorrectDiagnostic(
+            reason: .traitsGate, boundary: nil, wordLength: nil, completionsEmpty: nil, traits: traits
+        ))
     }
 
     /// Notes the word typed here that a boundary is about to end, for the strip. Whether the document really

@@ -44,7 +44,14 @@ Only these event names are uploaded. An event recorded under any other name is d
 | Recording and dictation | `recording.audioEstablished`, `recording.engineAttempt`, `recording.inputReady`, `recording.interruptedStop`, `recording.recovery`, `recording.recoveryRejected`, `recording.started`, `recording.startFailed`, `recording.startRequested`, `recording.startRetry`, `dictation.delivery`, `dictation.finalText`, `preview.persistFailed`, `startup.exited`, `startup.permissionRequested`, `startup.permissionResolved` |
 | Models, Live Activity, lifecycle | `liveActivity.failed`, `liveActivity.skipped`, `liveActivity.started`, `livePreview.memoryWarning`, `model.prewarm.backingOff`, `whisper.loaded`, `scene.active`, `scene.inactive`, `scene.background` |
 | Silence guard | `transcribe.trimmed` (`leading_ms`, `trailing_ms`, `text_source`), `transcribe.tail_dropped` (`reason`, `phrase_len`, `text_source`), `transcribe.skipped_silent` (`duration_ms`, `text_source`) |
+| Autocorrect | `autocorrect.declined` (a word the keyboard left alone: `decline_reason`, `boundary`, `word_len`, `completions_empty`, `field_variant`, `suggestions_off`, `secure`, `count`) |
 | Stop to save | `handoff.saved`, `stop.received`, `stop.ignored`, `recording.stopped`, `transcription.started`, `transcription.finished`, `transcription.failed`, `result.persisted`, `delivery.outcome`, `dictation.cancelled`, `dictation.exit`, `backgroundTask`, `app.memoryWarning`, `app.thermalState` |
+
+`autocorrect.declined` is written when a word was flagged and autocorrect did not change it, when the keyboard could
+not act on a word it typed (`proxy_mismatch`), and when a field turns autocorrect off (`traits_gate`, once per change
+of field). It carries a reason, the word's length and yes or no flags; it never carries the word, a suggestion or any
+text. To keep typing from flooding the log, each distinct decline is written the 1st, 2nd, 4th, 8th time and so on, with
+the running `count`.
 
 ### Keys
 
@@ -57,9 +64,9 @@ than the limit never match.
 | UUID | `capture_request`, `intent_invocation`, `history_id`, `boot` |
 | UUID or 8 hex characters | `request` |
 | UUID, 8 hex characters, or `none` | `active`, `active_request`, `session`, `mic_generation` |
-| integer (sent as a JSON integer) | `type`, `attempt`, `elapsed_ms`, `duration_ms`, `samples`, `bytes`, `characters`, `code`, `options`, `options_before`, `channels`, `app_state`, `audio_ms`, `heartbeat_age_ms`, `bg_remaining_ms`, `leading_ms`, `trailing_ms`, `phrase_len` |
+| integer (sent as a JSON integer) | `type`, `attempt`, `elapsed_ms`, `duration_ms`, `samples`, `bytes`, `characters`, `code`, `options`, `options_before`, `channels`, `app_state`, `audio_ms`, `heartbeat_age_ms`, `bg_remaining_ms`, `leading_ms`, `trailing_ms`, `phrase_len`, `word_len`, `count` |
 | code word or integer | `reason` |
-| true, false, yes or no (sent as a JSON bool) | `should_resume`, `enabled`, `startup`, `recording`, `protected_data`, `persistent`, `loaded`, `input_enabled`, `output_enabled`, `input_available`, `other_audio`, `file_written`, `empty`, `fresh`, `inserted`, `matchesActive`, `canUseRuntimeStart` |
+| true, false, yes or no (sent as a JSON bool) | `should_resume`, `enabled`, `startup`, `recording`, `protected_data`, `persistent`, `loaded`, `input_enabled`, `output_enabled`, `input_available`, `other_audio`, `file_written`, `empty`, `fresh`, `inserted`, `matchesActive`, `canUseRuntimeStart`, `completions_empty`, `suggestions_off`, `secure` |
 | decimal number | `sample_rate`, `input_sample_rate` |
 | seconds as text (`0.45`, `1.2s`, `none`, `never`; sent as a string, never a JSON float) | `total_s`, `wall_s`, `encoder_load_s`, `encoder_specialization_s`, `decoder_load_s`, `decoder_specialization_s`, `age`, `appSeenAt` |
 | one short code word (letters, digits, `_ . : -`, up to 48) | `model`, `variant`, `source`, `trigger`, `kind`, `error`, `stage`, `step`, `caller`, `file`, `category`, `category_before`, `mode`, `mode_before`, `preference`, `phase`, `localPhase`, `appPhase`, `readiness`, `action`, `model_state`, `trip_outcome` |
@@ -76,6 +83,9 @@ than the limit never match.
 | closed list: `begin denied end expired` | `bg_state` |
 | closed list: `nominal fair serious critical` | `thermal` |
 | closed list: `clipboard foregroundCopyRequired` | `destination` |
+| closed list: `no_guesses length_diff budget short_word max_score margin strict_edit usage_unavailable rejected_word learned_word language_unsupported proxy_mismatch traits_gate` | `decline_reason` |
+| closed list: `space punctuation return` | `boundary` |
+| closed list: `standard email url numeric` | `field_variant` |
 
 The source of truth is `Shared/DiagnosticsShipping/DiagnosticsVocabulary.swift`; a test fails when this page and that
 file disagree, and another fails when the app records an event that is not in the list.
