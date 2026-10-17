@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The "Diagnostics" section of About: the opt-in toggle, where it sends, how the last upload went, Send now and
+/// The "Diagnostics" sub-screen of Privacy and Sync: the opt-in toggle, where it sends, how the last upload went, Send now and
 /// Reset device ID, and a plain statement of what is and is not sent.
 struct DiagnosticsShippingSettings: View {
     @AppStorage(MuesliPreferences.diagnosticsShippingEnabledKey) private var enabled = false
@@ -219,5 +219,56 @@ struct DiagnosticsShippingSettings: View {
             }
         }
         .contentShape(Rectangle())
+    }
+}
+
+/// Copies the keyboard transition log to the clipboard. Shown on the Diagnostics sub-screen.
+struct CopyKeyboardDiagnosticsRow: View {
+    @State private var copiedDiagnostics = false
+
+    /// The keyboard transition log, preceded by a count of audio files against
+    /// the notes that own them. Filenames are never included -- only totals.
+    private func diagnosticsReport() -> String {
+        var header = ""
+        let store = SharedStore()
+        if let audit = try? store.audioFileAudit() {
+            header += "audio: \(audit.onDisk) files, \(audit.owned) owned, \(audit.orphaned) orphaned\n"
+        }
+        header += ICloudTextSyncEngine.diagnosticsSummary(store: store) + "\n\n"
+        return header + KeyboardDiagnosticsLog.exportText()
+    }
+
+    var body: some View {
+        MuesliSurface {
+            Button {
+                // Keyboard state transitions only -- phases, short
+                // request IDs, timings. Never dictated text.
+                UIPasteboard.general.string = diagnosticsReport()
+                copiedDiagnostics = true
+                // Confirm the copy, then go back to showing the size of
+                // the buffer. Latching on "Copied" hid that permanently.
+                Task {
+                    try? await Task.sleep(for: .seconds(2))
+                    copiedDiagnostics = false
+                }
+            } label: {
+                HStack(spacing: MuesliTheme.spacing12) {
+                    Image(systemName: "stethoscope")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(MuesliTheme.accent)
+                        .frame(width: 22)
+                    Text("Copy keyboard diagnostics")
+                        .font(MuesliTheme.headline())
+                        .foregroundStyle(MuesliTheme.textPrimary)
+                    Spacer()
+                    Text(copiedDiagnostics ? "Copied" : "Last \(KeyboardDiagnosticsLog.entryLimit)")
+                        .font(MuesliTheme.callout())
+                        .foregroundStyle(MuesliTheme.accent)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(MuesliTheme.spacing16)
+        }
     }
 }

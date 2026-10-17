@@ -1,20 +1,5 @@
 import SwiftUI
 
-struct DictionaryView: View {
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                DictionarySettingsContent()
-                    .padding(.horizontal, MuesliTheme.spacing20)
-                    .padding(.top, MuesliTheme.spacing24)
-                    .padding(.bottom, MuesliTheme.spacing24)
-            }
-            .background(MuesliTheme.backgroundBase)
-            .toolbar(.hidden, for: .navigationBar)
-        }
-    }
-}
-
 struct DictionarySettingsContent: View {
     @AppStorage(MuesliPreferences.fillerWordRemovalKey) private var fillerWordRemoval = true
     @AppStorage(MuesliPreferences.customDictionaryKey) private var customDictionary = true

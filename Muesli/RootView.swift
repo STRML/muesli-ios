@@ -18,6 +18,8 @@ struct RootView: View {
         .overlay {
             if coordinator.isKeyboardHandoffActive {
                 KeyboardHandoffOverlay(coordinator: coordinator)
+            } else if coordinator.prepareTrip != nil {
+                PrepareTripView(coordinator: coordinator)
             }
         }
         .background(MuesliTheme.backgroundBase)

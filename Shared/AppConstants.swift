@@ -18,6 +18,11 @@ enum MuesliAppConstants {
     static let syncHost = "sync"
     static let settingsHost = "settings"
     static let debugHost = "debug"
+    /// The keyboard sends the app here when dictation is not ready: load the model, then say when to come back.
+    static let prepareHost = "prepare"
+    /// Just open the app. Used for "Open Muesli" when something has stalled.
+    static let openHost = "open"
+    static let tripQueryItem = "trip"
     static let resetOnboardingPath = "/reset-onboarding"
     static let resetOnboardingLaunchArgument = "--muesli-reset-onboarding"
     static let uiTestingLaunchArgument = "--muesli-ui-testing"

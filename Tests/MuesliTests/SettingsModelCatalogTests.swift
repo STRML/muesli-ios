@@ -6,18 +6,63 @@ final class SettingsModelCatalogTests: XCTestCase {
         XCTAssertEqual(
             SettingsSection.allCases.map(\.title),
             [
+                "Keyboard",
                 "Voice Notes",
                 "Meetings",
-                "Dictionary",
                 "Models",
-                "AI Summaries",
-                "Quill",
-                "Sync & Privacy",
+                "Dictionary",
+                "AI Services",
+                "Privacy and Sync",
                 "Appearance",
                 "About",
             ]
         )
         XCTAssertFalse(SettingsSection.allCases.map(\.title).contains("Status"))
+        XCTAssertFalse(SettingsSection.allCases.map(\.title).contains("Quill"))
+    }
+
+    func testSettingsRootGroupsListEverySectionExactlyOnceInOrder() {
+        XCTAssertEqual(SettingsSection.rootGroups.map(\.title), ["Capture", "Text", "AI and Privacy", "App"])
+        XCTAssertEqual(
+            SettingsSection.rootGroups.map { $0.sections.map(\.title) },
+            [
+                ["Keyboard", "Voice Notes", "Meetings"],
+                ["Models", "Dictionary"],
+                ["AI Services", "Privacy and Sync"],
+                ["Appearance", "About"],
+            ]
+        )
+        XCTAssertEqual(SettingsSection.rootGroups.flatMap(\.sections), SettingsSection.allCases)
+    }
+
+    func testVoiceNoteDeepLinksStillLandOnVoiceNotes() {
+        // openLongVoiceNoteSettings requests the .input section; it holds the Long Voice Note rows.
+        XCTAssertEqual(SettingsSection.inputRequestTarget, .input)
+        XCTAssertEqual(SettingsSection.inputRequestTarget.title, "Voice Notes")
+        XCTAssertEqual(SettingsSection.syncPrivacyRequestTarget, .syncPrivacy)
+        XCTAssertEqual(SettingsSection.syncPrivacyRequestTarget.title, "Privacy and Sync")
+    }
+
+    func testKeyboardIsItsOwnSectionWithTheKeyboardIcon() {
+        XCTAssertEqual(SettingsSection.keyboard.title, "Keyboard")
+        XCTAssertEqual(SettingsSection.keyboard.icon, "keyboard")
+        XCTAssertNotEqual(SettingsSection.input.icon, "keyboard")
+        XCTAssertNotEqual(SettingsSection.keyboard, SettingsSection.input)
+    }
+
+    func testDiagnosticsCopyNamesTheSectionThatHoldsTheServer() {
+        let named = [
+            DiagnosticsShippingCopy.toggleDetail,
+            DiagnosticsShippingCopy.noEndpoint,
+            DiagnosticsShippingCopy.serverFieldPlaceholder,
+            DiagnosticsShippingCopy.keyNote,
+            DiagnosticsShippingCopy.fromAISummaries,
+            DiagnosticsShippingCopy.keyRejected,
+        ]
+        for text in named {
+            XCTAssertTrue(text.contains(SettingsSection.aiServices.title), text)
+            XCTAssertFalse(text.contains("AI Summaries"), text)
+        }
     }
 
     func testAboutListsEveryDirectThirdPartyRuntimeDependency() {

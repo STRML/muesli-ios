@@ -9,6 +9,8 @@ final class ModelPrewarmPolicyTests: XCTestCase {
 
     private let model = "whisper-small-en"
     private let t0 = Date(timeIntervalSince1970: 1_700_000_000)
+    /// The app build and OS the model loads under in these tests. `ModelPrewarmReadinessTests` covers a change.
+    private let stamp = "0.1.7(40)/27.0"
 
     private func decide(
         _ trigger: Policy.Trigger,
@@ -24,6 +26,7 @@ final class ModelPrewarmPolicyTests: XCTestCase {
             isLoaded: loaded,
             loadInFlight: inFlight,
             history: history ?? ModelPrewarmHistory(modelID: model),
+            stamp: stamp,
             now: now ?? t0
         )
     }
@@ -31,13 +34,13 @@ final class ModelPrewarmPolicyTests: XCTestCase {
     /// A model that has loaded before: the steady state after the first warm.
     private func warmed() -> ModelPrewarmHistory {
         var history = ModelPrewarmHistory(modelID: model)
-        history.recordLoad(seconds: 2, now: t0)
+        history.recordLoad(seconds: 2, now: t0, stamp: stamp)
         return history
     }
 
     private func failedOnce(at time: Date? = nil) -> ModelPrewarmHistory {
         var history = ModelPrewarmHistory(modelID: model)
-        history.recordFailure(now: time ?? t0)
+        history.recordFailure(now: time ?? t0, stamp: stamp)
         return history
     }
 
@@ -150,8 +153,8 @@ final class ModelPrewarmPolicyTests: XCTestCase {
     // Row 9b: each failure restarts the wait from the failure, with the next length.
     func testEachFailureRestartsTheWaitFromThatFailure() {
         var history = ModelPrewarmHistory(modelID: model)
-        history.recordFailure(now: t0)
-        history.recordFailure(now: t0.addingTimeInterval(400))
+        history.recordFailure(now: t0, stamp: stamp)
+        history.recordFailure(now: t0.addingTimeInterval(400), stamp: stamp)
         XCTAssertEqual(history.strikes, 2)
         XCTAssertEqual(history.remainingBackoff(now: t0.addingTimeInterval(400)), 600, accuracy: 0.001)
         XCTAssertEqual(history.remainingBackoff(now: t0.addingTimeInterval(1_000)), 0, accuracy: 0.001)
@@ -160,17 +163,17 @@ final class ModelPrewarmPolicyTests: XCTestCase {
     // Row 10: a load that succeeds but takes longer than 30 s counts as a strike, and exactly 30 s does not.
     func testASlowLoadCountsAsAStrikeAndAFastOneClearsThem() {
         var slow = ModelPrewarmHistory(modelID: model)
-        slow.recordLoad(seconds: 30.5, now: t0)
+        slow.recordLoad(seconds: 30.5, now: t0, stamp: stamp)
         XCTAssertEqual(slow.strikes, 1)
-        XCTAssertTrue(slow.hasLoadedSuccessfully)
+        XCTAssertTrue(slow.isWarm(for: stamp))
         XCTAssertEqual(decide(.keyboardSession, history: slow, at: t0.addingTimeInterval(5)), .skip(.backingOff))
 
         var boundary = ModelPrewarmHistory(modelID: model)
-        boundary.recordLoad(seconds: 30, now: t0)
+        boundary.recordLoad(seconds: 30, now: t0, stamp: stamp)
         XCTAssertEqual(boundary.strikes, 0)
 
         var recovered = failedOnce()
-        recovered.recordLoad(seconds: 2, now: t0.addingTimeInterval(400))
+        recovered.recordLoad(seconds: 2, now: t0.addingTimeInterval(400), stamp: stamp)
         XCTAssertEqual(recovered.strikes, 0)
         XCTAssertNil(recovered.lastStrikeAt)
         XCTAssertEqual(decide(.keyboardSession, history: recovered, at: t0.addingTimeInterval(401)), .load)
@@ -180,7 +183,7 @@ final class ModelPrewarmPolicyTests: XCTestCase {
     // did load is not warmed again on open.
     func testTheNineHundredSecondLoadBacksOffAndStopsOpportunisticWarming() {
         var history = ModelPrewarmHistory(modelID: model)
-        history.recordLoad(seconds: 933, now: t0)
+        history.recordLoad(seconds: 933, now: t0, stamp: stamp)
         XCTAssertEqual(decide(.foreground, history: history, at: t0.addingTimeInterval(1)), .skip(.backingOff))
         let afterWait = t0.addingTimeInterval(Policy.baseBackoffSeconds)
         XCTAssertEqual(decide(.foreground, history: history, at: afterWait), .skip(.alreadyWarmedOnce))
@@ -225,9 +228,9 @@ final class ModelPrewarmPolicyTests: XCTestCase {
         XCTAssertEqual(Duration.milliseconds(30_500).totalSeconds, 30.5, accuracy: 0.0001)
         XCTAssertEqual(Duration.seconds(2).totalSeconds, 2, accuracy: 0.0001)
         var history = ModelPrewarmHistory(modelID: model)
-        history.recordLoad(seconds: Duration.milliseconds(29_900).totalSeconds, now: t0)
+        history.recordLoad(seconds: Duration.milliseconds(29_900).totalSeconds, now: t0, stamp: stamp)
         XCTAssertEqual(history.strikes, 0)
-        history.recordLoad(seconds: Duration.milliseconds(30_500).totalSeconds, now: t0)
+        history.recordLoad(seconds: Duration.milliseconds(30_500).totalSeconds, now: t0, stamp: stamp)
         XCTAssertEqual(history.strikes, 1)
     }
 
@@ -236,7 +239,7 @@ final class ModelPrewarmPolicyTests: XCTestCase {
     // Row 13: the app relaunches right after a failure. A new store over the same defaults still backs off.
     func testRelaunchRightAfterAFailureRespectsThePersistedBackoff() {
         let defaults = isolatedDefaults()
-        ModelPrewarmHistoryStore(defaults: defaults).recordFailure(modelID: model, now: t0)
+        ModelPrewarmHistoryStore(defaults: defaults).recordFailure(modelID: model, now: t0, stamp: stamp)
 
         let relaunched = ModelPrewarmHistoryStore(defaults: defaults)
         let history = relaunched.history(for: model)
@@ -248,9 +251,9 @@ final class ModelPrewarmPolicyTests: XCTestCase {
     // Row 13b: a successful load persists too, so a relaunch no longer warms on open.
     func testASuccessfulLoadPersistsAcrossRelaunch() {
         let defaults = isolatedDefaults()
-        ModelPrewarmHistoryStore(defaults: defaults).recordLoad(modelID: model, seconds: 2.2, now: t0)
+        ModelPrewarmHistoryStore(defaults: defaults).recordLoad(modelID: model, seconds: 2.2, now: t0, stamp: stamp)
         let history = ModelPrewarmHistoryStore(defaults: defaults).history(for: model)
-        XCTAssertTrue(history.hasLoadedSuccessfully)
+        XCTAssertTrue(history.isWarm(for: stamp))
         XCTAssertEqual(decide(.launch, history: history), .skip(.alreadyWarmedOnce))
     }
 
@@ -259,10 +262,10 @@ final class ModelPrewarmPolicyTests: XCTestCase {
     func testChangingTheModelResetsTheBackoff() {
         let defaults = isolatedDefaults()
         let store = ModelPrewarmHistoryStore(defaults: defaults)
-        store.recordFailure(modelID: model, now: t0)
+        store.recordFailure(modelID: model, now: t0, stamp: stamp)
 
         XCTAssertEqual(store.history(for: "parakeet-v3").strikes, 0)
-        XCTAssertFalse(store.history(for: "parakeet-v3").hasLoadedSuccessfully)
+        XCTAssertFalse(store.history(for: "parakeet-v3").isWarm(for: stamp))
 
         store.reset(modelID: model)
         XCTAssertEqual(store.history(for: model).strikes, 0)
@@ -273,8 +276,8 @@ final class ModelPrewarmPolicyTests: XCTestCase {
     func testAnOutcomeForAnotherModelDoesNotTouchTheCurrentModelsRecord() {
         let defaults = isolatedDefaults()
         let store = ModelPrewarmHistoryStore(defaults: defaults)
-        store.recordLoad(modelID: "parakeet-v3", seconds: 1, now: t0)
-        store.recordFailure(modelID: model, now: t0)
+        store.recordLoad(modelID: "parakeet-v3", seconds: 1, now: t0, stamp: stamp)
+        store.recordFailure(modelID: model, now: t0, stamp: stamp)
         XCTAssertEqual(store.history(for: model).strikes, 1)
         // One record is kept, for the model that reported last; the earlier model reads back clean.
         XCTAssertEqual(store.history(for: "parakeet-v3").strikes, 0)
@@ -309,7 +312,7 @@ final class ModelPrewarmPolicyTests: XCTestCase {
             let decision = decide(.foreground, history: store.history(for: model), at: now)
             guard decision == .load else { continue }
             attempts += 1
-            store.recordFailure(modelID: model, now: now)
+            store.recordFailure(modelID: model, now: now, stamp: stamp)
         }
         XCTAssertEqual(attempts, 1)
         XCTAssertEqual(legacyAttempts(foregrounds: 10), 10)
@@ -324,7 +327,7 @@ final class ModelPrewarmPolicyTests: XCTestCase {
             let now = t0.addingTimeInterval(Double(minute) * 60)
             guard decide(.foreground, history: store.history(for: model), at: now) == .load else { continue }
             attemptTimes.append(now.timeIntervalSince(t0))
-            store.recordFailure(modelID: model, now: now)
+            store.recordFailure(modelID: model, now: now, stamp: stamp)
         }
         // Each attempt is followed by the next wait: 5, 10, 20, 40, 80, 160, 320 min, then the 6 h cap twice.
         XCTAssertEqual(attemptTimes, [0, 300, 900, 2_100, 4_500, 9_300, 18_900, 38_100, 59_700, 81_300])
@@ -338,7 +341,7 @@ final class ModelPrewarmPolicyTests: XCTestCase {
             let now = t0.addingTimeInterval(Double(index) * 30)
             guard decide(.foreground, history: store.history(for: model), at: now) == .load else { continue }
             attempts += 1
-            store.recordLoad(modelID: model, seconds: 2, now: now)
+            store.recordLoad(modelID: model, seconds: 2, now: now, stamp: stamp)
         }
         XCTAssertEqual(attempts, 1)
     }

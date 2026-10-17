@@ -30,6 +30,13 @@ Idle audio callbacks refresh background-start readiness. The audio tap is create
 in a nonisolated context so the audio thread does not inherit main-actor isolation.
 Permission completion checks ownership before starting cancelled audio work.
 
+## Truthful state after an update, a kill or a crash
+
+Every request the app works on carries the boot id of the app process, the app publishes a heartbeat and a readiness
+record, and the keyboard shows listening, writing or ready only when a live owner confirms it. A request whose owner
+is gone is shown as idle and ended once, atomically. The first load after an update has a Preparing screen and a
+prompt to go back. See `docs/keyboard-readiness.md`.
+
 ## Shared handoff rules
 
 Both processes apply `KeyboardHandoffState.accepts` inside a SQLite transaction.

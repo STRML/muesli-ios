@@ -238,6 +238,14 @@ struct KeyboardRootView: View {
     private var pillContent: some View {
         if isActive {
             switch controller.dictationPhase {
+            case .recording where controller.isConnectionLost:
+                // No audio is arriving: say so, and make the pill the way back instead of a stop that does nothing.
+                HStack(spacing: 10) {
+                    Image(systemName: "arrow.up.forward.app").font(.system(size: 22, weight: .semibold))
+                    Text("Reconnect")
+                        .font(.system(size: 20, weight: .semibold, design: .rounded))
+                }
+                .accessibilityLabel(controller.readinessPresentation.accessibilityLabel)
             case .recording:
                 // Listening is shown by the pill itself: the live level, not a label. Tap it to insert.
                 MuesliInlineWaveformView(
@@ -262,8 +270,7 @@ struct KeyboardRootView: View {
             }
         } else {
             HStack(spacing: 10) {
-                Image(systemName: controller.primaryButtonIcon)
-                    .font(.system(size: 24, weight: .semibold))
+                KeyboardReadinessSymbol(controller: controller, size: 24)
                 Text(primaryActionTitle)
                     .font(.system(size: 22, weight: .semibold, design: .rounded))
                     .lineLimit(1)
@@ -290,6 +297,8 @@ struct KeyboardRootView: View {
                 KeyboardDictationStatusView(controller: controller)
             } else if controller.canUndoRewrite {
                 KeyboardUndoEditButton(controller: controller)
+            } else if controller.readinessPresentation.needsAttention {
+                KeyboardReadinessBadge(controller: controller)
             } else {
                 readyCaption
             }

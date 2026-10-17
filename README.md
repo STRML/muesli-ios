@@ -209,7 +209,7 @@ Muesli's default design is local-first:
 - saved dictations and meetings stay on device unless you turn on iCloud Sync (off by default), which syncs them through your private iCloud account;
 - TelemetryDeck events avoid audio, transcript text, and user-provided content;
 - cloud summary providers are optional and separate from local transcription;
-- diagnostics shipping is off by default. When you turn it on (Settings > About > Diagnostics), the app sends its event log (what happened and when, never transcripts, rewrites, text, audio, contacts or your device name) only to the server you set under AI Summaries, over HTTPS. See [docs/diagnostics-shipping.md](docs/diagnostics-shipping.md) for exactly what is sent, and [docs/diagnostics-receiver.md](docs/diagnostics-receiver.md) to run your own receiver.
+- diagnostics shipping is off by default. When you turn it on (Settings > Privacy and Sync > Diagnostics), the app sends its event log (what happened and when, never transcripts, rewrites, text, audio, contacts or your device name) only to the server you set under AI Services, over HTTPS. See [docs/diagnostics-shipping.md](docs/diagnostics-shipping.md) for exactly what is sent, and [docs/diagnostics-receiver.md](docs/diagnostics-receiver.md) to run your own receiver.
 
 Review [Muesli/PrivacyInfo.xcprivacy](Muesli/PrivacyInfo.xcprivacy) and [MuesliKeyboard/PrivacyInfo.xcprivacy](MuesliKeyboard/PrivacyInfo.xcprivacy) for the current privacy manifests.
 

@@ -4,20 +4,6 @@ struct AboutSettingsContent: View {
     private let sourceURL = URL(string: "https://github.com/Muesli-HQ/muesli-ios")!
     private let libraries = OpenSourceLibrary.all
 
-    @State private var copiedDiagnostics = false
-
-    /// The keyboard transition log, preceded by a count of audio files against
-    /// the notes that own them. Filenames are never included -- only totals.
-    private func diagnosticsReport() -> String {
-        var header = ""
-        let store = SharedStore()
-        if let audit = try? store.audioFileAudit() {
-            header += "audio: \(audit.onDisk) files, \(audit.owned) owned, \(audit.orphaned) orphaned\n"
-        }
-        header += ICloudTextSyncEngine.diagnosticsSummary(store: store) + "\n\n"
-        return header + KeyboardDiagnosticsLog.exportText()
-    }
-
     private var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
     }
@@ -35,35 +21,6 @@ struct AboutSettingsContent: View {
                     AboutValueRow(icon: "lock.shield", title: "Processing", value: "On device")
                     Divider().overlay(MuesliTheme.surfaceBorder)
                     AboutValueRow(icon: "externaldrive", title: "App data", value: "Local SQLite")
-                    Divider().overlay(MuesliTheme.surfaceBorder)
-                    Button {
-                        // Keyboard state transitions only -- phases, short
-                        // request IDs, timings. Never dictated text.
-                        UIPasteboard.general.string = diagnosticsReport()
-                        copiedDiagnostics = true
-                        // Confirm the copy, then go back to showing the size of
-                        // the buffer. Latching on "Copied" hid that permanently.
-                        Task {
-                            try? await Task.sleep(for: .seconds(2))
-                            copiedDiagnostics = false
-                        }
-                    } label: {
-                        HStack(spacing: MuesliTheme.spacing12) {
-                            Image(systemName: "stethoscope")
-                                .font(.system(size: 15, weight: .medium))
-                                .foregroundStyle(MuesliTheme.accent)
-                                .frame(width: 22)
-                            Text("Copy keyboard diagnostics")
-                                .font(MuesliTheme.headline())
-                                .foregroundStyle(MuesliTheme.textPrimary)
-                            Spacer()
-                            Text(copiedDiagnostics ? "Copied" : "Last \(KeyboardDiagnosticsLog.entryLimit)")
-                                .font(MuesliTheme.callout())
-                                .foregroundStyle(MuesliTheme.accent)
-                        }
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
                     Divider().overlay(MuesliTheme.surfaceBorder)
                     Link(destination: sourceURL) {
                         HStack(spacing: MuesliTheme.spacing12) {
@@ -87,8 +44,6 @@ struct AboutSettingsContent: View {
                 }
                 .padding(MuesliTheme.spacing16)
             }
-
-            DiagnosticsShippingSettings()
 
             VStack(alignment: .leading, spacing: MuesliTheme.spacing8) {
                 Text("OPEN SOURCE LIBRARIES")

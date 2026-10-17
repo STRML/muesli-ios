@@ -27,17 +27,29 @@ struct SharedStore: Sendable {
     private let eventPoster: any CrossProcessEventPosting
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
+    /// The boot of the app process that holds this store. Every handoff the app writes is stamped with it, so a
+    /// request always names the process working on it. The keyboard's store has none and carries the stored owner
+    /// forward instead.
+    private let bootID: UUID?
 
     init(
         appGroupIdentifier: String = MuesliAppConstants.appGroupIdentifier,
         containerURL: URL? = nil,
-        eventPoster: any CrossProcessEventPosting = DarwinCrossProcessEventBus.shared
+        eventPoster: any CrossProcessEventPosting = DarwinCrossProcessEventBus.shared,
+        bootID: UUID? = nil
     ) {
         self.appGroupIdentifier = appGroupIdentifier
         self.overrideContainerURL = containerURL
         self.eventPoster = eventPoster
+        self.bootID = bootID
         self.encoder = JSONEncoder()
         self.decoder = JSONDecoder()
+    }
+
+    /// The same store, with every handoff it writes stamped with `bootID`. The app uses it to name itself as owner.
+    func owned(by bootID: UUID) -> SharedStore {
+        SharedStore(appGroupIdentifier: appGroupIdentifier, containerURL: overrideContainerURL,
+                    eventPoster: eventPoster, bootID: bootID)
     }
 
     /// Atomically acquires the existing handoff and pending-request slot.
@@ -92,6 +104,50 @@ struct SharedStore: Sendable {
     func clearKeyboardHandoffState() throws {
         try database().clearValue(key: .keyboardHandoffState)
         eventPoster.post(.handoffStatusChanged)
+    }
+
+    /// Ends a request whose owner is gone, atomically: it commits only if the request is still the current one,
+    /// still owned by `expectedOwner` and still in a phase that needs an owner. Returns whether this call did it,
+    /// so of several processes that notice at once exactly one records the outcome. A locked database reads as a
+    /// lost race: the caller re-reads and sees the winner's row.
+    func abandonRequest(
+        _ requestID: UUID,
+        expectedOwner: UUID?,
+        reason: AbandonReason,
+        endingAs terminal: KeyboardHandoffPhase = .failed
+    ) throws -> Bool {
+        let abandoned: Bool
+        do {
+            abandoned = try database().abandonRequest(
+                requestID, expectedOwner: expectedOwner, reason: reason, endingAs: terminal
+            )
+        } catch SharedStoreDatabaseError.stepFailed(let message)
+                    where message.localizedCaseInsensitiveContains("locked")
+                        || message.localizedCaseInsensitiveContains("busy") {
+            return false
+        }
+        if abandoned {
+            eventPoster.post(.handoffStatusChanged)
+            eventPoster.post(.ownershipChanged)
+        }
+        return abandoned
+    }
+
+    /// The app's readiness record: boot identity, model state, mic state and the heartbeat. `notify` is false for a
+    /// plain heartbeat, which the keyboard picks up on its own tick, so a beat every few seconds wakes nobody.
+    func saveAppReadiness(_ record: AppReadinessRecord, notify: Bool) throws {
+        try database().saveValue(record, key: .appReadiness)
+        if notify { eventPoster.post(.readinessChanged) }
+    }
+
+    func appReadiness() throws -> AppReadinessRecord? {
+        try database().value(AppReadinessRecord.self, key: .appReadiness)
+    }
+
+    /// Whether `value` differs from the last one anyone logged for `topic`, recording it if so. Both processes and
+    /// every keyboard instance share the answer, so a recreated keyboard does not log the same state again.
+    func noteLogged(topic: String, value: String) throws -> Bool {
+        try database().noteLogged(topic: topic, value: value)
     }
 
     func saveStatus(_ status: DictationStatus) throws {
@@ -545,7 +601,7 @@ struct SharedStore: Sendable {
     }
 
     private func database() throws -> SharedStoreDatabase {
-        try SharedStoreDatabase(containerURL: containerURL(), encoder: encoder, decoder: decoder)
+        try SharedStoreDatabase(containerURL: containerURL(), encoder: encoder, decoder: decoder, bootID: bootID)
     }
 
     /// Counts audio files on disk against the sessions that claim to own one.
@@ -625,6 +681,8 @@ private enum SharedStoreKey: String {
     case keyboardModelCatalog = "keyboard_model_catalog"
     case keyboardTypingSettings = "keyboard_typing_settings"
     case keyboardModelSelectionRequest = "keyboard_model_selection_request"
+    case appReadiness = "app_readiness"
+    case loggedOnce = "logged_once"
     case legacyJSONMigrated = "legacy_json_migrated_v1"
     case customWordsInitialized = "custom_words_initialized"
 }
@@ -714,12 +772,14 @@ private struct SharedStoreDatabase {
     private let databaseURL: URL
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
+    private let bootID: UUID?
 
-    init(containerURL: URL, encoder: JSONEncoder, decoder: JSONDecoder) {
+    init(containerURL: URL, encoder: JSONEncoder, decoder: JSONDecoder, bootID: UUID?) {
         self.containerURL = containerURL
         self.databaseURL = containerURL.appendingPathComponent(Self.databaseFileName)
         self.encoder = encoder
         self.decoder = decoder
+        self.bootID = bootID
     }
 
     func saveValue<T: Encodable>(_ value: T, key: SharedStoreKey) throws {
@@ -763,7 +823,8 @@ private struct SharedStoreDatabase {
                       ![.idle, .resultReady, .inserted, .copyRequired, .cancelled, .cancelRequested].contains(current.phase),
                       current.recoveryAction != .cancel else { throw SharedStoreError.requestInProgress }
                 try upsertValue(encoder.encode(request), key: .pendingRequest, db: db)
-                try upsertValue(encoder.encode(current.advanced(to: .transcribingStarted)),
+                // The recovering app owns it from here, or the keyboard would abandon what is being recovered.
+                try upsertValue(encoder.encode(current.advanced(to: .transcribingStarted).owned(by: bootID)),
                                 key: .keyboardHandoffState, db: db)
             }
         }
@@ -796,7 +857,7 @@ private struct SharedStoreDatabase {
                     if current.phase == .failed || current.phase == .idle {
                         // Retrying the same ID must reserve it just as a new
                         // claim does, before another process can claim a start.
-                        try upsertValue(encoder.encode(current.advanced(to: .startRequested)),
+                        try upsertValue(encoder.encode(current.advanced(to: .startRequested).owned(by: bootID)),
                                         key: .keyboardHandoffState, db: db)
                     }
                     return
@@ -812,7 +873,7 @@ private struct SharedStoreDatabase {
                 }
                 try upsertValue(encoder.encode(request), key: .pendingRequest, db: db)
                 try upsertValue(encoder.encode(KeyboardHandoffState(
-                    requestID: request.id, phase: .startRequested
+                    requestID: request.id, phase: .startRequested, ownerBootID: bootID
                 )), key: .keyboardHandoffState, db: db)
                 // Clear an earlier owner's command inside acquisition. Clearing
                 // later in the keyboard could erase a new Stop/Cancel.
@@ -853,6 +914,7 @@ private struct SharedStoreDatabase {
             // SQLite transaction so a delayed app update cannot undo insertion.
             try transaction(db: db) {
                 var state = state
+                var owner = bootID ?? state.ownerBootID
                 if let data = try valueData(key: .keyboardHandoffState, db: db) {
                     let current = try decoder.decode(KeyboardHandoffState.self, from: data)
                     if current.requestID != nil, current.requestID != state.requestID {
@@ -867,7 +929,11 @@ private struct SharedStoreDatabase {
                        current.phase == .cancelRequested || current.recoveryAction == .cancel {
                         state = current.advanced(to: .cancelled, message: "Cancelled")
                     }
+                    // The app stamps its own boot. The keyboard has none, so the stored owner outranks whatever
+                    // it read a moment ago, and a fresh state it builds (stop, cancel) keeps it.
+                    if current.requestID == state.requestID { owner = bootID ?? current.ownerBootID ?? owner }
                 }
+                state = state.owned(by: owner)
                 if let requestID = state.requestID {
                     if state.phase == .resultReady {
                         try enqueueKeyboardDelivery(for: requestID, db: db)
@@ -878,6 +944,82 @@ private struct SharedStoreDatabase {
                 }
                 try upsertValue(encoder.encode(state), key: .keyboardHandoffState, db: db)
             }
+        }
+    }
+
+    /// Phases that need a running app. A settled request, a queued result and a recovery prompt are not abandoned.
+    private static let abandonablePhases: Set<KeyboardHandoffPhase> = [
+        .startRequested, .startAcknowledged, .recordingStarted, .stopRequested, .cancelRequested,
+        .stopAcknowledged, .audioSaved, .transcribingStarted,
+    ]
+
+    func abandonRequest(
+        _ requestID: UUID,
+        expectedOwner: UUID?,
+        reason: AbandonReason,
+        endingAs terminal: KeyboardHandoffPhase
+    ) throws -> Bool {
+        precondition([.failed, .cancelled].contains(terminal), "an abandoned request ends failed or cancelled")
+        return try withDatabase { db in
+            var won = false
+            try transaction(db: db) {
+                guard let data = try valueData(key: .keyboardHandoffState, db: db) else { return }
+                let current = try decoder.decode(KeyboardHandoffState.self, from: data)
+                guard current.requestID == requestID,
+                      Self.abandonablePhases.contains(current.phase),
+                      current.ownerBootID == expectedOwner else { return }
+                let ended = current.advanced(
+                    to: terminal,
+                    message: terminal == .cancelled ? "Cancelled" : reason.message,
+                    endReason: reason.rawValue
+                )
+                try upsertValue(encoder.encode(ended), key: .keyboardHandoffState, db: db)
+                try deleteKeyboardDelivery(for: requestID, db: db)
+                // A stop or start nobody read must not reach the next owner, and the request's other records must
+                // not keep describing a recording that is not happening.
+                // A cancel the user just sent stays, so an app that only looks quiet still stops its recorder.
+                if let data = try valueData(key: .pendingCommand, db: db) {
+                    let command = try decoder.decode(DictationCommand.self, from: data)
+                    let isTheUsersCancel = terminal == .cancelled && command.action == .cancel
+                    if command.requestID == requestID, !isTheUsersCancel {
+                        try execute("DELETE FROM key_values WHERE key = ?", db: db) { statement in
+                            try bind(SharedStoreKey.pendingCommand.rawValue, to: statement, at: 1)
+                        }
+                    }
+                }
+                if let data = try valueData(key: .pendingRequest, db: db),
+                   try decoder.decode(DictationRequest.self, from: data).id == requestID {
+                    try execute("DELETE FROM key_values WHERE key = ?", db: db) { statement in
+                        try bind(SharedStoreKey.pendingRequest.rawValue, to: statement, at: 1)
+                    }
+                }
+                if let data = try valueData(key: .dictationStatus, db: db) {
+                    let status = try decoder.decode(DictationStatus.self, from: data)
+                    if status.requestID == requestID, [.requested, .recording, .transcribing].contains(status.phase) {
+                        try upsertValue(
+                            encoder.encode(DictationStatus(requestID: requestID, phase: .failed, message: reason.message)),
+                            key: .dictationStatus, db: db
+                        )
+                    }
+                }
+                won = true
+            }
+            return won
+        }
+    }
+
+    func noteLogged(topic: String, value: String) throws -> Bool {
+        try withDatabase { db in
+            var changed = false
+            try transaction(db: db) {
+                var logged = try valueData(key: .loggedOnce, db: db)
+                    .flatMap { try? decoder.decode([String: String].self, from: $0) } ?? [:]
+                guard logged[topic] != value else { return }
+                logged[topic] = value
+                try upsertValue(encoder.encode(logged), key: .loggedOnce, db: db)
+                changed = true
+            }
+            return changed
         }
     }
 
