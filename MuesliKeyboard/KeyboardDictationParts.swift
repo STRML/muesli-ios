@@ -6,18 +6,22 @@ import SwiftUI
 /// place when it is: the Dictate page's pill and the Type page's Record key are both this.
 struct KeyboardPrimaryActionControl<Label: View>: View {
     let controller: KeyboardController
+    /// True while a press has already acted as something else (the Record key's hold), so its release is no tap.
+    var isTapSuppressed: () -> Bool = { false }
     @ViewBuilder let label: () -> Label
 
     var body: some View {
         if controller.recordKeyMode == .openMuesli, let launchURL = controller.launchURL {
             Link(destination: launchURL) { label() }
                 .simultaneousGesture(TapGesture().onEnded {
+                    guard !isTapSuppressed() else { return }
                     controller.primaryLaunchAction()
                 })
                 .buttonStyle(KeyboardPressStyle())
                 .allowsHitTesting(!controller.isPrimaryButtonDisabled)
         } else {
             Button {
+                guard !isTapSuppressed() else { return }
                 controller.primaryAction()
             } label: {
                 label()
