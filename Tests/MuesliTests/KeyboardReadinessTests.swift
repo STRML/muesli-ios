@@ -500,6 +500,34 @@ final class KeyboardReadinessTests: XCTestCase {
         XCTAssertNotNil(row.endReason)
     }
 
+    // The review's concern: a healthy recording must never read as a lost connection. While it records the app
+    // republishes the level at least every 0.75 s, so the keyboard sees a fresh status on every one-second tick.
+    func testAHealthyRecordingStaysRecordingForAsLongAsLevelsKeepArriving() throws {
+        let id = try persistRequest(owner: liveBoot, phase: .recordingStarted, age: 0)
+        try publishApp()
+        controller.prepareInitialPresentationState()
+        for second in 1...30 {
+            clock = clock.addingTimeInterval(1)
+            try publishApp()
+            try keyboardStore.saveKeyboardRuntimeStatus(KeyboardRuntimeStatus(
+                isActive: true, activeRequestID: id, phase: .recording, inputLevel: 0.2, updatedAt: clock))
+            controller.reevaluateReadiness()
+            XCTAssertEqual(controller.readiness.state, .recording, "second \(second)")
+            XCTAssertTrue(controller.canStopFromStatusPill, "second \(second)")
+        }
+        // The levels stop: 6 s later it is a lost connection, not before.
+        for second in 1...5 {
+            clock = clock.addingTimeInterval(1)
+            try publishApp()
+            controller.reevaluateReadiness()
+            XCTAssertEqual(controller.readiness.state, .recording, "silent second \(second)")
+        }
+        clock = clock.addingTimeInterval(1.5)
+        try publishApp()
+        controller.reevaluateReadiness()
+        XCTAssertEqual(controller.readiness.state, .connectionLost)
+    }
+
     // A cancel with a live, confirming owner still goes through the app.
     func testACancelWithALiveOwnerStillWaitsForTheApp() throws {
         let id = try persistRequest(owner: liveBoot, phase: .recordingStarted)
