@@ -38,7 +38,8 @@ let package = Package(
         .testTarget(
             name: "KeyboardTypingKitTests",
             dependencies: ["KeyboardTypingKit"],
-            path: "Tests/KeyboardTypingKitTests"
+            path: "Tests/KeyboardTypingKitTests",
+            exclude: ["Corpus/README.md"]
         ),
     ]
 )
