@@ -122,3 +122,26 @@ struct TypingRecordHold: Sendable, Equatable {
         return hasMovedAway ? .movedAway : .tap
     }
 }
+
+/// What the dictation is doing, as far as the strip's pill cares. The controller maps its own phases onto this.
+enum TypingPillPhase: Sendable, Equatable {
+    case idle
+    case requested
+    case recording
+    case transcribing
+    case inserting
+    case copyRequired
+    case failed
+    case cancelled
+}
+
+/// The wide pill in the strip while a dictation runs: tapping it stops and saves, like the Record key. It is
+/// tappable only while recording, and not once a stop or a cancel is already on its way.
+enum TypingStripPill {
+    /// 44 pt is Apple's minimum touch target; the pill's tap area keeps it across its full width.
+    static let minimumHitHeight: Double = 44
+
+    static func isTappable(phase: TypingPillPhase, stopRequested: Bool, cancelRequested: Bool) -> Bool {
+        phase == .recording && !stopRequested && !cancelRequested
+    }
+}
