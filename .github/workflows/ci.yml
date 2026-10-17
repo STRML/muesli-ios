@@ -154,14 +154,25 @@ jobs:
             !DerivedData/Logs
           key: dd-v1-${{ steps.toolchain.outputs.xcode }}-${{ hashFiles('project.yml') }}-${{ github.sha }}
 
+  # Two shards. AutocorrectCorpusTests.testGeneratedCorpusReport runs the real
+  # UITextChecker over thousands of typos and took 1215 s of the 1311 s the whole
+  # unit suite needed on a 2026-10-17 runner (the other 609 tests together took
+  # about 95 s). It gets its own job so it overlaps everything else instead of
+  # trailing it. Running the suite with parallel workers was slower (31 min
+  # against 25 min), so tests stay sequential within a shard.
   unit-tests:
+    name: unit-tests (${{ matrix.shard }})
     needs: build-for-testing
     runs-on: macos-latest
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        variant: [seq, par]
+        include:
+          - shard: unit
+            selection: "-only-testing:MuesliTests -skip-testing:MuesliTests/AutocorrectCorpusTests/testGeneratedCorpusReport"
+          - shard: corpus
+            selection: "-only-testing:MuesliTests/AutocorrectCorpusTests/testGeneratedCorpusReport"
     steps:
       - uses: actions/checkout@v4
       - name: Select iPhone simulator
@@ -173,18 +184,17 @@ jobs:
       - name: Unpack build products
         run: tar -xzf products.tgz
       - name: Run unit tests
+        env:
+          SELECTION: ${{ matrix.selection }}
         run: |
-          if [ '${{ matrix.variant }}' = par ]; then
-            parallel="-parallel-testing-enabled YES -maximum-parallel-testing-workers 2"
-          else
-            parallel="-parallel-testing-enabled NO"
-          fi
+          # SELECTION is deliberately unquoted: it holds several flags.
+          # shellcheck disable=SC2086
           xcodebuild \
             test-without-building \
             -xctestrun "$(ls -1 Products/*.xctestrun | head -1)" \
             -destination 'platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}' \
-            -only-testing:MuesliTests \
-            $parallel \
+            $SELECTION \
+            -parallel-testing-enabled NO \
             -enableCodeCoverage YES \
             -resultBundlePath TestResults.xcresult \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee unit-tests.log
@@ -200,14 +210,14 @@ jobs:
             echo "No result bundle produced; skipping coverage report."
             exit 0
           fi
-          echo "### Unit tests" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Unit tests (${{ matrix.shard }})" >> "$GITHUB_STEP_SUMMARY"
           xcrun xccov view --report --json TestResults.xcresult > coverage.json
           python3 scripts/coverage-summary.py coverage.json | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-unit-${{ matrix.variant }}
+          name: test-results-unit-${{ matrix.shard }}
           path: |
             TestResults.xcresult
             unit-tests.log
