@@ -35,6 +35,7 @@ final class TypingEngineAutocorrectTests: XCTestCase {
         enabled = true
         checker.misspelled = ["teh", "adn", "recieve", "wich", "Teh"]
         checker.guessTable = ["teh": ["the"], "adn": ["and"], "recieve": ["receive"], "wich": ["which"], "Teh": ["the"]]
+        checker.listGuessesAsUsed()
         engine = TypingEngine(document: document, suggestionSource: source, now: { 0 })
         corrector = TypingAutocorrector(
             checker: { [unowned self] in self.checker },

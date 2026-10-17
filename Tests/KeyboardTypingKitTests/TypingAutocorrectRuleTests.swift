@@ -1,140 +1,163 @@
 import XCTest
 @testable import KeyboardTypingKit
 
-/// Matrix rows R1-R10: the pure rule that decides whether a checker guess is a safe correction.
+/// Matrix rows R1-R16: the pure rule that decides whether the best candidate is a safe correction.
 final class TypingAutocorrectRuleTests: XCTestCase {
-    // R1: an adjacent swap is one edit, or "teh" and "adn" (three-letter words) could never be fixed.
+    /// A candidate the checker guessed at `guess`, listed under its first `listedAt` letters (1 is the most used).
+    private func candidate(_ word: String, guess: Int? = 0, listedAt: Int? = 1, position: Int = 0) -> TypingCandidate {
+        var usage = [Int](repeating: -1, count: max(word.count, 4))
+        if let listedAt { usage[listedAt - 1] = position }
+        return TypingCandidate(word: word, guessPosition: guess, usage: usage)
+    }
+
+    private func fix(_ typed: String, _ candidates: [TypingCandidate], strict: Bool = false) -> String? {
+        TypingAutocorrectRule.correction(for: typed, candidates: candidates, strict: strict)
+    }
+
     func testAnAdjacentTranspositionIsOneEdit() {
         XCTAssertEqual(TypingEditDistance.between("teh", "the"), 1)
         XCTAssertEqual(TypingEditDistance.between("adn", "and"), 1)
-        XCTAssertEqual(TypingEditDistance.between("thier", "their"), 1)
         XCTAssertEqual(TypingEditDistance.between("recieve", "receive"), 1)
     }
 
     func testInsertionDeletionAndSubstitutionAreOneEditEach() {
         XCTAssertEqual(TypingEditDistance.between("wich", "which"), 1)
-        XCTAssertEqual(TypingEditDistance.between("untill", "until"), 1)
         XCTAssertEqual(TypingEditDistance.between("cat", "cut"), 1)
         XCTAssertEqual(TypingEditDistance.between("same", "same"), 0)
         XCTAssertEqual(TypingEditDistance.between("kitten", "sitting"), 3)
-    }
-
-    func testDistanceIgnoresCaseAndCountsCharacters() {
         XCTAssertEqual(TypingEditDistance.between("Teh", "the"), 1)
-        XCTAssertEqual(TypingEditDistance.between("café", "cafe"), 1)
     }
 
-    // R2: at most a quarter of the letters may change, and never more than two edits.
-    func testTheAllowedDistanceGrowsWithTheLengthOfTheWord() {
-        XCTAssertEqual(TypingAutocorrectRule.maximumDistance(forWordLength: 2), 0, "two letters are never corrected")
-        XCTAssertEqual(TypingAutocorrectRule.maximumDistance(forWordLength: 3), 1)
-        XCTAssertEqual(TypingAutocorrectRule.maximumDistance(forWordLength: 7), 1)
-        XCTAssertEqual(TypingAutocorrectRule.maximumDistance(forWordLength: 8), 2)
-        XCTAssertEqual(TypingAutocorrectRule.maximumDistance(forWordLength: 20), 2)
+    // R1
+    func testOneClearCandidateIsTheCorrection() {
+        XCTAssertEqual(fix("recieve", [candidate("receive")]), "receive")
+        XCTAssertEqual(fix("teh", [candidate("the")]), "the")
+        XCTAssertEqual(fix("tomorow", [candidate("tomorrow", guess: nil)]), "tomorrow", "found by our own generation only")
+    }
+
+    // R2: a three-letter word only takes a swap: "npm" and "faq" are not typos, and "wel" for "well" and "ide" for
+    // "idea" cost more wrong fixes than they gain on the generated corpus.
+    func testAThreeLetterWordOnlyTakesASwap() {
+        XCTAssertEqual(fix("adn", [candidate("and")]), "and")
+        XCTAssertNil(fix("thw", [candidate("the")]), "w is beside e, but a swap is the only slip trusted")
+        XCTAssertNil(fix("wel", [candidate("well")]))
+        XCTAssertNil(fix("npm", [candidate("nom")]))
+        XCTAssertNil(fix("cto", [candidate("cot", listedAt: nil)]), "a swap to a word nobody uses is an acronym, not a slip")
     }
 
     // R3
-    func testTheTopGuessWithinRangeIsTheCorrection() {
-        XCTAssertEqual(TypingAutocorrectRule.correction(for: "recieve", guesses: ["receive", "relieve"]), "receive")
-        XCTAssertEqual(TypingAutocorrectRule.correction(for: "teh", guesses: ["the", "tech", "ten"]), "the")
+    func testTwoLettersOrFewerAreNeverCorrected() {
+        XCTAssertNil(fix("cn", [candidate("can")]))
+        XCTAssertNil(fix("im", [candidate("in")]))
     }
 
-    // R4
-    func testATopGuessBeyondTheAllowedDistanceIsNotACorrection() {
-        XCTAssertNil(TypingAutocorrectRule.correction(for: "kubectl", guesses: ["cubicle", "kebab"]))
-        XCTAssertNil(TypingAutocorrectRule.correction(for: "json", guesses: ["Jason", "jigsaw"]))
+    // R4: too far from what was typed.
+    func testACandidateOverTheCostBudgetIsNotACorrection() {
+        XCTAssertNil(fix("kubectl", [candidate("cubicle", guess: 0)]))
+        XCTAssertNil(fix("macos", [candidate("mamos", listedAt: nil)]), "c to m is not a slip")
     }
 
-    // R5: with three letters a swap is the only edit trusted: "teh" is a slip, "npm" and "faq" are words.
-    func testAThreeLetterWordOnlyTakesAnAdjacentSwap() {
-        XCTAssertEqual(TypingAutocorrectRule.correction(for: "teh", guesses: ["the"]), "the")
-        XCTAssertEqual(TypingAutocorrectRule.correction(for: "adn", guesses: ["and"]), "and")
-        XCTAssertNil(TypingAutocorrectRule.correction(for: "npm", guesses: ["nom"]))
-        XCTAssertNil(TypingAutocorrectRule.correction(for: "faq", guesses: ["fae"]))
-        XCTAssertNil(TypingAutocorrectRule.correction(for: "btw", guesses: ["btu"]))
-        XCTAssertNil(TypingAutocorrectRule.correction(for: "cn", guesses: ["can"]), "and a guess that adds a letter")
+    // R5: ties are decided by the margin, not declined outright.
+    func testTwoEquallyGoodCandidatesAreAmbiguous() {
+        XCTAssertNil(fix("wich", [candidate("witch", position: 3), candidate("which", position: 3)]))
     }
 
-    func testTwoEditsNeedAnEightLetterWord() {
-        XCTAssertEqual(TypingEditDistance.between("vercel", "verbal"), 2)
-        XCTAssertNil(TypingAutocorrectRule.correction(for: "vercel", guesses: ["verbal"]))
-        XCTAssertEqual(TypingEditDistance.between("tommorow", "tomorrow"), 2)
-        XCTAssertEqual(TypingAutocorrectRule.correction(for: "tommorow", guesses: ["tomorrow"]), "tomorrow")
+    func testAClearlyMoreUsedCandidateWinsOverAnEquallyCloseOne() {
+        let which = candidate("which", guess: 2, listedAt: 2, position: 6)
+        let witch = candidate("witch", guess: 4, listedAt: nil)
+        XCTAssertEqual(fix("wich", [witch, which]), "which")
     }
 
-    func testAWordOfTwoLettersIsNeverCorrected() {
-        XCTAssertNil(TypingAutocorrectRule.correction(for: "ok", guesses: ["OK", "of", "oh"]))
-        XCTAssertNil(TypingAutocorrectRule.correction(for: "hm", guesses: ["him", "ham"]))
+    // R6
+    func testTheCheapestSlipBeatsAnArbitrarySubstitution() {
+        XCTAssertEqual(fix("hte", [candidate("the", guess: 3), candidate("hue", guess: 0)]), "the")
     }
 
-    // R6: "clear top guess": a later guess that is closer means the checker's order is not to be trusted.
-    func testACloserGuessFurtherDownMeansTheTopGuessIsNotClear() {
-        XCTAssertNil(TypingAutocorrectRule.correction(for: "abcdefgh", guesses: ["abcdefghij", "abcdefghi"]))
-        XCTAssertEqual(TypingAutocorrectRule.correction(for: "abcdefgh", guesses: ["abcdefghi", "abcdefghij"]), "abcdefghi")
+    // R7: a word nobody uses is not worth correcting to.
+    func testACandidateTheCheckerNeverListsIsHeldBack() {
+        XCTAssertNil(fix("oauth", [candidate("oath", listedAt: nil)]))
     }
 
-    // R6b: a tie is not clear either, unless the top guess is a swap of the letters typed.
-    func testATieBetweenGuessesIsAmbiguousUnlessTheTopIsASwap() {
-        XCTAssertNil(TypingAutocorrectRule.correction(for: "wich", guesses: ["wish", "which"]))
-        XCTAssertNil(TypingAutocorrectRule.correction(for: "wich", guesses: ["which", "witch"]))
-        XCTAssertNil(TypingAutocorrectRule.correction(for: "hte", guesses: ["hate", "the"]))
-        XCTAssertEqual(TypingAutocorrectRule.correction(for: "teh", guesses: ["the", "ten", "tech"]), "the")
-        XCTAssertEqual(TypingAutocorrectRule.correction(for: "recieve", guesses: ["receive", "relieve"]), "receive")
+    // R8: before a "." or ":" the word may be a host name, so only a single edit counts.
+    func testStrictBoundariesNeedASingleEdit() {
+        XCTAssertEqual(fix("teh", [candidate("the")], strict: true), "the")
+        XCTAssertNil(fix("becuawe", [candidate("because")], strict: true), "two edits")
+        XCTAssertEqual(fix("becuawe", [candidate("because")]), "because")
     }
 
-    // R7
-    func testAGuessWithSpacesOrPunctuationIsSkipped() {
-        XCTAssertEqual(TypingAutocorrectRule.correction(for: "alot", guesses: ["a lot", "allot"]), "allot")
-        XCTAssertNil(TypingAutocorrectRule.correction(for: "alot", guesses: ["a lot"]))
+    // R9: more edits for longer words, when the budget allows and the margin holds. The tuned budget is one
+    // vowel swap plus one dropped letter short of this word, so it is declined until the budget is raised.
+    func testALongWordMayTakeTwoSlipsOnlyWithinTheBudget() {
+        XCTAssertNil(fix("definatly", [candidate("definitely", guess: 0)]))
+        var tuning = TypingAutocorrectTuning.standard
+        tuning.budgetEightOrMore = 2.0
+        XCTAssertEqual(TypingAutocorrectRule.correction(for: "definatly", candidates: [candidate("definitely")], tuning: tuning), "definitely")
+        XCTAssertNil(fix("flxm", [candidate("film")]), "a four-letter word is not given two slips")
     }
 
-    // R8
-    func testNoGuessesNoCorrection() {
-        XCTAssertNil(TypingAutocorrectRule.correction(for: "teh", guesses: []))
+    func testTwoCheapSlipsFitTheBudgetOfALongWord() {
+        // "becuawe" for "because": a swap and a neighbour key.
+        XCTAssertEqual(fix("becuawe", [candidate("because", guess: 0)]), "because")
     }
 
-    // R9: a guess that only changes the case (a name, a brand) is not a spelling fix.
-    func testACaseOnlyGuessIsNotACorrection() {
-        XCTAssertNil(TypingAutocorrectRule.correction(for: "tuesday", guesses: ["Tuesday"]))
-        XCTAssertNil(TypingAutocorrectRule.correction(for: "github", guesses: ["GitHub"]))
+    func testNoCandidatesNoCorrection() {
+        XCTAssertNil(fix("zzzz", []))
     }
 
-    // R10: before a "." or ":" the word may be the start of a host name or a URL scheme, so only one edit.
-    func testStrictModeAllowsOnlyOneEdit() {
-        XCTAssertEqual(TypingAutocorrectRule.correction(for: "tommorow", guesses: ["tomorrow"]), "tomorrow")
-        XCTAssertNil(TypingAutocorrectRule.correction(for: "tommorow", guesses: ["tomorrow"], strict: true))
-        XCTAssertEqual(TypingAutocorrectRule.correction(for: "recieve", guesses: ["receive"], strict: true), "receive")
-        XCTAssertEqual(TypingAutocorrectRule.correction(for: "teh", guesses: ["the"], strict: true), "the")
+    // R10
+    func testTheTypedWordItselfIsNeverTheCorrection() {
+        XCTAssertNil(fix("teh", [candidate("teh")]))
     }
 
-    // R12: a guess is letters only. "linked-in" for "linkedin" is the checker splitting a name.
-    func testAGuessWithAHyphenOrApostropheIsSkipped() {
-        XCTAssertNil(TypingAutocorrectRule.correction(for: "linkedin", guesses: ["linked-in"]))
-        XCTAssertNil(TypingAutocorrectRule.correction(for: "webhook", guesses: ["web-hook"]))
-        XCTAssertNil(TypingAutocorrectRule.correction(for: "dockerfile", guesses: ["docker-file"]))
-        XCTAssertNil(TypingAutocorrectRule.correction(for: "shes", guesses: ["she's"]))
+    // R11: a candidate more than two letters longer or shorter never scores.
+    func testALengthDifferenceOfThreeIsNeverCorrected() {
+        XCTAssertNil(fix("config", [candidate("configuration")]))
     }
 
-    // R13: a swapped-in letter must be a slip: a vowel for a vowel, or the key next door.
-    func testASubstitutionMustBeAVowelSwapOrAnAdjacentKey() {
-        XCTAssertEqual(TypingAutocorrectRule.correction(for: "definately", guesses: ["definitely"]), "definitely")
-        XCTAssertEqual(TypingAutocorrectRule.correction(for: "grammer", guesses: ["grammar"]), "grammar")
-        XCTAssertEqual(TypingAutocorrectRule.correction(for: "tesy", guesses: ["test"]), "test", "t and y are neighbours")
-        XCTAssertNil(TypingAutocorrectRule.correction(for: "macos", guesses: ["mamos"]), "c to m is not a slip")
-        XCTAssertNil(TypingAutocorrectRule.correction(for: "wich", guesses: ["wish"]))
+    // R12
+    func testScoredCandidatesAreSortedBestFirstWithTheirCost() {
+        let scored = TypingAutocorrectRule.scored(
+            for: "wich", candidates: [candidate("witch", guess: 4, listedAt: nil), candidate("which", guess: 2, listedAt: 2, position: 6)],
+            tuning: .standard
+        )
+        XCTAssertEqual(scored.map(\.word), ["which", "witch"])
+        XCTAssertLessThan(scored[0].score, scored[1].score)
     }
 
-    func testTheGuessMustKeepTheFirstLetter() {
-        XCTAssertNil(TypingAutocorrectRule.correction(for: "eelcome", guesses: ["welcome"]),
-                     "a different first letter is rarely a typo and often a different word")
-        XCTAssertEqual(TypingAutocorrectRule.correction(for: "welcmoe", guesses: ["welcome"]), "welcome")
+    // R13: the margin has to be met; widening it turns a correction into a decline.
+    func testALargerMarginDeclinesWhatASmallerOneTakes() {
+        // "wirk": "work" is a neighbour key away, "wark" a vowel swap.
+        let candidates = [candidate("work"), candidate("wark", guess: 1)]
+        var tuning = TypingAutocorrectTuning.standard
+        tuning.margin = 0
+        XCTAssertEqual(TypingAutocorrectRule.correction(for: "wirk", candidates: candidates, tuning: tuning), "work")
+        tuning.margin = 10
+        XCTAssertNil(TypingAutocorrectRule.correction(for: "wirk", candidates: candidates, tuning: tuning))
     }
 
-    // R11: lowercase typing never becomes a proper noun or an acronym; the checker offers those for brands.
-    func testALowercaseWordIsNeverCorrectedToACapitalizedGuess() {
-        XCTAssertNil(TypingAutocorrectRule.correction(for: "wich", guesses: ["Which"]))
-        XCTAssertNil(TypingAutocorrectRule.correction(for: "githb", guesses: ["GitHub"]))
-        XCTAssertEqual(TypingAutocorrectRule.correction(for: "Wich", guesses: ["Which"]), "Which",
-                       "a capital the user typed can stay")
+    // R14: the usage depth is the number of prefix letters that count.
+    func testAWordListedOnlyPastTheUsageDepthCountsAsUnlisted() {
+        var tuning = TypingAutocorrectTuning.standard
+        let deep = TypingCandidate(word: "work", guessPosition: 0, usage: [-1, -1, -1, 0])
+        tuning.usageDepth = 3
+        let shallow = TypingAutocorrectRule.scored(for: "wirk", candidates: [deep], tuning: tuning)
+        tuning.usageDepth = 4
+        let full = TypingAutocorrectRule.scored(for: "wirk", candidates: [deep], tuning: tuning)
+        XCTAssertGreaterThan(shallow[0].score, full[0].score)
+    }
+
+    // R15: the budget table.
+    func testTheBudgetGrowsWithTheLengthOfTheWord() {
+        let tuning = TypingAutocorrectTuning.standard
+        XCTAssertEqual(tuning.budget(forWordLength: 2), 0)
+        XCTAssertLessThan(tuning.budget(forWordLength: 3), tuning.budget(forWordLength: 5))
+        XCTAssertLessThanOrEqual(tuning.budget(forWordLength: 5), tuning.budget(forWordLength: 7))
+        XCTAssertLessThan(tuning.budget(forWordLength: 7), tuning.budget(forWordLength: 12))
+    }
+
+    // R16: the rule works on lowercase; the pool lowercases candidates and the autocorrector restores a capital.
+    func testCasingOfTheTypedWordDoesNotChangeTheDecision() {
+        XCTAssertEqual(fix("Teh", [candidate("the")]), "the")
+        XCTAssertEqual(fix("TEH", [candidate("the")]), "the")
     }
 }

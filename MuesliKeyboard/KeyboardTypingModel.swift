@@ -57,7 +57,7 @@ final class KeyboardTypingModel {
     @ObservationIgnored private let languageSource = TypingLanguageSource()
     @ObservationIgnored private let autocorrectSwitch = AutocorrectSwitch()
 
-    init() {
+    init(learnedWords: TypingLearnedWordsStoring = TypingLearnedWordsDefaults()) {
         let languages = languageSource
         let autocorrectSwitch = autocorrectSwitch
         builder = TypingSuggestionBuilder(
@@ -75,7 +75,10 @@ final class KeyboardTypingModel {
             languageCandidates: { languages.candidates },
             traits: { [weak engine] in engine?.state.traits ?? TypingTraits() },
             isEnabled: { autocorrectSwitch.isOn },
-            ignoreWord: { builder.ignore($0) }
+            ignoreWord: { builder.ignore($0) },
+            // The keyboard's own defaults: they outlive a launch and need no Full Access.
+            learnedWords: learnedWords,
+            learnWord: { UITextChecker.learnWord($0) }
         )
         engine.completionHandler = autocorrector
         engine.onChange = { [weak self] in self?.state = $0 }

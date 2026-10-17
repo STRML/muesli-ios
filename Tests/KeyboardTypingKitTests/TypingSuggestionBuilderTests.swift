@@ -28,6 +28,19 @@ final class FakeSpellChecker: TypingSpellChecking {
     }
 }
 
+extension FakeSpellChecker {
+    /// Makes every word the guess table offers a used one: listed first under each of its prefixes, which is what
+    /// the real checker does for a common word. Autocorrect only trusts a candidate the checker lists.
+    func listGuessesAsUsed() {
+        for word in guessTable.values.flatMap({ $0 }) {
+            for length in 1...word.count {
+                let prefix = String(word.prefix(length))
+                if completionTable[prefix]?.contains(word) != true { completionTable[prefix, default: []].append(word) }
+            }
+        }
+    }
+}
+
 /// Matrix rows G1-G12: what the strip offers for the partial word.
 @MainActor
 final class TypingSuggestionBuilderTests: XCTestCase {
