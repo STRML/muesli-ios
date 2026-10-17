@@ -63,7 +63,8 @@ actor DiagnosticsUploadEngine {
             disableAndClear()
             return .blocked(reason)
         }
-        guard let endpoint = settings.endpoint, !isRunning else { return .idle }
+        guard let endpoint = settings.endpoint else { return .idle }
+        guard !isRunning else { return .busy }
         isRunning = true
         defer { isRunning = false }
 
@@ -366,6 +367,8 @@ actor DiagnosticsUploadEngine {
     }
 
     private func commit(_ next: DiagnosticsUploadState) {
+        // An idle pass changes nothing; do not rewrite a file of up to 2 MB every 15 seconds for it.
+        guard next != state else { return }
         state = next
         store.save(next)
     }

@@ -153,6 +153,33 @@ final class DiagnosticsUploadEngineTests: XCTestCase {
         XCTAssertNil(after.lastError)
     }
 
+    func testAPassStartedWhileAnotherIsSendingReportsBusyAndSendNowStillGoesThroughAfterwards() async {
+        let rig = Rig()
+        let gate = GatedTransport()
+        let engine = DiagnosticsUploadEngine(store: rig.store, transport: gate, clock: rig.clock, deviceInfo: { Fixture.device })
+        _ = await run(engine, "")
+        let log = Fixture.numbered(2)
+        let settings = on()
+        let first = Task { await engine.run(settings: settings, logText: log, trigger: .timer) }
+        await gate.waitUntilSending()
+        let concurrent = await run(engine, log, trigger: .manual, backfill: true)
+        XCTAssertEqual(concurrent, .busy, "a pass that did nothing must not read as 'nothing new to send'")
+        gate.release()
+        let finished = await first.value
+        XCTAssertEqual(finished, .sent(batches: 1, events: 2))
+    }
+
+    func testAnIdlePassDoesNotRewriteTheStateFile() async {
+        let rig = Rig()
+        let engine = rig.engine
+        _ = await run(engine, "")
+        let log = Fixture.numbered(2)
+        _ = await run(engine, log)
+        let writes = rig.store.saveCount
+        for _ in 0..<5 { _ = await run(engine, log) }
+        XCTAssertEqual(rig.store.saveCount, writes)
+    }
+
     func testAirplaneModeQueuesAndDoesNotLoopTightly() async {
         let rig = Rig()
         rig.transport.setFallback(.networkFailure(code: -1009))

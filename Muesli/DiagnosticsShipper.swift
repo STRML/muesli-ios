@@ -164,6 +164,7 @@ final class DiagnosticsShipper: ObservableObject {
     private static func message(for report: DiagnosticsFlushReport) -> String {
         switch report {
         case .idle: "Nothing new to send."
+        case .busy: "An upload is already in progress. Try again in a moment."
         case .sent(let batches, let events): "Sent \(events) events in \(batches) \(batches == 1 ? "batch" : "batches")."
         case .backingOff: "Waiting to retry."
         case .stopped(.keyRejected): DiagnosticsShippingCopy.keyRejected

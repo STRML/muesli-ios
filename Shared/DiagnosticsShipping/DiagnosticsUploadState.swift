@@ -101,6 +101,8 @@ enum DiagnosticsFlushReport: Equatable, Sendable {
     case failed(String)
     /// Diagnostics are not allowed to leave the phone right now.
     case blocked(DiagnosticsGate.Reason)
+    /// Another pass was still running, so this one did nothing. Send now says so instead of "nothing new".
+    case busy
     /// The app ran out of background time (or the task was cancelled) mid-send; the batch stays queued, unpenalized.
     case interrupted
 }

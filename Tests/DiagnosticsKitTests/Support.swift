@@ -55,6 +55,25 @@ final class ScriptedTransport: DiagnosticsTransport, @unchecked Sendable {
     }
 }
 
+/// Holds a send open until the test lets it finish, so a second pass can arrive meanwhile.
+final class GatedTransport: DiagnosticsTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private var sending = false
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func send(body: Data, batchID: String, target: DiagnosticsTargetRecord) async -> DiagnosticsTransportResult {
+        lock.withLock { sending = true }
+        await withCheckedContinuation { continuation in lock.withLock { self.continuation = continuation } }
+        return .status(200)
+    }
+
+    func waitUntilSending() async {
+        while !lock.withLock({ sending && continuation != nil }) { try? await Task.sleep(for: .milliseconds(5)) }
+    }
+
+    func release() { lock.withLock { continuation?.resume(); continuation = nil } }
+}
+
 enum Fixture {
     static let t0 = Date(timeIntervalSince1970: 1_800_000_000)
     static let request = UUID(uuidString: "04FCC3FC-0000-4000-8000-000000000001")!

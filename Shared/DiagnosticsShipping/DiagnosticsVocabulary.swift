@@ -112,14 +112,8 @@ enum DictationCancelSource: String, CaseIterable, Sendable {
     case keyboardCommand
     /// Cancel from the app's own UI or its Live Activity.
     case appUser
-    /// A new request replaced this one before it finished.
-    case superseded
-    /// The start was abandoned because ownership of the microphone was lost before recording began.
-    case startupOwnershipLost
     /// Swift task cancellation reached the transcription task without a recorded cause.
     case taskCancelled
-    case audioInterruption
-    case backgroundTimeExpired
     case unknown
 }
 
@@ -129,7 +123,6 @@ enum StopIgnoredReason: String, CaseIterable, Sendable {
     case lifecycleRejected
     case noActiveRequest
     case recoveredFromStorage
-    case noRecoverableRecording
 }
 
 enum TextSource: String, CaseIterable, Sendable {

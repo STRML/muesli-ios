@@ -56,8 +56,8 @@ than the limit never match.
 | error domain (`NSURLErrorDomain`) | `domain` |
 | closed list: `saved failed cancelled superseded abandoned missingAudio noRecoverableRecording` | `outcome` |
 | closed list: `requested startup recording stopping finalizingAudio transcribing persisting delivering completed` | `last_stage`, `cancel_stage` |
-| closed list: `keyboardCommand appUser superseded startupOwnershipLost taskCancelled audioInterruption backgroundTimeExpired unknown` | `cancel_by` |
-| closed list: `conflictingCommand notRecording lifecycleRejected noActiveRequest recoveredFromStorage noRecoverableRecording` | `ignored_reason` |
+| closed list: `keyboardCommand appUser taskCancelled unknown` | `cancel_by` |
+| closed list: `conflictingCommand notRecording lifecycleRejected noActiveRequest recoveredFromStorage` | `ignored_reason` |
 | closed list: `onDevice remote streaming` | `text_source` |
 | closed list: `timeout interrupted engineFailure audioUnavailable checkpointFailure unknown` | `failure` |
 | closed list: `insertDirect copied copyRequired` | `route` |

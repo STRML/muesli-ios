@@ -35,7 +35,6 @@ enum KeyboardDiagnosticsLog {
     )
 
     private static let fileName = "keyboard-diagnostics.log"
-    private static let lockFileName = "keyboard-diagnostics.lock"
     private static let queue = DispatchQueue(label: "com.samuelreed.muesli.keyboard-diagnostics")
 
     /// Records one transition. `detail` values are truncated and must never
@@ -76,7 +75,7 @@ enum KeyboardDiagnosticsLog {
     static func clear() {
         queue.sync {
             guard let url = fileURL() else { return }
-            withFileLock { try? FileManager.default.removeItem(at: url) }
+            try? FileManager.default.removeItem(at: url)
         }
     }
 
@@ -92,15 +91,12 @@ enum KeyboardDiagnosticsLog {
     /// bounded file is cheaper than the bookkeeping needed to avoid it, and
     /// this runs off the main thread.
     ///
-    /// The app, the keyboard and the intents each have their own `queue`, so this read-modify-write ran
-    /// unlocked across processes and one could overwrite the other's newest line. That mattered most for the
-    /// last event of a failed dictation, so the whole step now holds an exclusive file lock.
+    /// The app, the keyboard and the intents each have their own `queue`, so this read-modify-write is not
+    /// serialized across processes and one can overwrite the other's newest line (known limit). A cross-process
+    /// `flock` would fix that, but holding a file lock in the app-group container across a suspension is a known
+    /// 0xdead10cc kill, so it is deliberately not used.
     private static func append(line: String) {
         guard let url = fileURL() else { return }
-        withFileLock { appendLocked(line: line, to: url) }
-    }
-
-    private static func appendLocked(line: String, to url: URL) {
         var lines = (try? String(contentsOf: url, encoding: .utf8))?
             .split(separator: "\n", omittingEmptySubsequences: true)
             .map(String.init) ?? []
@@ -133,17 +129,5 @@ enum KeyboardDiagnosticsLog {
             try? Data((lines.joined(separator: "\n") + "\n").utf8).write(to: mirror, options: .atomic)
         }
         #endif
-    }
-
-    /// Runs `body` holding an exclusive `flock` on a sidecar file, so two processes never interleave a rewrite. If
-    /// the lock file cannot be opened (device locked before first unlock), the write still happens, unlocked.
-    private static func withFileLock<T>(_ body: () -> T) -> T {
-        guard let lockURL = fileURL()?.deletingLastPathComponent().appendingPathComponent(lockFileName) else { return body() }
-        let descriptor = open(lockURL.path, O_CREAT | O_RDWR, 0o644)
-        guard descriptor >= 0 else { return body() }
-        defer { close(descriptor) }
-        flock(descriptor, LOCK_EX)
-        defer { flock(descriptor, LOCK_UN) }
-        return body()
     }
 }
