@@ -52,6 +52,12 @@ final class DiagnosticsDocsTests: XCTestCase {
         XCTAssertTrue(DiagnosticsShippingCopy.toggleDetail.contains("Off by default"))
     }
 
+    func testTheDocsLinkTheReceiverGuideTheSettingsRowOpens() throws {
+        XCTAssertTrue(DiagnosticsShippingCopy.receiverGuideURL.hasSuffix("/docs/diagnostics-receiver.md"))
+        XCTAssertTrue(try read("docs/diagnostics-shipping.md").contains("(diagnostics-receiver.md)"))
+        XCTAssertTrue(DiagnosticsShippingCopy.noEndpoint.contains(DiagnosticsShippingCopy.receiverGuideTitle))
+    }
+
     func testTheREADMEAndThePrivacyManifestMentionDiagnosticsShipping() throws {
         XCTAssertTrue(try read("README.md").contains("docs/diagnostics-shipping.md"))
         let manifest = try read("Muesli/PrivacyInfo.xcprivacy")
