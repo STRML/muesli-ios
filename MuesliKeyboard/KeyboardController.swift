@@ -31,6 +31,9 @@ final class KeyboardController {
     private var completedClipboardRequestIDs = Set<UUID>()
     private var cancelledRequestIDs = Set<UUID>()
     private var pendingCancellationIDs = Set<UUID>()
+    /// The request whose stop is on its way to the app, so a second tap on the pill or the Record key sends no
+    /// second stop. It names a request, so the next dictation is unaffected.
+    private var pendingStopID: UUID?
     private var isBlockedByAppVoiceNote = false
     /// Tracked separately from `latestHandoffState`, which `refreshLatestDictation`
     /// overwrites before `apply(handoffState:)` runs -- comparing against it
@@ -248,6 +251,44 @@ final class KeyboardController {
             && !(activeRequestID.map { pendingCancellationIDs.contains($0) } ?? false)
     }
 
+    private var isStopPending: Bool {
+        activeRequestID != nil && pendingStopID == activeRequestID
+    }
+
+    private var isCancelPending: Bool {
+        activeRequestID.map { pendingCancellationIDs.contains($0) } ?? false
+    }
+
+    private static let settledPillPhases: [KeyboardHandoffPhase: TypingPillPhase] = [
+        .copyRequired: .copyRequired,
+        .cancelled: .cancelled,
+    ]
+
+    private var pillPhase: TypingPillPhase {
+        switch dictationPhase {
+        case .idle:
+            Self.settledPillPhases[latestHandoffState?.phase ?? .idle] ?? .idle
+        case .requested: .requested
+        case .recording: .recording
+        case .transcribing: .transcribing
+        case .finished: .inserting
+        case .failed: .failed
+        }
+    }
+
+    /// Whether the wide pill in the strip stops and saves the dictation right now: while it records, and not
+    /// once a stop or a cancel is on its way.
+    var canStopFromStatusPill: Bool {
+        TypingStripPill.isTappable(phase: pillPhase, stopRequested: isStopPending, cancelRequested: isCancelPending)
+    }
+
+    /// A tap on the strip's pill: the Record key's stop, behind the pill's own guard.
+    func stopFromStatusPill() {
+        refreshLatestDictation()
+        guard canStopFromStatusPill else { return }
+        stopActiveDictation()
+    }
+
     var selectedTranscriptionModel: KeyboardTranscriptionModelOption? {
         modelCatalog?.selectedModel
     }
@@ -452,6 +493,7 @@ final class KeyboardController {
             prepareLaunchRequestIfNeeded()
             return
         }
+        guard !isStopPending, !isCancelPending else { return }
 
         MuesliHaptics.dictationStop()
         KeyboardDiagnosticsLog.record("intent.stop", [
@@ -465,6 +507,7 @@ final class KeyboardController {
                 message: "Stopping"
             ))
             try store.saveCommand(.init(requestID: activeRequestID, action: .stop))
+            pendingStopID = activeRequestID
             dictationPhase = .recording
             statusText = "Stopping"
             awaitCommandAcknowledgement(
@@ -1318,6 +1361,7 @@ final class KeyboardController {
             try? self.store.saveKeyboardHandoffState(recovery)
             self.latestHandoffState = recovery
             self.canUseRuntimeStart = false
+            if self.pendingStopID == requestID { self.pendingStopID = nil }
             self.recoveryRequestID = requestID
             self.activeRequestID = nil
             self.dictationPhase = .failed
