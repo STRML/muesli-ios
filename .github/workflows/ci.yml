@@ -5,53 +5,199 @@ on:
   push:
     branches: [main]
 
+# A new push to a pull request cancels the run it supersedes. Main pushes get a
+# group of their own per commit, so every merge still gets a result.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
 jobs:
-  build:
+  # Cheap Linux job: decides which of the Mac jobs a change can affect. The
+  # `build` job at the bottom always runs and reports, so a change that skips
+  # the Mac jobs still produces the `build` status.
+  #
+  #   skipped:  App Store assets, license, issue templates, the Claude bot workflows
+  #   host only: docs/, README.md and Context/ (the host tests read them)
+  #   everything else: the full pipeline (this workflow file included)
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      host: ${{ steps.filter.outputs.host }}
+      app: ${{ steps.filter.outputs.app }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          # A pull request checks out the merge commit, so HEAD^1 is the base.
+          if [ "$EVENT" = "pull_request" ]; then
+            base="HEAD^1"
+          else
+            base="$BEFORE"
+          fi
+          host=false
+          app=false
+          if files="$(git diff --name-only "$base" HEAD 2>/dev/null)" && [ -n "$files" ]; then
+            while IFS= read -r f; do
+              case "$f" in
+                AppStore/*|LICENSE|.env.example|.github/ISSUE_TEMPLATE/*|.github/pull_request_template.md|.github/workflows/claude.yml|.github/workflows/claude-code-review.yml) ;;
+                docs/*|README.md|Context/*) host=true ;;
+                *) host=true; app=true ;;
+              esac
+            done <<< "$files"
+          else
+            # No diff to read (new branch, force push, empty commit): test everything.
+            host=true
+            app=true
+          fi
+          echo "host=$host" >> "$GITHUB_OUTPUT"
+          echo "app=$app" >> "$GITHUB_OUTPUT"
+          echo "host=$host app=$app"
+
+  # The Swift package slice (remote transcription, dictation policy, keyboard
+  # typing, diagnostics). No XcodeGen and no simulator needed.
+  host-tests:
+    needs: changes
+    if: needs.changes.outputs.host == 'true'
     runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Host tests (remote transcription logic)
+        run: swift test
+
+  # Builds the app and the test bundles once. The two test jobs below run
+  # against this build instead of compiling it again.
+  build-for-testing:
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Generate project
         run: xcodegen generate
-      - name: Host tests (remote transcription logic)
-        run: swift test
+      - name: Toolchain
+        id: toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          echo "xcode=$(xcodebuild -version | tr '\n ' '--')" >> "$GITHUB_OUTPUT"
+      # DerivedData holds the resolved Swift packages and their build products.
+      # Only main (and this PR while it is being proven) writes it, so a pull
+      # request can read the cache but never poison what main reads.
+      - name: Restore DerivedData
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            DerivedData
+            !DerivedData/Logs
+          key: dd-v1-${{ steps.toolchain.outputs.xcode }}-${{ hashFiles('project.yml') }}-${{ github.sha }}
+          restore-keys: |
+            dd-v1-${{ steps.toolchain.outputs.xcode }}-${{ hashFiles('project.yml') }}-
+            dd-v1-${{ steps.toolchain.outputs.xcode }}-
       - name: Select iPhone simulator
         id: simulator
-        run: |
-          SIMULATOR_UDID="$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ && /Shutdown|Booted/ { print $2; exit }')"
-          if [ -z "$SIMULATOR_UDID" ]; then
-            echo "No available iPhone simulator found"
-            xcrun simctl list devices available
-            exit 1
-          fi
-          xcrun simctl list devices available | grep "$SIMULATOR_UDID"
-          echo "udid=$SIMULATOR_UDID" >> "$GITHUB_OUTPUT"
-      # Boot the device ourselves so xcodebuild reuses it and leaves it running.
-      # The Live Activity diagnostics below read the simulator's unified log,
-      # which needs the device still booted after the tests.
-      - name: Boot simulator
-        run: |
-          xcrun simctl boot '${{ steps.simulator.outputs.udid }}' || true
-          xcrun simctl bootstatus '${{ steps.simulator.outputs.udid }}' -b
-      - name: Build for simulator
+        run: echo "udid=$(scripts/ci-select-simulator.sh)" >> "$GITHUB_OUTPUT"
+      - name: Resolve packages
         run: |
           xcodebuild \
+            -resolvePackageDependencies \
             -project MuesliiOS.xcodeproj \
             -scheme Muesli \
-            -destination 'generic/platform=iOS Simulator' \
-            CODE_SIGNING_ALLOWED=NO \
-            build
-      - name: Run unit and UI tests
+            -derivedDataPath DerivedData
+      # This also stands in for the old generic `build` step: it compiles the
+      # same app, keyboard and Live Activity extension targets.
+      - name: Build for testing
         run: |
           xcodebuild \
-            test \
+            build-for-testing \
             -project MuesliiOS.xcodeproj \
             -scheme Muesli \
             -destination 'platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}' \
+            -derivedDataPath DerivedData \
+            -enableCodeCoverage YES \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            CODE_SIGNING_ALLOWED=NO
+      # upload-artifact drops file modes, which breaks executables inside the
+      # .app, so the products travel as one tarball.
+      - name: Package build products
+        run: |
+          ls -1 DerivedData/Build/Products/*.xctestrun
+          tar -C DerivedData/Build -cf - Products | gzip -1 > products.tgz
+          ls -lh products.tgz
+      - name: Upload build products
+        uses: actions/upload-artifact@v4
+        with:
+          name: products
+          path: products.tgz
+          compression-level: 0
+          retention-days: 1
+      - name: Save DerivedData
+        if: github.event_name == 'push' || github.head_ref == 'ci/faster-pipeline'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            DerivedData
+            !DerivedData/Logs
+          key: dd-v1-${{ steps.toolchain.outputs.xcode }}-${{ hashFiles('project.yml') }}-${{ github.sha }}
+
+  # Two shards. AutocorrectCorpusTests.testGeneratedCorpusReport runs the real
+  # UITextChecker over thousands of typos and took 1215 s of the 1311 s the whole
+  # unit suite needed on a 2026-10-17 runner (the other 609 tests together took
+  # about 95 s). It gets its own job so it overlaps everything else instead of
+  # trailing it. Running the suite with parallel workers was slower (31 min
+  # against 25 min), so tests stay sequential within a shard.
+  unit-tests:
+    name: unit-tests (${{ matrix.shard }})
+    needs: build-for-testing
+    runs-on: macos-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: unit
+            selection: "-only-testing:MuesliTests -skip-testing:MuesliTests/AutocorrectCorpusTests/testGeneratedCorpusReport"
+          - shard: corpus
+            selection: "-only-testing:MuesliTests/AutocorrectCorpusTests/testGeneratedCorpusReport"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select iPhone simulator
+        id: simulator
+        run: echo "udid=$(scripts/ci-select-simulator.sh)" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v4
+        with:
+          name: products
+      - name: Unpack build products
+        run: tar -xzf products.tgz
+      - name: Run unit tests
+        env:
+          SELECTION: ${{ matrix.selection }}
+        run: |
+          # SELECTION is deliberately unquoted: it holds several flags.
+          # shellcheck disable=SC2086
+          xcodebuild \
+            test-without-building \
+            -xctestrun "$(ls -1 Products/*.xctestrun | head -1)" \
+            -destination 'platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}' \
+            $SELECTION \
+            -parallel-testing-enabled NO \
             -enableCodeCoverage YES \
             -resultBundlePath TestResults.xcresult \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee unit-tests.log
 
       # Reported, not gated. A floor is only meaningful once there is a
       # baseline worth holding, and gating on a number nobody chose tends to
@@ -64,22 +210,102 @@ jobs:
             echo "No result bundle produced; skipping coverage report."
             exit 0
           fi
+          echo "### Unit tests (${{ matrix.shard }})" >> "$GITHUB_STEP_SUMMARY"
           xcrun xccov view --report --json TestResults.xcresult > coverage.json
           python3 scripts/coverage-summary.py coverage.json | tee -a "$GITHUB_STEP_SUMMARY"
-
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results
-          path: TestResults.xcresult
+          name: test-results-unit-${{ matrix.shard }}
+          path: |
+            TestResults.xcresult
+            unit-tests.log
+          retention-days: 7
+
+  ui-tests:
+    needs: build-for-testing
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select iPhone simulator
+        id: simulator
+        run: echo "udid=$(scripts/ci-select-simulator.sh)" >> "$GITHUB_OUTPUT"
+      # Boot the device ourselves so xcodebuild reuses it and leaves it running.
+      # The Live Activity diagnostics below read the simulator's unified log,
+      # which needs the device still booted after the tests. The boot runs
+      # while the build products download.
+      - name: Start simulator boot
+        run: xcrun simctl boot '${{ steps.simulator.outputs.udid }}' || true
+      - uses: actions/download-artifact@v4
+        with:
+          name: products
+      - name: Unpack build products
+        run: tar -xzf products.tgz
+      - name: Wait for simulator
+        run: xcrun simctl bootstatus '${{ steps.simulator.outputs.udid }}' -b
+      # A failed test is retried once. The job still passes only if the retry
+      # passes, and a retry is reported as a warning and in the job summary so
+      # flakiness stays visible.
+      - name: Run UI tests
+        id: tests
+        run: |
+          set +e
+          xcodebuild \
+            test-without-building \
+            -xctestrun "$(ls -1 Products/*.xctestrun | head -1)" \
+            -destination 'platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}' \
+            -only-testing:MuesliUITests \
+            -retry-tests-on-failure \
+            -test-iterations 2 \
+            -enableCodeCoverage YES \
+            -resultBundlePath TestResults.xcresult \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee ui-tests.log
+          status=${PIPESTATUS[0]}
+          set -e
+          failed="$(grep -E "^Test [Cc]ase '.*' failed" ui-tests.log | sed -E "s/^Test [Cc]ase '([^']*)' failed.*/\1/" | sort -u || true)"
+          if [ -n "$failed" ]; then
+            echo "retried=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "### UI tests needed a retry"
+              echo
+              echo "These failed on the first attempt (job exit status: $status):"
+              echo
+              echo "$failed" | sed 's/^/- `/; s/$/`/'
+            } >> "$GITHUB_STEP_SUMMARY"
+            if [ "$status" -eq 0 ]; then
+              echo "::warning title=Flaky UI test::Passed only on retry: $(echo "$failed" | paste -sd, -)"
+            fi
+          fi
+          exit "$status"
+
+      - name: Report code coverage
+        if: always()
+        run: |
+          if [ ! -d TestResults.xcresult ]; then
+            echo "No result bundle produced; skipping coverage report."
+            exit 0
+          fi
+          echo "### UI tests" >> "$GITHUB_STEP_SUMMARY"
+          xcrun xccov view --report --json TestResults.xcresult > coverage.json
+          python3 scripts/coverage-summary.py coverage.json | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-ui
+          path: |
+            TestResults.xcresult
+            ui-tests.log
           retention-days: 7
 
       # The Dynamic Island UI test depends on the system rendering the Live
       # Activity extension. Keep the renderer's logs and any crash reports so a
-      # blank island can be traced past the screenshots.
+      # blank island can be traced past the screenshots. Collected when the
+      # tests failed or needed a retry; the log query costs about a minute.
       - name: Collect Live Activity diagnostics
-        if: always() && steps.simulator.outputs.udid != ''
+        if: failure() || steps.tests.outputs.retried == 'true'
         run: |
           mkdir -p sim-diagnostics
           UDID='${{ steps.simulator.outputs.udid }}'
@@ -89,11 +315,31 @@ jobs:
             > sim-diagnostics/live-activity.log 2>&1 || true
           wc -l sim-diagnostics/live-activity.log || true
           cp -R ~/Library/Logs/DiagnosticReports sim-diagnostics/ 2>/dev/null || true
-          xcrun simctl shutdown "$UDID" || true
       - name: Upload Live Activity diagnostics
-        if: always() && steps.simulator.outputs.udid != ''
+        if: failure() || steps.tests.outputs.retried == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: sim-diagnostics
           path: sim-diagnostics
           retention-days: 7
+
+  # The single status the pull request waits on. It always runs, passes when
+  # every job it depends on passed or was skipped for lack of relevant changes,
+  # and fails otherwise.
+  build:
+    needs: [changes, host-tests, build-for-testing, unit-tests, ui-tests]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check job results
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "needed job results: $RESULTS"
+          for r in $RESULTS; do
+            case "$r" in
+              success|skipped) ;;
+              *) echo "A required job did not pass: $r"; exit 1 ;;
+            esac
+          done
