@@ -199,6 +199,20 @@ jobs:
             -resultBundlePath TestResults.xcresult \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee unit-tests.log
 
+          # A selector that matches nothing exits 0 with no tests run. Fail
+          # if that happens (the corpus test renamed or moved), and fail if
+          # the unit shard still runs the test it is meant to skip.
+          executed="$(grep -E 'Executed [0-9]+ tests?,' unit-tests.log | tail -1 | sed -E 's/.*Executed ([0-9]+) tests?,.*/\1/')"
+          echo "tests executed: ${executed:-none}"
+          if [ "${executed:-0}" -eq 0 ]; then
+            echo "::error::No tests ran in the ${{ matrix.shard }} shard; its selection matches nothing"
+            exit 1
+          fi
+          if [ '${{ matrix.shard }}' = unit ] && grep -Eq "^Test [Cc]ase .*testGeneratedCorpusReport.* started" unit-tests.log; then
+            echo "::error::The unit shard ran testGeneratedCorpusReport; its skip filter is stale"
+            exit 1
+          fi
+
       # Reported, not gated. A floor is only meaningful once there is a
       # baseline worth holding, and gating on a number nobody chose tends to
       # produce tests written to move the number. Pass --fail-under-watched to
