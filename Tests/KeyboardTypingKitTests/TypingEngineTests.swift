@@ -42,10 +42,18 @@ final class FakeSuggestionSource: TypingSuggestionSource {
     var table: [String: [TypingSuggestion]] = [:]
     private(set) var requested: [String] = []
     private(set) var documentChanges = 0
+    /// Alternatives for a just-finished word, by the word.
+    var completedTable: [String: [TypingSuggestion]] = [:]
+    private(set) var completedRequested: [String] = []
 
     func suggestions(forPartial partial: String) -> [TypingSuggestion] {
         requested.append(partial)
         return table[partial] ?? []
+    }
+
+    func corrections(forCompletedWord word: String) -> [TypingSuggestion] {
+        completedRequested.append(word)
+        return completedTable[word] ?? []
     }
 
     func documentDidChange() { documentChanges += 1 }

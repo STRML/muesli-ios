@@ -28,4 +28,11 @@ enum TypingTokenContext {
         guard (3...maximumWordLength).contains(word.count), word.allSatisfy(\.isLetter) else { return false }
         return !word.dropFirst().contains(where: { $0.isUppercase })
     }
+
+    /// Whether a just-finished word is something the strip may offer alternatives for: letters, with an
+    /// apostrophe allowed inside, and short enough for a dictionary to judge.
+    static func isSuggestibleShape(_ word: String) -> Bool {
+        guard (1...maximumWordLength).contains(word.count), word.first?.isLetter == true else { return false }
+        return word.allSatisfy { $0.isLetter || $0 == "'" || $0 == "\u{2019}" }
+    }
 }

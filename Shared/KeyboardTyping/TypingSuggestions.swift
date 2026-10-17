@@ -60,6 +60,9 @@ enum TypingLanguageResolver {
 @MainActor
 protocol TypingSuggestionSource: AnyObject {
     func suggestions(forPartial partial: String) -> [TypingSuggestion]
+    /// Alternatives for a word the user just finished (the cursor is past its space or punctuation): guesses when
+    /// the word is misspelled, nothing when it is fine.
+    func corrections(forCompletedWord word: String) -> [TypingSuggestion]
     /// The host moved to another document: drop the checker so a new one is made for it.
     func documentDidChange()
 }
@@ -119,6 +122,31 @@ final class TypingSuggestionBuilder: TypingSuggestionSource {
         var result = lexiconSuggestions(for: partial)
         result += checkerSuggestions(for: partial)
         return Array(deduplicated(result, partial: partial).prefix(limit))
+    }
+
+    /// Guesses for a word the user just finished, only when the checker thinks it is misspelled, with the
+    /// contraction first for a word missing its apostrophe ("dont"). A word with an apostrophe, a contact or
+    /// shortcut of the user's, and a language without a dictionary get nothing.
+    func corrections(forCompletedWord word: String) -> [TypingSuggestion] {
+        let lowered = word.lowercased()
+        guard !word.isEmpty, !word.contains("'"), !word.contains("\u{2019}"),
+              !lexicon.contains(where: { $0.userInput.lowercased() == lowered })
+        else { return [] }
+        let available = checker?.availableLanguages ?? resolvedChecker().availableLanguages
+        guard let language = TypingLanguageResolver.resolve(candidates: languageCandidates(), available: available) else {
+            return []
+        }
+        var candidates: [String] = []
+        if TypingLanguageResolver.baseCode(of: language) == "en", let contraction = TypingContractions.correction(for: word) {
+            candidates.append(contraction)
+        }
+        let checker = resolvedChecker()
+        if checker.isMisspelled(word, language: language) {
+            candidates += checker.guesses(forWord: word, language: language).map { matchCase($0, to: word) }
+        }
+        var seen = Set<String>([lowered])
+        let corrections = candidates.filter { seen.insert($0.lowercased()).inserted }
+        return corrections.prefix(limit).map { TypingSuggestion(text: $0, kind: .correction) }
     }
 
     private func lexiconSuggestions(for partial: String) -> [TypingSuggestion] {

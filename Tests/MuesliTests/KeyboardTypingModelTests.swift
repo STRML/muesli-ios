@@ -333,4 +333,23 @@ final class KeyboardTypingModelTests: XCTestCase {
         XCTAssertEqual(controller.typing.state.suggestions.first?.kind, .original)
         XCTAssertEqual(controller.typing.state.suggestions.first?.text, "teh")
     }
+
+    // M9: with Autocorrect off a typo stays, and the strip offers the real checker's alternatives for it.
+    func testAfterASpaceTheStripOffersTheRealCheckersAlternativesForATypo() throws {
+        try store.saveKeyboardTypingSettings(KeyboardTypingSettings(autocorrect: false))
+        controller.loadTypingSettings()
+        typeKeys("I think teh ")
+        let corrections = controller.typing.state.suggestions
+        XCTAssertTrue(corrections.contains { $0.text == "the" && $0.kind == .correction }, "\(corrections)")
+        controller.typing.accept(try XCTUnwrap(corrections.first { $0.text == "the" }))
+        XCTAssertEqual(before, "I think the ")
+        controller.typing.perform(.backspace)
+        XCTAssertEqual(before, "I think teh ")
+    }
+
+    // M10: a correct word leaves the strip empty after its space.
+    func testAfterASpaceACorrectWordLeavesTheStripEmpty() {
+        typeKeys("Hey is just gets stuck ")
+        XCTAssertEqual(controller.typing.state.suggestions, [])
+    }
 }

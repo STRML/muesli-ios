@@ -80,14 +80,29 @@ final class TypingEngine {
     private var lastAutocapKey: AutocapKey?
     private var knownDocumentID: UUID?
     private var snapshot: SuggestionSnapshot?
+    /// The word the user finished by typing a space, punctuation or return, until the next keystroke or edit
+    /// changes the context. The strip offers alternatives for it while the cursor is still right after it.
+    private var completedWord: CompletedWord?
 
     private struct AutocapKey: Equatable {
         let mode: TypingAutocapitalization
         let before: String
     }
 
+    private struct CompletedWord: Equatable {
+        let word: String
+        /// What ended it: a space, one punctuation mark or a line break.
+        let boundary: String
+        var text: String { word + boundary }
+    }
+
     private struct SuggestionSnapshot {
-        let partial: String
+        enum Target {
+            case partial(String)
+            case completed(CompletedWord)
+        }
+
+        let target: Target
         let documentIdentifier: UUID?
     }
 
@@ -133,6 +148,7 @@ final class TypingEngine {
     /// a pending correction, and nothing in it is ever corrected.
     func noteExternalInsertion() {
         pendingUndo = nil
+        completedWord = nil
         typedWord = ""
         refresh()
     }
@@ -141,7 +157,9 @@ final class TypingEngine {
 
     func type(_ text: String) {
         pendingUndo = nil
+        completedWord = nil
         if let character = text.first, text.count == 1, TypingWordExtractor.endsWord(character) {
+            rememberCompletedWord(boundary: text)
             completeWord(boundary: .punctuation(text))
             typedWord = ""
         } else {
@@ -154,6 +172,7 @@ final class TypingEngine {
 
     func tapSpace() {
         pendingUndo = nil
+        rememberCompletedWord(boundary: " ")
         completeWord(boundary: .space)
         typedWord = ""
         document.insert(" ")
@@ -163,6 +182,7 @@ final class TypingEngine {
 
     func tapReturn() {
         pendingUndo = nil
+        rememberCompletedWord(boundary: "\n")
         completeWord(boundary: .returnKey)
         typedWord = ""
         document.insert("\n")
@@ -178,6 +198,7 @@ final class TypingEngine {
             return
         }
         pendingUndo = nil
+        completedWord = nil
         if hasSelection { typedWord = "" } else if !typedWord.isEmpty { typedWord.removeLast() }
         // Always forwarded, even when the context looks empty: some hosts never show their text to a keyboard.
         document.deleteBackward()
@@ -206,10 +227,17 @@ final class TypingEngine {
               let snapshot, state.suggestions.contains(suggestion),
               snapshot.documentIdentifier == document.documentIdentifier
         else { return false }
+        switch snapshot.target {
+        case .partial(let partial): return acceptCompletion(suggestion, partial: partial)
+        case .completed(let completed): return acceptCorrection(suggestion, for: completed)
+        }
+    }
+
+    private func acceptCompletion(_ suggestion: TypingSuggestion, partial: String) -> Bool {
         let before = document.contextBefore
         let after = document.contextAfter
         guard case .partial(let current) = TypingWordExtractor.word(before: before, after: after),
-              current == snapshot.partial
+              current == partial
         else {
             refresh()
             return false
@@ -220,8 +248,35 @@ final class TypingEngine {
             return false
         }
         pendingUndo = nil
+        completedWord = nil
         typedWord = ""
         apply(plan)
+        refresh()
+        return true
+    }
+
+    /// An alternative for the word just finished: swap it in, keep the space or punctuation after it, and make it
+    /// the same one-backspace undo an autocorrect is.
+    private func acceptCorrection(_ suggestion: TypingSuggestion, for completed: CompletedWord) -> Bool {
+        let before = document.contextBefore
+        let replacement = suggestion.text + completed.boundary
+        let plan = TypingEditPlan(
+            deleteCount: completed.text.count,
+            insertText: replacement,
+            expectedSuffix: completed.text,
+            undo: TypingReplacementUndo(
+                replacedText: completed.text, insertedText: replacement, originalWord: completed.word
+            )
+        )
+        guard (document.selectedText ?? "").isEmpty, plan.isApplicable(toContextBefore: before) else {
+            refresh()
+            return false
+        }
+        undoContextAfter = document.contextAfter ?? ""
+        completedWord = nil
+        typedWord = ""
+        apply(plan)
+        pendingUndo = plan.undo
         refresh()
         return true
     }
@@ -244,6 +299,8 @@ final class TypingEngine {
 
     private func restore(_ undo: TypingReplacementUndo) {
         pendingUndo = nil
+        // The user insisted on the word as typed; the strip does not argue.
+        completedWord = nil
         typedWord = ""
         for _ in 0..<undo.insertedText.count { document.deleteBackward() }
         document.insert(undo.replacedText)
@@ -264,6 +321,7 @@ final class TypingEngine {
         guard !state.traits.isSecure else {
             // A secure field is never read.
             typedWord = ""
+            completedWord = nil
             pendingUndo = nil
             return
         }
@@ -301,6 +359,28 @@ final class TypingEngine {
         pendingUndo = plan.undo
     }
 
+    /// Notes the word typed here that a boundary is about to end, for the strip. Whether the document really
+    /// ends with it is checked when the strip is built, so a proxy that lags only delays the alternatives.
+    private func rememberCompletedWord(boundary: String) {
+        completedWord = nil
+        let word = TypingWordExtractor.withoutLeadingJoiners(typedWord)
+        guard TypingTokenContext.isSuggestibleShape(word) else { return }
+        completedWord = CompletedWord(word: word, boundary: boundary)
+    }
+
+    /// The finished word the cursor is still right after, if the strip may judge it: typed here, the whole token,
+    /// and not a name in the middle of a sentence.
+    private func completedWordBeforeCursor(before: String?) -> CompletedWord? {
+        guard let completed = completedWord, (document.selectedText ?? "").isEmpty,
+              let before, before.hasSuffix(completed.text)
+        else { return nil }
+        let wordEnd = String(before.dropLast(completed.boundary.count))
+        guard TypingTokenContext.isStandaloneWord(completed.word, contextBefore: wordEnd) else { return nil }
+        if completed.word.first?.isUppercase == true,
+           !TypingTokenContext.startsSentence(word: completed.word, contextBefore: wordEnd) { return nil }
+        return completed
+    }
+
     private func refresh() {
         let traits = state.traits
         noteDocumentIdentity()
@@ -323,7 +403,12 @@ final class TypingEngine {
             let word = TypingWordExtractor.word(before: before, after: document.contextAfter)
             if case .partial(let partial) = word {
                 suggestions = suggestionSource.suggestions(forPartial: partial)
-                snapshot = SuggestionSnapshot(partial: partial, documentIdentifier: document.documentIdentifier)
+                snapshot = SuggestionSnapshot(target: .partial(partial), documentIdentifier: document.documentIdentifier)
+            } else if let completed = completedWordBeforeCursor(before: before) {
+                suggestions = suggestionSource.corrections(forCompletedWord: completed.word)
+                if !suggestions.isEmpty {
+                    snapshot = SuggestionSnapshot(target: .completed(completed), documentIdentifier: document.documentIdentifier)
+                }
             }
         }
         publish(suggestions: suggestions, isReturnEnabled: returnIsEnabled(before: before))
@@ -334,6 +419,7 @@ final class TypingEngine {
         if let known = knownDocumentID, known != identifier {
             suggestionSource.documentDidChange()
             pendingUndo = nil
+            completedWord = nil
             typedWord = ""
             lastAutocapKey = nil
         }
