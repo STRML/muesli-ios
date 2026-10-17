@@ -17,6 +17,10 @@ import os
 /// **Never record transcript text.** Phases, identifiers, and timings only. A
 /// diagnostics buffer full of what people dictated is a liability the moment a
 /// tester pastes it into a chat.
+///
+/// With "Ship diagnostics" on, the app uploads this file to the user's own server, line by line, through an
+/// allowlist (`DiagnosticsVocabulary`). A new event name has to be added there or it is never uploaded, and the
+/// file format is owned by `DiagnosticsLogFormat`, which the uploader reads back.
 enum KeyboardDiagnosticsLog {
     /// Roughly a few dictation sessions' worth of history -- enough to see how a
     /// session got into a bad state, small enough to stay cheap to rewrite.
@@ -31,6 +35,7 @@ enum KeyboardDiagnosticsLog {
     )
 
     private static let fileName = "keyboard-diagnostics.log"
+    private static let lockFileName = "keyboard-diagnostics.lock"
     private static let queue = DispatchQueue(label: "com.samuelreed.muesli.keyboard-diagnostics")
 
     /// Records one transition. `detail` values are truncated and must never
@@ -44,15 +49,17 @@ enum KeyboardDiagnosticsLog {
         var detail = detail
         if let captureRequestID { detail["capture_request"] = captureRequestID }
         if let intentInvocationID { detail["intent_invocation"] = intentInvocationID }
-        let rendered = detail
-            .sorted { $0.key < $1.key }
-            .map { "\($0.key)=\(sanitize($0.value))" }
-            .joined(separator: " ")
+        let rendered = DiagnosticsLogFormat.renderDetail(detail)
 
         logger.debug("\(event, privacy: .public) \(rendered, privacy: .public)")
 
-        let fields = [process, event, rendered].filter { !$0.isEmpty }
-        queue.async { append(fields: fields, at: date) }
+        let line = DiagnosticsLogFormat.line(date: date, process: process, event: event, detail: detail)
+        queue.async { append(line: line) }
+    }
+
+    /// Records one of the stop-to-save events built by `DiagnosticsEvents`.
+    static func record(_ record: DiagnosticsRecord) {
+        self.record(record.name, record.fields)
     }
 
     /// The buffer as text, oldest first, for export or a debug screen.
@@ -69,7 +76,7 @@ enum KeyboardDiagnosticsLog {
     static func clear() {
         queue.sync {
             guard let url = fileURL() else { return }
-            try? FileManager.default.removeItem(at: url)
+            withFileLock { try? FileManager.default.removeItem(at: url) }
         }
     }
 
@@ -84,15 +91,16 @@ enum KeyboardDiagnosticsLog {
     /// Appends, then trims to the newest `entryLimit` lines. Rewriting a
     /// bounded file is cheaper than the bookkeeping needed to avoid it, and
     /// this runs off the main thread.
-    private static func append(fields: [String], at date: Date) {
+    ///
+    /// The app, the keyboard and the intents each have their own `queue`, so this read-modify-write ran
+    /// unlocked across processes and one could overwrite the other's newest line. That mattered most for the
+    /// last event of a failed dictation, so the whole step now holds an exclusive file lock.
+    private static func append(line: String) {
         guard let url = fileURL() else { return }
+        withFileLock { appendLocked(line: line, to: url) }
+    }
 
-        // Built here rather than held as shared state: ISO8601DateFormatter is
-        // not Sendable, and this is the only context that touches it.
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let line = ([formatter.string(from: date)] + fields).joined(separator: "\t")
-
+    private static func appendLocked(line: String, to url: URL) {
         var lines = (try? String(contentsOf: url, encoding: .utf8))?
             .split(separator: "\n", omittingEmptySubsequences: true)
             .map(String.init) ?? []
@@ -127,10 +135,15 @@ enum KeyboardDiagnosticsLog {
         #endif
     }
 
-    private static func sanitize(_ value: String) -> String {
-        let collapsed = value
-            .replacingOccurrences(of: "\n", with: " ")
-            .replacingOccurrences(of: "\t", with: " ")
-        return collapsed.count <= 64 ? collapsed : String(collapsed.prefix(64)) + "..."
+    /// Runs `body` holding an exclusive `flock` on a sidecar file, so two processes never interleave a rewrite. If
+    /// the lock file cannot be opened (device locked before first unlock), the write still happens, unlocked.
+    private static func withFileLock<T>(_ body: () -> T) -> T {
+        guard let lockURL = fileURL()?.deletingLastPathComponent().appendingPathComponent(lockFileName) else { return body() }
+        let descriptor = open(lockURL.path, O_CREAT | O_RDWR, 0o644)
+        guard descriptor >= 0 else { return body() }
+        defer { close(descriptor) }
+        flock(descriptor, LOCK_EX)
+        defer { flock(descriptor, LOCK_UN) }
+        return body()
     }
 }
