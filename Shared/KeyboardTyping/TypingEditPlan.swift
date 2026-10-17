@@ -2,10 +2,19 @@ import Foundation
 
 /// A replacement that the next backspace takes back (phase 2: autocorrect). Right after the replacement the
 /// document ends with `insertedText` (the new word and the boundary that followed it); undoing deletes that and
-/// types `replacedText` again, which is what the user had typed.
+/// types `replacedText` again, which is exactly what the user had typed: the original word and the same space,
+/// punctuation or line break after it.
 struct TypingReplacementUndo: Sendable, Equatable {
     let replacedText: String
     let insertedText: String
+    /// The word as typed, without the boundary: what the strip offers back, in quotes.
+    let originalWord: String
+
+    init(replacedText: String, insertedText: String, originalWord: String? = nil) {
+        self.replacedText = replacedText
+        self.insertedText = insertedText
+        self.originalWord = originalWord ?? replacedText
+    }
 }
 
 /// One edit to the host document: delete characters before the cursor, then insert text. Counts are in

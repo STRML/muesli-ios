@@ -8,6 +8,9 @@ final class FakeSpellChecker: TypingSpellChecking {
     var completionTable: [String: [String]] = [:]
     var guessTable: [String: [String]] = [:]
     private(set) var calls: [String] = []
+    private(set) var ignored: [String] = []
+
+    func ignore(_ word: String) { ignored.append(word) }
 
     func isMisspelled(_ word: String, language: String) -> Bool {
         calls.append("misspelled:\(language)")
@@ -206,5 +209,19 @@ final class TypingSuggestionBuilderTests: XCTestCase {
         let builder = builder(limit: 2)
         checker.completionTable["a"] = ["apple", "ant", "ask"]
         XCTAssertEqual(texts(builder.suggestions(forPartial: "a")), ["apple", "ant"])
+    }
+
+    // U8: UITextChecker.ignoreWord only lasts as long as one instance; the builder replays it.
+    func testIgnoredWordsAreReplayedIntoANewChecker() {
+        let sut = builder()
+        _ = sut.suggestions(forPartial: "te")
+        sut.ignore("teh")
+        XCTAssertEqual(checker.ignored, ["teh"], "the live checker hears it at once")
+        sut.documentDidChange()
+        let firstChecker = checker
+        checker = FakeSpellChecker()
+        _ = sut.suggestions(forPartial: "te")
+        XCTAssertEqual(checker.ignored, ["teh"], "a new checker gets it too")
+        XCTAssertNotEqual(ObjectIdentifier(firstChecker), ObjectIdentifier(checker))
     }
 }

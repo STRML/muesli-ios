@@ -159,8 +159,8 @@ struct KeyboardSuggestionStrip: View {
                     onTap(suggestion)
                 } label: {
                     Text(display(suggestion))
-                        .font(.system(size: 17, weight: suggestion.kind == .verbatim ? .regular : .medium))
-                        .foregroundStyle(suggestion.kind == .verbatim ? MuesliTheme.textSecondary : MuesliTheme.textPrimary)
+                        .font(.system(size: 17, weight: isQuoted(suggestion) ? .regular : .medium))
+                        .foregroundStyle(isQuoted(suggestion) ? MuesliTheme.textSecondary : MuesliTheme.textPrimary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
                         .padding(.horizontal, 6)
@@ -176,7 +176,12 @@ struct KeyboardSuggestionStrip: View {
 
     /// The word as typed is shown in quotes, the way the system strip marks it.
     private func display(_ suggestion: TypingSuggestion) -> String {
-        suggestion.kind == .verbatim ? "\u{201C}\(suggestion.text)\u{201D}" : suggestion.text
+        isQuoted(suggestion) ? "\u{201C}\(suggestion.text)\u{201D}" : suggestion.text
+    }
+
+    /// What was typed (before a fix, or after one) is shown in quotes, as the system keyboard does.
+    private func isQuoted(_ suggestion: TypingSuggestion) -> Bool {
+        suggestion.kind == .verbatim || suggestion.kind == .original
     }
 }
 

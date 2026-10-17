@@ -14,7 +14,14 @@ final class FakeDocument: TypingDocument {
     private(set) var deleteCalls = 0
     private(set) var inserted: [String] = []
 
-    var contextBefore: String? { beforeReads += 1; return before.isEmpty ? nil : before }
+    var selectedText: String? { selection }
+    /// What the proxy reports while it lags behind the keystrokes it was just given.
+    var staleBefore: String?
+    var contextBefore: String? {
+        beforeReads += 1
+        let shown = staleBefore ?? before
+        return shown.isEmpty ? nil : shown
+    }
     var contextAfter: String? { afterReads += 1; return after.isEmpty ? nil : after }
 
     func insert(_ text: String) {
@@ -478,16 +485,16 @@ final class TypingEngineTests: XCTestCase {
         let handler = FakeCompletionHandler()
         handler.plan = TypingEditPlan(
             deleteCount: 3, insertText: "the", expectedSuffix: "teh",
-            undo: TypingReplacementUndo(replacedText: "teh", insertedText: "the ")
+            undo: TypingReplacementUndo(replacedText: "teh ", insertedText: "the ", originalWord: "teh")
         )
         engine.completionHandler = handler
         typeWord("teh")
         engine.tapSpace()
         XCTAssertEqual(document.before, "the ")
         engine.tapBackspace()
-        XCTAssertEqual(document.before, "teh", "one backspace puts the typed word back, boundary included")
+        XCTAssertEqual(document.before, "teh ", "one backspace puts the typed word back, boundary included")
         engine.tapBackspace()
-        XCTAssertEqual(document.before, "te", "the undo is spent after one use")
+        XCTAssertEqual(document.before, "teh", "the undo is spent after one use")
     }
 
     // Y19
@@ -504,7 +511,7 @@ final class TypingEngineTests: XCTestCase {
         let handler = FakeCompletionHandler()
         handler.plan = TypingEditPlan(
             deleteCount: 3, insertText: "the", expectedSuffix: "teh",
-            undo: TypingReplacementUndo(replacedText: "teh", insertedText: "the ")
+            undo: TypingReplacementUndo(replacedText: "teh ", insertedText: "the ", originalWord: "teh")
         )
         engine.completionHandler = handler
         typeWord("teh")
