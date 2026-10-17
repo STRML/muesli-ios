@@ -14,6 +14,9 @@ final class OrchestratorTests: XCTestCase {
         let log = LogSink()
         let uploadCancelled = Flag()
         let localCancelled = Flag()
+        /// Every wait the orchestrator schedules lands here and stays parked until a test releases it, so no test
+        /// outcome depends on how fast the machine runs.
+        let sleeper = ManualSleeper()
     }
 
     private func make(
@@ -27,8 +30,23 @@ final class OrchestratorTests: XCTestCase {
             probe: { harness.probeCalls.increment(); return await probe() },
             upload: { _ in harness.uploadCalls.increment(); return try await upload() },
             prewarm: { harness.prewarmCalls.increment() },
-            log: { harness.log.append($0) }
+            log: { harness.log.append($0) },
+            sleep: harness.sleeper.sleep
         )
+    }
+
+    /// Runs one dictation whose probe never answers and whose on-device text is ready at once, letting only the
+    /// unresolved-probe grace elapse. Returning at all shows that wait alone ended the dictation.
+    private func dictationWithAProbeThatNeverAnswers(
+        timing: RemoteTranscriptionTiming
+    ) async throws -> (outcome: RemoteTranscriptionOrchestrator.Outcome, sleeper: ManualSleeper) {
+        let h = Harness()
+        let orchestrator = make(h, timing: timing, probe: { try? await cancellableSleep(1_000); return .unreachable })
+        let (audio, eligible) = (self.audio, self.eligible)
+        let run = Task { try await orchestrator.transcribe(audioURL: audio, context: eligible, local: { "local text" }) }
+        await h.sleeper.waitUntilPending(timing.unresolvedProbeGrace)
+        h.sleeper.release(timing.unresolvedProbeGrace)
+        return (try await run.value, h.sleeper)
     }
 
     private func local(
@@ -136,13 +154,10 @@ final class OrchestratorTests: XCTestCase {
     }
 
     func testRow04AProbeThatNeverAnswersDoesNotHoldTheOnDeviceTextBeyondTheGrace() async throws {
-        let h = Harness()
-        let orchestrator = make(h, probe: { try? await Task.sleep(for: .seconds(30)); return .unreachable })
-        let start = ContinuousClock.now
-        let outcome = try await orchestrator.transcribe(audioURL: audio, context: eligible, local: local())
-        let elapsed = seconds(ContinuousClock.now - start)
+        let (outcome, sleeper) = try await dictationWithAProbeThatNeverAnswers(timing: timing)
         XCTAssertEqual(outcome.source, .onDevice)
-        XCTAssertLessThan(elapsed, timing.unresolvedProbeGrace + 0.15)
+        XCTAssertEqual(sleeper.released, [timing.unresolvedProbeGrace], "only the grace elapsed, never the result budget")
+        XCTAssertTrue(sleeper.requested.contains(timing.resultBudget), "the budget was scheduled but did not gate the text")
     }
 
     func testRow09ProbeFailureOnAMeteredLinkStillSendsNoRecording() async throws {
@@ -178,17 +193,17 @@ final class OrchestratorTests: XCTestCase {
     func testRow06RemoteAfterTheBudgetIsDroppedAndNothingReplacesTheOnDeviceText() async throws {
         let h = Harness()
         let orchestrator = make(h, upload: {
-            try await cancellableSleep(2, cancelled: h.uploadCancelled)
+            try await cancellableSleep(1_000, cancelled: h.uploadCancelled)
             return "remote text"
         })
-        let start = ContinuousClock.now
-        let outcome = try await orchestrator.transcribe(audioURL: audio, context: eligible, local: local())
-        let elapsed = seconds(ContinuousClock.now - start)
+        let (audio, eligible) = (self.audio, self.eligible)
+        let run = Task { try await orchestrator.transcribe(audioURL: audio, context: eligible, local: { "local text" }) }
+        await h.sleeper.waitUntilPending(timing.resultBudget)
+        h.sleeper.release(timing.resultBudget)
+        let outcome = try await run.value
         XCTAssertEqual(outcome, .init(text: "local text", source: .onDevice))
-        XCTAssertGreaterThanOrEqual(elapsed, timing.resultBudget - 0.05, "waits for the remote until the budget runs out")
-        XCTAssertLessThan(elapsed, timing.resultBudget + 0.3)
-        try await Task.sleep(for: .milliseconds(50))
-        XCTAssertTrue(h.uploadCancelled.value, "the late upload is cancelled, never left to land later")
+        XCTAssertEqual(h.sleeper.released, [timing.resultBudget], "it waited for the remote exactly until the budget ran out")
+        await eventually("the late upload to be cancelled") { h.uploadCancelled.value }
     }
 
     func testRow07EmptyOrGarbageRemoteTextFallsBackToOnDevice() async throws {
@@ -202,39 +217,46 @@ final class OrchestratorTests: XCTestCase {
 
     func testRow08RemoteTextInsideTheBudgetWinsAndIsDeliveredOnce() async throws {
         let h = Harness()
+        let gate = Gate()
         let orchestrator = make(h, upload: {
-            try await Task.sleep(for: .milliseconds(120))
+            await gate.wait()
             return "remote text"
         })
-        let outcome = try await orchestrator.transcribe(audioURL: audio, context: eligible, local: local())
+        let (audio, eligible) = (self.audio, self.eligible)
+        let run = Task { try await orchestrator.transcribe(audioURL: audio, context: eligible, local: { "local text" }) }
+        await eventually("the upload to start") { h.uploadCalls.value == 1 }
+        gate.open()
+        let outcome = try await run.value
         XCTAssertEqual(outcome, .init(text: "remote text", source: .remote))
         XCTAssertEqual(h.uploadCalls.value, 1)
+        XCTAssertTrue(h.sleeper.released.isEmpty, "the budget never ran out")
     }
 
     func testRow08RemoteThatBeatsASlowOnDeviceRunIsUsedAtOnceAndOnDeviceIsStopped() async throws {
         let h = Harness()
-        let orchestrator = make(h, upload: {
-            try await Task.sleep(for: .milliseconds(80))
-            return "remote text"
-        })
-        let start = ContinuousClock.now
-        let outcome = try await orchestrator.transcribe(
-            audioURL: audio, context: eligible, local: local(after: 2, harness: h)
+        let outcome = try await make(h).transcribe(
+            audioURL: audio, context: eligible, local: local(after: 1_000, harness: h)
         )
-        let elapsed = seconds(ContinuousClock.now - start)
         XCTAssertEqual(outcome.source, .remote)
-        XCTAssertLessThan(elapsed, 0.4)
-        try await Task.sleep(for: .milliseconds(50))
-        XCTAssertTrue(h.localCancelled.value)
+        XCTAssertTrue(h.sleeper.released.isEmpty)
+        await eventually("the on-device run to be stopped") { h.localCancelled.value }
     }
 
     func testOnDeviceTextReadyFirstWaitsOnlyForARemoteThatIsInFlight() async throws {
         let h = Harness()
+        let gate = Gate()
+        let localDone = Flag()
         let orchestrator = make(h, upload: {
-            try await Task.sleep(for: .milliseconds(200))
+            await gate.wait()
             return "remote text"
         })
-        let outcome = try await orchestrator.transcribe(audioURL: audio, context: eligible, local: local())
+        let (audio, eligible) = (self.audio, self.eligible)
+        let run = Task {
+            try await orchestrator.transcribe(audioURL: audio, context: eligible, local: { localDone.set(); return "local text" })
+        }
+        await eventually("on-device text and the upload both under way") { localDone.value && h.uploadCalls.value == 1 }
+        gate.open()
+        let outcome = try await run.value
         XCTAssertEqual(outcome.text, "remote text")
     }
 
@@ -251,7 +273,7 @@ final class OrchestratorTests: XCTestCase {
         let task = Task {
             try await orchestrator.transcribe(audioURL: audio, context: eligible, local: slowLocal)
         }
-        try await Task.sleep(for: .milliseconds(100))
+        await eventually("the upload to start") { h.uploadCalls.value == 1 }
         task.cancel()
         do {
             _ = try await task.value
@@ -259,9 +281,7 @@ final class OrchestratorTests: XCTestCase {
         } catch {
             XCTAssertTrue(error is CancellationError)
         }
-        try await Task.sleep(for: .milliseconds(50))
-        XCTAssertTrue(h.uploadCancelled.value)
-        XCTAssertTrue(h.localCancelled.value)
+        await eventually("both paths to be cancelled") { h.uploadCancelled.value && h.localCancelled.value }
     }
 
     func testOnDeviceFailureWithAGoodRemoteUsesTheRemoteText() async throws {
@@ -284,41 +304,28 @@ final class OrchestratorTests: XCTestCase {
 
     // MARK: Acceptance
 
+    /// The acceptance criterion: an unreachable remote adds under 100 ms to a dictation. The orchestrator's only wait
+    /// on that path is the unresolved-probe grace, so the criterion is a bound on the configured grace. Asserting the
+    /// wait itself, not a stopwatch reading, keeps the check independent of runner load.
     func testAcceptanceUnreachableServerAddsLessThan100msToDictation() async throws {
-        // Best of three: a shared CI runner can stall one run by 100 ms or more, which says nothing about the wait.
-        var added: [Double] = []
-        for _ in 0..<3 {
-            let orchestrator = make(Harness(), timing: .standard, probe: {
-                try? await Task.sleep(for: .seconds(30))
-                return .unreachable
-            })
-            let baselineStart = ContinuousClock.now
-            _ = try await make(Harness(), timing: .standard).transcribe(
-                audioURL: audio,
-                context: RemoteRequestContext(settingEnabled: false, endpointConfigured: true),
-                local: local()
-            )
-            let baseline = seconds(ContinuousClock.now - baselineStart)
-
-            let start = ContinuousClock.now
-            let outcome = try await orchestrator.transcribe(audioURL: audio, context: eligible, local: local())
-            let withRemote = seconds(ContinuousClock.now - start)
-            XCTAssertEqual(outcome.source, .onDevice)
-            added.append(withRemote - baseline)
-        }
-        XCTAssertLessThan(added.min() ?? .infinity, 0.1, "added per run: \(added)")
+        let criterion = 0.1
+        let (outcome, sleeper) = try await dictationWithAProbeThatNeverAnswers(timing: .standard)
+        XCTAssertEqual(outcome.source, .onDevice)
+        XCTAssertEqual(sleeper.released, [RemoteTranscriptionTiming.standard.unresolvedProbeGrace])
+        XCTAssertLessThan(sleeper.released.reduce(0, +), criterion, "the whole wait the unreachable server caused")
+        XCTAssertLessThan(RemoteTranscriptionTiming.standard.unresolvedProbeGrace, criterion)
     }
 
     func testAcceptanceAPrewarmedUnreachableVerdictAddsNothing() async throws {
         let cache = RemoteProbeCache(ttl: 30, probe: { .unreachable })
         await cache.prewarm()
+        let sleeper = ManualSleeper()
         let orchestrator = RemoteTranscriptionOrchestrator(
-            timing: .standard, probe: { await cache.outcome() }, upload: { _ in "remote" }
+            timing: .standard, probe: { await cache.outcome() }, upload: { _ in "remote" }, sleep: sleeper.sleep
         )
-        let start = ContinuousClock.now
         let outcome = try await orchestrator.transcribe(audioURL: audio, context: eligible, local: local())
         XCTAssertEqual(outcome.source, .onDevice)
-        XCTAssertLessThan(seconds(ContinuousClock.now - start), 0.03)
+        XCTAssertTrue(sleeper.released.isEmpty, "no wait of any length was let elapse")
     }
 }
 
@@ -365,7 +372,9 @@ final class StaleVerdictTests: XCTestCase {
 
     func testRow14AnUploadThatMissesTheBudgetMakesTheNextRecordingProbeAgain() async throws {
         let probes = Counter()
+        let invalidations = Counter()
         let hanging = Flag()
+        let sleeper = ManualSleeper()
         let cache = RemoteProbeCache(ttl: 30, probe: {
             probes.increment()
             return hanging.value ? .timedOut : .reachable(latency: 0.02)
@@ -375,21 +384,26 @@ final class StaleVerdictTests: XCTestCase {
             probe: { await cache.outcome() },
             upload: { _ in
                 hanging.set()
-                try await Task.sleep(for: .seconds(5))
+                try await cancellableSleep(1_000)
                 return "late"
             },
-            invalidateProbe: { await cache.invalidate() }
+            invalidateProbe: { await cache.invalidate(); invalidations.increment() },
+            sleep: sleeper.sleep
         )
-        let first = try await orchestrator.transcribe(audioURL: audio, context: eligible, local: { "on device" })
+        let (audio, eligible) = (self.audio, self.eligible)
+        let firstRun = Task { try await orchestrator.transcribe(audioURL: audio, context: eligible, local: { "on device" }) }
+        await sleeper.waitUntilPending(timing.resultBudget)
+        await eventually("the upload to start, after the probe passed") { hanging.value }
+        sleeper.release(timing.resultBudget)
+        let first = try await firstRun.value
         XCTAssertEqual(first.source, .onDevice)
-        try await Task.sleep(for: .milliseconds(50))
+        await eventually("the stale verdict to be dropped") { invalidations.value == 1 }
         XCTAssertEqual(probes.value, 1)
 
-        let start = ContinuousClock.now
         let second = try await orchestrator.transcribe(audioURL: audio, context: eligible, local: { "on device" })
         XCTAssertEqual(second.source, .onDevice)
         XCTAssertEqual(probes.value, 2, "the stale 'fast' verdict was dropped and probed again")
-        XCTAssertLessThan(seconds(ContinuousClock.now - start), timing.resultBudget, "no second wait for the full budget")
+        XCTAssertEqual(sleeper.released, [timing.resultBudget], "the second recording did not wait for the budget again")
     }
 
     func testRow05AFailedUploadInvalidatesTheVerdictAndASuccessDoesNot() async throws {
@@ -402,10 +416,11 @@ final class StaleVerdictTests: XCTestCase {
                     if fails { throw RemoteTranscriptionError.transport(-1005) }
                     return "remote"
                 },
-                invalidateProbe: { invalidations.increment() }
+                invalidateProbe: { invalidations.increment() },
+                sleep: ManualSleeper().sleep
             )
             _ = try await orchestrator.transcribe(audioURL: audio, context: eligible, local: { "on device" })
-            try await Task.sleep(for: .milliseconds(30))
+            // A failed upload is invalidated before the orchestrator reports it, so the count is final on return.
             XCTAssertEqual(invalidations.value, expected, "fails=\(fails)")
         }
     }
