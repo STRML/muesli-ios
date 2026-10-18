@@ -78,8 +78,15 @@ final class TypingAutocorrectDiagnosticsTests: XCTestCase {
         assertOneDecline("length_diff")
     }
 
+    private func cost(_ typed: String, _ candidate: String) -> Double {
+        TypingEditCost.between(typed, candidate, weights: TypingEditWeights())
+    }
+
+    /// "abcdef" to "abpdef": c to p is a substitution between keys that are not neighbours, 1.7 (not first
+    /// letter, so no +0.4). A six-letter word's budget is 1.0, so 1.7 > 1.0 and nothing is scored.
     func testEveryGuessOverTheEditBudget() {
-        flag("abcdef", guesses: ["abxxef"])
+        XCTAssertEqual(cost("abcdef", "abpdef"), 1.7, accuracy: 0.0001)
+        flag("abcdef", guesses: ["abpdef"])
         XCTAssertNil(finish("abcdef"))
         assertOneDecline("budget")
     }
@@ -90,13 +97,20 @@ final class TypingAutocorrectDiagnosticsTests: XCTestCase {
         assertOneDecline("short_word")
     }
 
+    /// "garsn" to "garden": d to s is a neighbour substitution (0.4) and the missing "e" an insertion (0.6), cost
+    /// 1.0, within the five-letter budget of 1.0. The checker lists "garden" under neither "g" nor "ga" (its
+    /// "g" completions are just ["go"]), so the usage miss adds 1.4: 1.0 + 1.4 = 2.4 > maximumScore 2.2.
     func testABestGuessThatScoresTooHigh() {
-        flag("recieve", guesses: ["receive"], listed: false)
-        checker.completionTable["r"] = ["run"]
-        XCTAssertNil(finish("recieve"))
+        XCTAssertEqual(cost("garsn", "garden"), 1.0, accuracy: 0.0001)
+        flag("garsn", guesses: ["garden"], listed: false)
+        checker.completionTable["g"] = ["go"]
+        XCTAssertNil(finish("garsn"))
         assertOneDecline("max_score")
         XCTAssertEqual(declines.first?["completions_empty"], "false")
     }
+
+    /// "wich" to "which" and to "witch" each insert one letter, 0.6. The checker lists both (which first, then
+    /// witch), so the scores are 0.6 and 0.605 (0.005 per place down the list). The gap 0.005 < margin 0.6.
 
     func testTwoGuessesTooCloseToCall() {
         flag("wich", guesses: ["which", "witch"])
@@ -104,18 +118,22 @@ final class TypingAutocorrectDiagnosticsTests: XCTestCase {
         assertOneDecline("margin")
     }
 
+    /// The same "garsn" fixture with no completions at all: 1.0 + usage miss 1.4 = 2.4 > 2.2 would be max_score,
+    /// but the checker returned nothing for "g", so the decline is read as usage_unavailable.
     func testEmptyCompletionsReadAsUsageUnavailable() {
-        flag("recieve", guesses: ["receive"], listed: false)
-        XCTAssertNil(finish("recieve"))
+        flag("garsn", guesses: ["garden"], listed: false)
+        XCTAssertNil(finish("garsn"))
         assertOneDecline("usage_unavailable")
         XCTAssertEqual(declines.first?["completions_empty"], "true")
     }
 
+    /// "tgrir" to "their": g to h and r to e are both neighbour substitutions, 0.4 + 0.4 = 0.8 <= budget 1.0, and
+    /// the checker lists "their" first, so the score is 0.8 and it would be corrected. Before a "." it needs a
+    /// single edit and this is two, so the strict check declines.
     func testAStrictBoundaryThatNeedsMoreThanOneEdit() {
-        flag("thier", guesses: ["their"])
-        // "thier" to "their" is a swap (one edit), so use two keys off instead.
-        flag("tgeir", guesses: ["their"])
-        XCTAssertNil(finish("tgeir", .punctuation(".")))
+        XCTAssertEqual(cost("tgrir", "their"), 0.8, accuracy: 0.0001)
+        flag("tgrir", guesses: ["their"])
+        XCTAssertNil(finish("tgrir", .punctuation(".")))
         assertOneDecline("strict_edit")
         XCTAssertEqual(declines.first?["boundary"], "punctuation")
     }
