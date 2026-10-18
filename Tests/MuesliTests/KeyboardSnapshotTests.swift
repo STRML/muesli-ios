@@ -304,4 +304,47 @@ final class KeyboardSnapshotTests: XCTestCase {
             }
         }
     }
+
+    /// The surface reaches `surfaceOverscan` above the envelope, so a host region a few points taller than the
+    /// keyboard does not show iOS's backdrop as a second gray band, and no further: a full-screen transient region
+    /// stays transparent.
+    func testTheSurfacePaintsAFewPointsAboveTheEnvelopeAndNoFurther() throws {
+        // 16 pt is the band measured on a phone on the Type page.
+        XCTAssertGreaterThan(try topRowAlpha(regionExtra: 16), 0.9)
+        XCTAssertLessThan(try topRowAlpha(regionExtra: 200), 0.1)
+    }
+
+    /// The alpha of the topmost row of the keyboard drawn in a transparent host region `regionExtra` points taller
+    /// than its envelope, like the input view the system gives a keyboard.
+    private func topRowAlpha(regionExtra: CGFloat) throws -> CGFloat {
+        let controller = try makeController(Scene(name: "paint", setup: .ready, rewriteAvailable: true, surface: .type))
+        let size = CGSize(width: 393, height: KeyboardRootView.preferredHeight + regionExtra)
+        let host = UIHostingController(rootView: KeyboardRootView(controller: controller))
+        host.view.frame = CGRect(origin: .zero, size: size)
+        host.safeAreaRegions = []
+        host.overrideUserInterfaceStyle = .dark
+        host.view.backgroundColor = .clear
+        let window = UIWindow(frame: CGRect(origin: .zero, size: size))
+        window.overrideUserInterfaceStyle = .dark
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        host.view.layoutIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.6))
+
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = false
+        let image = UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            host.view.drawHierarchy(in: CGRect(origin: .zero, size: size), afterScreenUpdates: true)
+        }
+        let pixel = try XCTUnwrap(image.cgImage?.cropping(to: CGRect(x: 200, y: 1, width: 1, height: 1)))
+        var rgba = [UInt8](repeating: 0, count: 4)
+        let context = try XCTUnwrap(CGContext(
+            data: &rgba, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.draw(pixel, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        return CGFloat(rgba[3]) / 255
+    }
 }
