@@ -23,7 +23,8 @@ final class KeyboardDictationSurfaceTests: XCTestCase {
         store = LiveAppFixture.store(directory: directory, bus: bus)
         controller = makeController()
         controller.textInserter = { _ in }
-        controller.loadTypingSettings(appliesLayout: true)
+        // These rows describe the switch, so they start with it on; the default is off (see the last tests).
+        try publish(.full)
     }
 
     override func tearDown() async throws {
@@ -57,9 +58,53 @@ final class KeyboardDictationSurfaceTests: XCTestCase {
         try enter(.recordingStarted, runtime: .recording, id: id)
     }
 
-    private func publish(_ layout: KeyboardLayout) throws {
-        try store.saveKeyboardTypingSettings(KeyboardTypingSettings(autocorrect: true, layout: layout))
+    private func publish(_ layout: KeyboardLayout, showsDictatePanel: Bool = true) throws {
+        try store.saveKeyboardTypingSettings(
+            KeyboardTypingSettings(autocorrect: true, layout: layout, showsDictatePanelWhileRecording: showsDictatePanel)
+        )
         controller.loadTypingSettings(appliesLayout: true)
+    }
+
+    // C13: the default keeps the Type page for the whole dictation: requested, recording, transcribing.
+    func testTheTypePageStaysWhileRecordingWhenTheSwitchIsOff() throws {
+        try publish(.full, showsDictatePanel: false)
+        try startRecording()
+        XCTAssertEqual(controller.dictationPhase, .recording)
+        XCTAssertEqual(controller.surface, .type)
+        try enter(.stopAcknowledged, runtime: .transcribing)
+        XCTAssertEqual(controller.surface, .type)
+        XCTAssertTrue(controller.showsActiveWaveform, "the strip still carries the live status")
+    }
+
+    // C14: with the switch off the user can still choose the Dictate page, and it stays.
+    func testChoosingTheDictatePageStillWorksWhenTheSwitchIsOff() throws {
+        try publish(.full, showsDictatePanel: false)
+        controller.selectedSurface = .dictate
+        try startRecording()
+        XCTAssertEqual(controller.surface, .dictate)
+    }
+
+    // C15: no published settings (no Full Access) mean the default: the Type page stays.
+    func testWithoutPublishedSettingsTheTypePageStaysWhileRecording() throws {
+        let emptyDirectory = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("kb-surface-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: emptyDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: emptyDirectory) }
+        let fresh = KeyboardController(store: LiveAppFixture.store(directory: emptyDirectory, bus: bus), eventBus: bus)
+        fresh.loadTypingSettings(appliesLayout: true)
+        XCTAssertFalse(fresh.showsDictatePanelWhileRecording)
+        XCTAssertEqual(fresh.surface, .type)
+    }
+
+    // C16: a settings record from before this choice reads as off, keeping the other choices.
+    func testAnOlderSettingsRecordReadsAsOff() throws {
+        let old = Data(#"{"autocorrect":false,"liveTyping":false,"layout":"minimal"}"#.utf8)
+        let decoded = try JSONDecoder().decode(KeyboardTypingSettings.self, from: old)
+        XCTAssertFalse(decoded.showsDictatePanelWhileRecording)
+        XCTAssertFalse(decoded.autocorrect)
+        XCTAssertEqual(decoded.layout, .minimal)
+        let on = KeyboardTypingSettings(autocorrect: true, showsDictatePanelWhileRecording: true)
+        let roundTripped = try JSONDecoder().decode(KeyboardTypingSettings.self, from: JSONEncoder().encode(on))
+        XCTAssertEqual(roundTripped, on)
     }
 
     // C1: recording shows the Dictate page; the remembered page is untouched.
@@ -312,7 +357,9 @@ final class KeyboardDictationSurfaceTypingTests: XCTestCase {
     // D4: live typing off (strip only): same switch, the final inserted once.
     func testWithLiveTypingOffTheSwitchIsTheSame() throws {
         try make(before: "Hello ")
-        try d.store.saveKeyboardTypingSettings(KeyboardTypingSettings(autocorrect: true, liveTyping: false))
+        try d.store.saveKeyboardTypingSettings(
+            KeyboardTypingSettings(autocorrect: true, liveTyping: false, showsDictatePanelWhileRecording: true)
+        )
         d.controller.loadTypingSettings(appliesLayout: true)
         try d.startRecording()
         try d.hear("so the plan")

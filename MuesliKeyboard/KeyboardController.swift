@@ -115,9 +115,12 @@ final class KeyboardController {
             selected: selectedSurface,
             hasPendingSetupVerification: hasPendingSetupVerification,
             phase: pillPhase,
-            holdsTypePage: holdsTypePageThisDictation
+            holdsTypePage: holdsTypePageThisDictation || !showsDictatePanelWhileRecording
         )
     }
+    /// The Settings choice to let Full switch to the Dictate panel for a dictation. Off keeps the Type page, which
+    /// is what holding it does for one dictation.
+    private(set) var showsDictatePanelWhileRecording = false
     /// The user tapped ABC while Full was showing the Dictate page for a dictation: the Type page stays for the rest
     /// of that dictation and the next one switches again. Never written anywhere; it ends with the dictation.
     private(set) var holdsTypePageThisDictation = false
@@ -1797,6 +1800,7 @@ final class KeyboardController {
         let settings = ((try? store.keyboardTypingSettings()) ?? nil) ?? .default
         typing.autocorrectEnabled = settings.autocorrect
         liveTyper.isEnabled = settings.liveTyping
+        showsDictatePanelWhileRecording = settings.showsDictatePanelWhileRecording
         if appliesLayout { layout = settings.layout }
     }
 

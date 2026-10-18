@@ -104,6 +104,9 @@ final class LiveDictationDriver {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         store = LiveAppFixture.store(directory: directory, bus: bus)
         controller = KeyboardController(store: store, eventBus: bus, liveTypingScheduler: clock.scheduler)
+        // These dictations run on the Dictate panel, so they start with the switch on; its default is off.
+        try store.saveKeyboardTypingSettings(KeyboardTypingSettings(autocorrect: true, showsDictatePanelWhileRecording: true))
+        controller.loadTypingSettings()
         host = FakeProxyHost(before: before, after: after, behavior: behavior)
         if attachHost { host.attach(to: controller) }
         controller.typing.setDocumentLanguage("en-US")
