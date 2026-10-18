@@ -193,6 +193,14 @@ final class TypingPresentationTests: XCTestCase {
         )
     }
 
+    // P5b: the settings gear and the Start pill live in the strip only while nothing else claims it.
+    func testSettingsAndStartPillShowOnlyWhenTheStripIsEmpty() {
+        XCTAssertTrue(TypingStripContent.empty.offersSettingsAndStart)
+        XCTAssertFalse(TypingStripContent.dictationStatus.offersSettingsAndStart)
+        XCTAssertFalse(TypingStripContent.undoEdit.offersSettingsAndStart)
+        XCTAssertFalse(TypingStripContent.suggestions([suggestion]).offersSettingsAndStart)
+    }
+
     // P6: setup verification
     func testPendingVerificationForcesTheDictatePage() {
         XCTAssertEqual(

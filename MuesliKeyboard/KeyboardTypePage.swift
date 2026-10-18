@@ -23,10 +23,21 @@ struct KeyboardTypePage: View {
 
     // MARK: Strip
 
+    private var stripKind: TypingStripContent {
+        TypingStripContent.resolve(
+            isDictationActive: isActive,
+            canUndoRewrite: controller.canUndoRewrite,
+            suggestions: typing.state.suggestions
+        )
+    }
+
     private var strip: some View {
         HStack(spacing: 6) {
             if isActive {
                 cancelSlot
+                    .frame(width: 40, height: CGFloat(TypingMetrics.stripHeight))
+            } else if stripKind.offersSettingsAndStart, let settingsURL = controller.settingsURL {
+                settingsSlot(settingsURL)
                     .frame(width: 40, height: CGFloat(TypingMetrics.stripHeight))
             }
             stripContent
@@ -35,6 +46,35 @@ struct KeyboardTypePage: View {
             trailingSlot
                 .frame(width: 40, height: CGFloat(TypingMetrics.stripHeight))
         }
+    }
+
+    /// Settings, at the strip's left while it has nothing to suggest.
+    private func settingsSlot(_ url: URL) -> some View {
+        Link(destination: url) {
+            stripGlyph(Image(systemName: "gearshape").font(.system(size: 18, weight: .regular)), tint: MuesliTheme.textSecondary)
+        }
+        .buttonStyle(KeyboardPressStyle())
+        .accessibilityLabel("Muesli settings")
+        .accessibilityIdentifier("keyboard.settings")
+    }
+
+    /// Start, in the middle of an empty strip. It is the Record key's twin and does what the key does.
+    private var startPill: some View {
+        KeyboardPrimaryActionControl(controller: controller) {
+            HStack(spacing: 7) {
+                Image(systemName: controller.primaryButtonIcon)
+                    .font(.system(size: 13, weight: .semibold))
+                Text("Start")
+                    .font(.system(size: 14, weight: .semibold))
+            }
+            .foregroundStyle(MuesliTheme.textPrimary)
+            .padding(.horizontal, 18)
+            .frame(minHeight: 30)
+            .background(MuesliTheme.textPrimary.opacity(0.07), in: Capsule())
+            .contentShape(Capsule())
+        }
+        .accessibilityLabel("Start dictation")
+        .accessibilityIdentifier("keyboard.startPill")
     }
 
     /// Cancel, in the slot it has on the Dictate page. Only while a dictation runs; otherwise the strip starts at
@@ -89,11 +129,7 @@ struct KeyboardTypePage: View {
 
     @ViewBuilder
     private var stripContent: some View {
-        switch TypingStripContent.resolve(
-            isDictationActive: isActive,
-            canUndoRewrite: controller.canUndoRewrite,
-            suggestions: typing.state.suggestions
-        ) {
+        switch stripKind {
         case .dictationStatus:
             KeyboardDictationStatusView(controller: controller)
         case .undoEdit:
@@ -104,7 +140,7 @@ struct KeyboardTypePage: View {
             if controller.readinessPresentation.needsAttention {
                 KeyboardReadinessBadge(controller: controller)
             } else {
-                Color.clear
+                startPill
             }
         }
     }
