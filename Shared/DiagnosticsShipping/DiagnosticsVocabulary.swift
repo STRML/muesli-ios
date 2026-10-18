@@ -47,6 +47,9 @@ enum DiagnosticsVocabulary {
         "dictation.cancelled", "dictation.exit", "backgroundTask", "app.memoryWarning", "app.thermalState",
         // Silence guard (Shared/DictationPolicy/ClipSilenceGuard.swift): counts only, never the phrase.
         "transcribe.trimmed", "transcribe.tail_dropped", "transcribe.skipped_silent",
+        // Autocorrect (Shared/KeyboardTyping/TypingAutocorrectDiagnostics.swift): why a word was left alone.
+        // Reasons, lengths and flags only, never the word or a guess.
+        "autocorrect.declined",
     ]
 
     static let keyRules: [String: DiagnosticsValueRule] = {
@@ -57,11 +60,11 @@ enum DiagnosticsVocabulary {
         add(.requestID, "request")
         add(.optionalID, "active", "active_request", "session", "mic_generation")
         add(.int, "type", "attempt", "elapsed_ms", "duration_ms", "samples", "bytes", "characters", "code",
-            "options", "options_before", "channels", "app_state", "audio_ms", "heartbeat_age_ms", "bg_remaining_ms", "leading_ms", "trailing_ms", "phrase_len")
+            "options", "options_before", "channels", "app_state", "audio_ms", "heartbeat_age_ms", "bg_remaining_ms", "leading_ms", "trailing_ms", "phrase_len", "word_len", "count")
         add(.codeOrInt, "reason")
         add(.flag, "should_resume", "enabled", "startup", "recording", "protected_data", "persistent", "loaded",
             "input_enabled", "output_enabled", "input_available", "other_audio", "file_written", "empty", "fresh",
-            "inserted", "matchesActive", "canUseRuntimeStart")
+            "inserted", "matchesActive", "canUseRuntimeStart", "completions_empty", "suggestions_off", "secure")
         add(.decimal, "sample_rate", "input_sample_rate")
         add(.duration, "total_s", "wall_s", "encoder_load_s", "encoder_specialization_s", "decoder_load_s",
             "decoder_specialization_s", "age", "appSeenAt")
@@ -81,6 +84,11 @@ enum DiagnosticsVocabulary {
         add(.oneOf(values(BackgroundTaskState.self)), "bg_state")
         add(.oneOf(values(ThermalLevel.self)), "thermal")
         add(.oneOf(["clipboard", "foregroundCopyRequired"]), "destination")
+        add(.oneOf(["no_guesses", "length_diff", "budget", "short_word", "max_score", "margin", "strict_edit",
+                    "usage_unavailable", "rejected_word", "learned_word", "language_unsupported",
+                    "proxy_mismatch", "traits_gate"]), "decline_reason")
+        add(.oneOf(["space", "punctuation", "return"]), "boundary")
+        add(.oneOf(["standard", "email", "url", "numeric"]), "field_variant")
         return rules
     }()
 

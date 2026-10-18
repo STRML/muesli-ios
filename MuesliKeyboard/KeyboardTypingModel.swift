@@ -74,6 +74,8 @@ final class KeyboardTypingModel {
             languageCandidates: { languages.candidates }
         )
         let builder = builder
+        // Why a word was left alone goes to the diagnostics log: reasons, lengths and flags, never the text.
+        let diagnostics = TypingAutocorrectDiagnostics { KeyboardDiagnosticsLog.record($0, $1) }
         let engine = TypingEngine(
             document: document,
             suggestionSource: builder,
@@ -87,9 +89,11 @@ final class KeyboardTypingModel {
             ignoreWord: { builder.ignore($0) },
             // The keyboard's own defaults: they outlive a launch and need no Full Access.
             learnedWords: learnedWords,
-            learnWord: { UITextChecker.learnWord($0) }
+            learnWord: { UITextChecker.learnWord($0) },
+            diagnostics: diagnostics
         )
         engine.completionHandler = autocorrector
+        engine.diagnostics = diagnostics
         engine.onChange = { [weak self] in self?.state = $0 }
         self.engine = engine
         state = engine.state

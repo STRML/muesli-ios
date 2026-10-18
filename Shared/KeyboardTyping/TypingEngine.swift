@@ -33,9 +33,13 @@ protocol TypingWordCompletionHandling: AnyObject {
     func wordCompleted(_ event: TypingWordCompletedEvent) -> TypingEditPlan?
     /// The user took a replacement back (backspace, or a tap on the original in the strip).
     func replacementWasRejected(_ undo: TypingReplacementUndo)
+    /// False when the handler would not look at a word right now (the setting is off, or the field forbids
+    /// it), so the engine does not report a word it could not have corrected. Defaults to true.
+    var isCorrecting: Bool { get }
 }
 
 extension TypingWordCompletionHandling {
+    var isCorrecting: Bool { true }
     func replacementWasRejected(_ undo: TypingReplacementUndo) {}
 }
 
@@ -66,6 +70,8 @@ final class TypingEngine {
     private var published = TypingState()
     var onChange: (@MainActor (TypingState) -> Void)?
     var completionHandler: TypingWordCompletionHandling?
+    /// Where autocorrect declines that happen here (a proxy that disagrees, a field that forbids it) are noted.
+    var diagnostics: TypingAutocorrectDiagnostics?
 
     private var machine = TypingShiftMachine()
     private var hasAppliedTraits = false
@@ -79,6 +85,11 @@ final class TypingEngine {
     private var typedWord = ""
     private var lastAutocapKey: AutocapKey?
     private var knownDocumentID: UUID?
+    private struct NotedGate: Equatable {
+        let traits: TypingTraits
+        let documentIdentifier: UUID?
+    }
+    private var lastNotedGate: NotedGate?
     private var snapshot: SuggestionSnapshot?
     /// The word the user finished by typing a space, punctuation or return, until the next keystroke or edit
     /// changes the context. The strip offers alternatives for it while the cursor is still right after it.
@@ -126,7 +137,10 @@ final class TypingEngine {
         state.traits = traits
         if variantChanged { state.page = traits.initialPage }
         // The host echoes the same traits after every keystroke; only a real change re-evaluates auto-capitalize.
-        if changed { lastAutocapKey = nil }
+        if changed {
+            lastAutocapKey = nil
+            noteTraitsGate(traits)
+        }
         syncWithHost()
         refresh()
     }
@@ -347,7 +361,10 @@ final class TypingEngine {
         let before = document.contextBefore
         let after = document.contextAfter
         // Only a word typed here, and seen by the proxy exactly as typed.
-        guard case .partial(let word) = TypingWordExtractor.word(before: before, after: after), word == TypingWordExtractor.withoutLeadingJoiners(typedWord) else { return }
+        guard case .partial(let word) = TypingWordExtractor.word(before: before, after: after), word == TypingWordExtractor.withoutLeadingJoiners(typedWord) else {
+            noteProxyMismatch(boundary: boundary)
+            return
+        }
         let event = TypingWordCompletedEvent(
             word: word, boundary: boundary, contextBefore: before, documentIdentifier: document.documentIdentifier
         )
@@ -357,6 +374,34 @@ final class TypingEngine {
         undoContextAfter = after ?? ""
         apply(plan)
         pendingUndo = plan.undo
+    }
+
+    /// A word was typed here and the proxy does not end with it, so autocorrect cannot act. Nothing typed
+    /// (a second space, punctuation after punctuation) is not a mismatch.
+    private func noteProxyMismatch(boundary: TypingBoundary) {
+        let typed = TypingWordExtractor.withoutLeadingJoiners(typedWord)
+        guard let diagnostics, !typed.isEmpty, completionHandler?.isCorrecting == true else { return }
+        diagnostics.note(TypingAutocorrectDiagnostic(
+            reason: .proxyMismatch, boundary: TypingAutocorrectDiagnostic.boundaryName(boundary),
+            wordLength: typed.count, completionsEmpty: nil, traits: state.traits
+        ))
+    }
+
+    /// Autocorrect is off for this field. Noted once per field and per change of its traits, not per keystroke:
+    /// a second call for the same traits in the same document (the host echoing them, or the traits and the
+    /// document changing in one update) is skipped.
+    private func noteTraitsGate(_ traits: TypingTraits) {
+        guard let diagnostics else { return }
+        guard !traits.allowsSuggestions || traits.variant != .standard else {
+            lastNotedGate = nil
+            return
+        }
+        let gate = NotedGate(traits: traits, documentIdentifier: document.documentIdentifier)
+        guard gate != lastNotedGate else { return }
+        lastNotedGate = gate
+        diagnostics.note(TypingAutocorrectDiagnostic(
+            reason: .traitsGate, boundary: nil, wordLength: nil, completionsEmpty: nil, traits: traits
+        ))
     }
 
     /// Notes the word typed here that a boundary is about to end, for the strip. Whether the document really
@@ -422,6 +467,7 @@ final class TypingEngine {
             completedWord = nil
             typedWord = ""
             lastAutocapKey = nil
+            noteTraitsGate(state.traits)
         }
         knownDocumentID = identifier
     }

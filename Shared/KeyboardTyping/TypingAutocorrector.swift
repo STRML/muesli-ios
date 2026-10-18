@@ -27,6 +27,7 @@ final class TypingAutocorrector: TypingWordCompletionHandling {
     private var learned: TypingLearnedWords
     private let store: TypingLearnedWordsStoring?
     private let learnWord: (String) -> Void
+    private let diagnostics: TypingAutocorrectDiagnostics?
 
     /// Only English has been measured, so only English is corrected.
     private static let correctedLanguage = "en"
@@ -40,8 +41,10 @@ final class TypingAutocorrector: TypingWordCompletionHandling {
         tuning: TypingAutocorrectTuning = .standard,
         poolOptions: TypingCandidatePool.Options = .init(),
         learnedWords: TypingLearnedWordsStoring? = nil,
-        learnWord: @escaping (String) -> Void = { _ in }
+        learnWord: @escaping (String) -> Void = { _ in },
+        diagnostics: TypingAutocorrectDiagnostics? = nil
     ) {
+        self.diagnostics = diagnostics
         self.checker = checker
         self.languageCandidates = languageCandidates
         self.traits = traits
@@ -73,6 +76,9 @@ final class TypingAutocorrector: TypingWordCompletionHandling {
         replacements = shortcuts
     }
 
+    /// Autocorrect would look at a finished word in this field right now.
+    var isCorrecting: Bool { isEnabled() && isCorrectableField() }
+
     func replacementWasRejected(_ undo: TypingReplacementUndo) {
         learned.reject(undo.originalWord)
         store?.save(learned)
@@ -82,15 +88,15 @@ final class TypingAutocorrector: TypingWordCompletionHandling {
     func wordCompleted(_ event: TypingWordCompletedEvent) -> TypingEditPlan? {
         guard isEnabled(), isCorrectableField(), let boundary = Boundary(event.boundary) else { return nil }
         let word = event.word
-        guard !learned.isRejected(word), !learned.isLearned(word),
-              TypingTokenContext.isStandaloneWord(word, contextBefore: event.contextBefore)
-        else { return nil }
+        guard TypingTokenContext.isStandaloneWord(word, contextBefore: event.contextBefore) else { return nil }
+        guard !learned.isRejected(word) else { return declined(.rejectedWord, word, boundary) }
+        guard !learned.isLearned(word) else { return declined(.learnedWord, word, boundary) }
         if boundary.expandsShortcuts, let expansion = replacements[word.lowercased()] {
             return plan(replacing: word, with: expansion, boundary: boundary)
         }
-        guard !knownWords.contains(word.lowercased()),
-              let language = resolvedLanguage(), TypingLanguageResolver.baseCode(of: language) == Self.correctedLanguage
-        else { return nil }
+        guard !knownWords.contains(word.lowercased()) else { return nil }
+        guard let language = resolvedLanguage(), TypingLanguageResolver.baseCode(of: language) == Self.correctedLanguage
+        else { return declined(.languageUnsupported, word, boundary) }
         if let fixed = TypingContractions.correction(for: word, strict: boundary.isStrict) {
             return plan(replacing: word, with: fixed, boundary: boundary)
         }
@@ -111,14 +117,51 @@ final class TypingAutocorrector: TypingWordCompletionHandling {
         guard checker.isMisspelled(word, language: language) else { return nil }
         let pool = TypingCandidatePool(checker: checker, language: language, options: poolOptions)
         let candidates = pool.candidates(for: word, excluding: Set(learned.rejected))
-        guard let guess = TypingAutocorrectRule.correction(
+        let decision = TypingAutocorrectRule.decision(
             for: word, candidates: candidates, strict: boundary.isStrict, tuning: tuning
-        ) else {
+        )
+        guard case .correct(let guess) = decision else {
+            if case .declined(let reason) = decision {
+                noteDeclined(reason, word, boundary, candidates: candidates, checker: checker, language: language)
+            }
             noteLeftAsTyped(word)
             return nil
         }
         guard capitalized else { return guess }
         return guess.prefix(1).uppercased() + guess.dropFirst()
+    }
+
+    /// Tells diagnostics a word was left alone. For a decline on score or margin it also looks up the completions
+    /// under the same prefixes the candidate pool reads usage from (each looked-up candidate's first one to
+    /// `usageDepth` letters): all of them empty means no guess could be shown to be a used word.
+    private func noteDeclined(
+        _ reason: TypingDeclineReason, _ word: String, _ boundary: Boundary, candidates: [TypingCandidate],
+        checker: TypingSpellChecking, language: String
+    ) {
+        guard let diagnostics else { return }
+        var prefixes = Set<String>()
+        for candidate in candidates where !candidate.usage.isEmpty {
+            for length in 1...candidate.usage.count { prefixes.insert(String(candidate.word.prefix(length))) }
+        }
+        if prefixes.isEmpty { prefixes.insert(String(word.prefix(1)).lowercased()) }
+        let empty = prefixes.allSatisfy { checker.completions(forPartial: $0, language: language).isEmpty }
+        let scoreBound = reason == .maxScore || reason == .margin
+        report(empty && scoreBound ? .usageUnavailable : reason, word, boundary, completionsEmpty: empty, to: diagnostics)
+    }
+
+    private func declined(_ reason: TypingDeclineReason, _ word: String, _ boundary: Boundary) -> TypingEditPlan? {
+        if let diagnostics { report(reason, word, boundary, completionsEmpty: nil, to: diagnostics) }
+        return nil
+    }
+
+    private func report(
+        _ reason: TypingDeclineReason, _ word: String, _ boundary: Boundary, completionsEmpty: Bool?,
+        to diagnostics: TypingAutocorrectDiagnostics
+    ) {
+        diagnostics.note(TypingAutocorrectDiagnostic(
+            reason: reason, boundary: boundary.name, wordLength: word.count, completionsEmpty: completionsEmpty,
+            traits: traits()
+        ))
     }
 
     /// A word the checker flags was typed and left alone. The third time, the user clearly means it: the checker
@@ -157,22 +200,25 @@ final class TypingAutocorrector: TypingWordCompletionHandling {
         let expandsShortcuts: Bool
         /// Before a "." or ":" the word may be the start of a host name or a URL scheme.
         let isStrict: Bool
+        /// For diagnostics: "space", "punctuation" or "return".
+        let name: String
 
         private static let sentenceMarks: Set<String> = [".", ",", "!", "?", ";", ":"]
 
         init?(_ boundary: TypingBoundary) {
             switch boundary {
             case .space:
-                self.init(text: " ", expandsShortcuts: true, isStrict: false)
+                self.init(text: " ", expandsShortcuts: true, isStrict: false, name: "space")
             case .returnKey:
-                self.init(text: "\n", expandsShortcuts: false, isStrict: false)
+                self.init(text: "\n", expandsShortcuts: false, isStrict: false, name: "return")
             case .punctuation(let mark):
                 guard Self.sentenceMarks.contains(mark) else { return nil }
-                self.init(text: mark, expandsShortcuts: false, isStrict: mark == "." || mark == ":")
+                self.init(text: mark, expandsShortcuts: false, isStrict: mark == "." || mark == ":", name: "punctuation")
             }
         }
 
-        private init(text: String, expandsShortcuts: Bool, isStrict: Bool) {
+        private init(text: String, expandsShortcuts: Bool, isStrict: Bool, name: String) {
+            self.name = name
             self.text = text
             self.expandsShortcuts = expandsShortcuts
             self.isStrict = isStrict
