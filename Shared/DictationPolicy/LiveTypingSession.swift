@@ -92,7 +92,12 @@ struct LiveTypingSession: Sendable {
     /// edit keeps what the user left and how many words of the stream it has already used up.
     private struct Edit {
         var kept: String
+        var keptWords: Int
+        /// Words of the stream used up when nothing better is known.
         var consumedWords: Int
+        /// The deleted word that closes the used-up part of the stream, folded. When a revised partial moves it, it
+        /// is found again instead of trusting a word count.
+        var deleted: String
     }
     private var edit: Edit?
     /// Words in the newest partial, before any edit is applied.
@@ -160,25 +165,49 @@ struct LiveTypingSession: Sendable {
     /// The streamed words with the user's deletions applied: what they left, then the words that came after.
     private func applyingEdit(to raw: String) -> String {
         guard let edit else { return raw }
-        return LiveTypingText.joined(edit.kept, LiveTypingText.text(of: raw, afterWords: edit.consumedWords))
+        return LiveTypingText.joined(edit.kept, LiveTypingText.text(of: raw, afterWords: consumedWords(of: edit, in: raw)))
+    }
+
+    /// How many words of `raw` the edit has used up. A revision that adds or drops words before the deleted word
+    /// would shift a plain count, and bring the deleted word back, so the deleted word is looked for first.
+    private func consumedWords(of edit: Edit, in raw: String) -> Int {
+        let count = LiveTypingText.wordCount(raw)
+        for index in edit.keptWords..<max(edit.keptWords, count)
+        where LiveTypingText.foldedWord(at: index, in: raw) == edit.deleted {
+            return index + 1
+        }
+        return edit.consumedWords
     }
 
     /// Backspace during a live dictation removes the last dictated word and dictation carries on, instead of ending
     /// live typing. Nil when there is no such word in the marked words (none yet, or it was already committed as
     /// plain text): the keyboard then edits the field the way it does for any other key.
     mutating func deleteLastWord() -> [LiveTypingCommand]? {
-        guard phase == .live, let shorter = LiveTypingText.droppingLastWord(of: mirroredText),
-              shorter.count >= committed.count, shorter.hasPrefix(committed) else { return nil }
-        edit = Edit(kept: shorter, consumedWords: rawWordCount)
+        let mirror = mirroredText
+        let ranges = LiveTypingText.wordRanges(mirror)
+        guard phase == .live, let lastWord = ranges.last, var kept = LiveTypingText.droppingLastWord(of: mirror) else {
+            return nil
+        }
+        // The word after committed text leaves the committed text, with its trailing space, in place.
+        if committed.hasPrefix(kept) { kept = committed }
+        guard kept.hasPrefix(committed) else { return nil }
+        // A word from the stream uses up one more word of it; deleting one the user already trimmed to does not.
+        let fromStream = edit.map { ranges.count > $0.keptWords } ?? true
+        edit = Edit(
+            kept: kept,
+            keptWords: ranges.count - 1,
+            consumedWords: fromStream ? rawWordCount : edit?.consumedWords ?? rawWordCount,
+            deleted: fromStream ? LiveTypingText.folded(String(mirror[lastWord])) : edit?.deleted ?? ""
+        )
         previousMarked = marked
-        marked = String(shorter.dropFirst(committed.count))
+        marked = String(kept.dropFirst(committed.count))
         return marked.isEmpty ? [.clearMarked] : [.setMarked(marked)]
     }
 
     private func editedFinal(_ text: String) -> String {
         guard let edit else { return text }
         guard abs(LiveTypingText.wordCount(text) - rawWordCount) <= Self.maxWordDrift else { return mirroredText }
-        return LiveTypingText.joined(edit.kept, LiveTypingText.text(of: text, afterWords: edit.consumedWords))
+        return LiveTypingText.joined(edit.kept, LiveTypingText.text(of: text, afterWords: consumedWords(of: edit, in: text)))
     }
 
     /// Replaces the whole marked range with the newest tail, or commits finished sentences of a long dictation.

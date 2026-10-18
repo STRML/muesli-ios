@@ -592,6 +592,37 @@ final class LiveTypingSessionTests: XCTestCase {
         XCTAssertEqual(h.host.document, "Hello a b c")
     }
 
+    func testBackspaceOnASpacelessScriptTakesOneWordNotTheWholeUtterance() {
+        let h = Harness()
+        h.reachLive(with: "今日はいい天気です")
+        XCTAssertTrue(backspace(h))
+        XCTAssertTrue(h.host.document.hasPrefix("Hello 今日"), h.host.document)
+        XCTAssertFalse(h.host.document.contains("です"), h.host.document)
+        h.partial("今日はいい天気です。明日も")
+        XCTAssertTrue(h.host.document.contains("明日も"), h.host.document)
+        XCTAssertFalse(h.host.document.contains("です"), "the deleted word came back: \(h.host.document)")
+    }
+
+    func testARevisionThatAddsAWordBeforeTheDeletedOneDoesNotBringItBack() {
+        let h = Harness()
+        h.reachLive(with: "we can leave")
+        XCTAssertTrue(backspace(h))
+        XCTAssertEqual(h.host.document, "Hello we can")
+        h.partial("we really can leave now")
+        XCTAssertEqual(h.host.document, "Hello we can now", "the deleted word came back")
+    }
+
+    func testBackspaceTakesTheOnlyWordLeftAfterCommittedSentences() {
+        let h = Harness(chunkThreshold: 120)
+        h.reachLive(with: "This is sentence number 1.")
+        h.partial(sentences(6).joined(separator: " ") + " next")
+        XCTAssertFalse(h.session.committed.isEmpty, "the sentences were not committed")
+        XCTAssertEqual(LiveTypingText.wordCount(h.session.marked), 1, h.session.marked)
+        XCTAssertTrue(backspace(h), "the one marked word could not be deleted")
+        XCTAssertEqual(h.session.marked, "")
+        XCTAssertTrue(h.host.document.hasSuffix(h.session.committed), h.host.document)
+    }
+
     func testBackspaceBeforeAnyWordsLeavesTheKeyToTheField() {
         let h = Harness()
         XCTAssertNil(h.session.deleteLastWord())

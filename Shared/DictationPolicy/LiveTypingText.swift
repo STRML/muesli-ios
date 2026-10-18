@@ -41,34 +41,46 @@ enum LiveTypingText {
 
     // MARK: Words, for editing a dictation as it streams
 
-    static func wordCount(_ text: String) -> Int {
-        text.split(whereSeparator: \.isWhitespace).count
-    }
-
-    /// `text` without its last word and the space before it, or nil when there is no word to remove.
-    static func droppingLastWord(of text: String) -> String? {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        guard let space = trimmed.lastIndex(where: \.isWhitespace) else { return "" }
-        return String(trimmed[..<space]).trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    /// What follows the first `count` words of `text`, without the space in front of it.
-    static func text(of text: String, afterWords count: Int) -> String {
-        var index = text.startIndex
-        var seen = 0
-        while index < text.endIndex, seen < count {
-            while index < text.endIndex, text[index].isWhitespace { index = text.index(after: index) }
-            guard index < text.endIndex else { break }
-            while index < text.endIndex, !text[index].isWhitespace { index = text.index(after: index) }
-            seen += 1
+    /// Word ranges by the system's word segmentation, which finds the words of scripts written without spaces
+    /// (Japanese, Thai) and leaves punctuation out.
+    static func wordRanges(_ text: String) -> [Range<String.Index>] {
+        var ranges: [Range<String.Index>] = []
+        text.enumerateSubstrings(in: text.startIndex..<text.endIndex, options: [.byWords, .substringNotRequired]) { _, range, _, _ in
+            ranges.append(range)
         }
-        return String(text[index...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        return ranges
     }
 
+    static func wordCount(_ text: String) -> Int { wordRanges(text).count }
+
+    /// `text` up to the end of its second-to-last word, or nil when there is no word to remove.
+    static func droppingLastWord(of text: String) -> String? {
+        let ranges = wordRanges(text)
+        guard !ranges.isEmpty else { return nil }
+        guard ranges.count > 1 else { return "" }
+        return String(text[..<ranges[ranges.count - 2].upperBound])
+    }
+
+    /// What follows the first `count` words of `text`, with the separator the speech engine put in front of it.
+    static func text(of text: String, afterWords count: Int) -> String {
+        guard count > 0 else { return text }
+        let ranges = wordRanges(text)
+        guard count <= ranges.count else { return "" }
+        return String(text[ranges[count - 1].upperBound...])
+    }
+
+    /// `head` and `tail` as one text: the tail keeps its own separator, and a head that ends in white space does
+    /// not get a second one.
     static func joined(_ head: String, _ tail: String) -> String {
-        if head.isEmpty { return tail }
-        return tail.isEmpty ? head : head + " " + tail
+        guard head.last?.isWhitespace == true else { return head + tail }
+        return head + tail.drop(while: \.isWhitespace)
+    }
+
+    /// The word at `index` of `text`, folded for comparison.
+    static func foldedWord(at index: Int, in text: String) -> String? {
+        let ranges = wordRanges(text)
+        guard ranges.indices.contains(index) else { return nil }
+        return folded(String(text[ranges[index]]))
     }
 
     /// The `selectedRange` for `setMarkedText`: it is relative to the marked text and counts UTF-16 units. The

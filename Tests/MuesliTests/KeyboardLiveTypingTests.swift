@@ -419,6 +419,19 @@ final class KeyboardLiveTypingTests: XCTestCase {
         XCTAssertEqual(d.host.markedLength, 0)
     }
 
+    // E4d: a backspace while the first words are still being confirmed waits instead of eating the user's text.
+    func testBackspaceDuringTheProbeIsHeldNotAppliedToTheField() throws {
+        try make(before: "Note: ")
+        try d.startRecording()
+        try d.hear("buy milk", settle: false)
+        XCTAssertEqual(phase, .probingAppearance)
+        d.controller.typing.perform(.backspace)
+        XCTAssertEqual(d.document, "Note: buy milk")
+        XCTAssertEqual(phase, .probingAppearance, "live typing ended")
+        d.settleHost()
+        XCTAssertEqual(phase, .live)
+    }
+
     // E4c: with no dictated word left to take back, backspace edits the field as it always did.
     func testBackspaceWithNoDictatedWordLeftEditsTheField() throws {
         try make(before: "Note: ")
