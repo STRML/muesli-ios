@@ -169,9 +169,9 @@ extension SettingsView {
     }
 
     func refreshKeyboardStatus() {
-        systemDictationEnabled = SystemDictation.isEnabled
         let store = SharedStore()
         let extensionStatus = try? store.keyboardExtensionStatus()
+        systemDictationEnabled = extensionStatus?.systemDictationEnabled == true
         let confirmed = UserDefaults.standard.bool(forKey: OnboardingPreferenceKeys.keyboardEnabledConfirmed)
         let fullAccessConfirmed = UserDefaults.standard.bool(forKey: OnboardingPreferenceKeys.fullAccessConfirmed)
 

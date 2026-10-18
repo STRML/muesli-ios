@@ -129,6 +129,7 @@ final class KeyboardViewController: UIInputViewController {
         refreshTypingTraits()
         controller.typing.loadLexicon(from: self)
 
+        controller.systemDictationEnabled = SystemDictation.isEnabled
         observeSystemDictation()
         isKeyboardPresented = true
         hasEnteredAppearance = true

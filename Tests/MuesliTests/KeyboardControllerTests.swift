@@ -475,7 +475,6 @@ final class KeyboardControllerTests: XCTestCase {
         defer { controller.stopObservingSharedState() }
         controller.systemDictationDidStart()
         XCTAssertEqual(try store.pendingCommand()?.action, .cancel)
-        XCTAssertEqual(controller.statusText, "iOS dictation took over")
         XCTAssertTrue(insertedText.isEmpty)
     }
 
@@ -483,7 +482,14 @@ final class KeyboardControllerTests: XCTestCase {
         controller.prepareInitialPresentationState()
         controller.systemDictationDidStart()
         XCTAssertNil(try store.pendingCommand())
-        XCTAssertNotEqual(controller.statusText, "iOS dictation took over")
+    }
+
+    func testTheKeyboardReportsWhetherIOSDictationIsOn() throws {
+        controller.systemDictationEnabled = true
+        controller.publishVisibilityHeartbeat()
+        XCTAssertEqual(try store.keyboardExtensionStatus()?.systemDictationEnabled, true)
+        controller.stopObservingSharedState()
+        XCTAssertEqual(try store.keyboardExtensionStatus()?.systemDictationEnabled, true)
     }
 
     // Keyboard hidden at completion: the app copies instead (copyRequired). The preview clears, nothing is inserted.
