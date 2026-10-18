@@ -51,6 +51,44 @@ final class KeyboardLiveTypingTests: XCTestCase {
         XCTAssertEqual(d.controller.statusText, "Latest ready")
     }
 
+    // A1b: the words sit in the field, so the strip does not show them a second time.
+    func testTheStripStaysOutOfTheWayWhileTheWordsAreInTheField() throws {
+        try make()
+        try d.startRecording()
+        try d.hear("hello wor")
+        XCTAssertEqual(phase, .live)
+        XCTAssertNil(d.controller.livePreview, "the words were shown in the strip and in the field")
+    }
+
+    // A1c: a host that cannot take live words keeps the strip, the only place they show.
+    func testTheStripShowsWhenTheHostIgnoresMarkedText() throws {
+        try make(behavior: .ignoresMarked)
+        try d.startRecording()
+        try d.hear("hello wor", settle: false)
+        d.settleHost(seconds: 0.8)
+        XCTAssertEqual(phase, .stripOnly(.noChange))
+        XCTAssertNotNil(d.controller.livePreview)
+    }
+
+    // A1d: a host that writes its own text back (React Native style) loses nothing: the final is inserted once,
+    // and the next dictation in that field goes straight to the strip.
+    func testAHostThatRewritesItsFieldStillGetsTheFinalAndTheNextDictationUsesTheStrip() throws {
+        try make(before: "Hi ")
+        try d.startRecording()
+        try d.hear("hello wor")
+        XCTAssertEqual(phase, .live)
+        d.host.model.hostRewritesItsText()
+        d.settleHost()
+        XCTAssertEqual(d.document, "Hi ")
+        try d.stopAndTranscribe()
+        try d.finish("Hello world")
+        XCTAssertEqual(d.document, "Hi Hello world", "the dictation was lost, or typed twice")
+
+        try d.startRecording()
+        try d.hear("second try")
+        XCTAssertEqual(phase, .stripOnly(.settingOff), "words were typed into a field that rewrites them")
+    }
+
     // A2: the final replaces in one operation, with no empty text in between.
     func testTheFinalReplacesTheMarkedWordsInOneOperation() throws {
         try make(before: "Dear ")

@@ -379,10 +379,40 @@ final class LiveTypingSessionTests: XCTestCase {
         XCTAssertEqual(h.session.final("Hi.", snapshot: h.host.snapshot()).outcome, .withheld("detached"))
     }
 
+    func testAHostThatWritesItsOwnTextBackFallsBackToThePlainFinal() {
+        let h = Harness()
+        h.reachLive(with: "hello world")
+        h.host.hostRewritesItsText()
+        h.settle()
+        XCTAssertEqual(h.session.phase, .stripOnly(.hostRewrote))
+        XCTAssertTrue(h.logs.contains("live_typing.detached textChanged"), "\(h.logs)")
+        let result = h.session.final("Hello world.", snapshot: h.host.snapshot())
+        XCTAssertEqual(result.outcome, .insertPlain("Hello world."), "the words were silently lost")
+    }
+
+    func testAFinalThatArrivesBeforeTheRecheckStillInsertsWhenTheHostDroppedTheWords() {
+        let h = Harness()
+        h.reachLive(with: "hello world")
+        h.host.hostRewritesItsText()
+        let result = h.session.final("Hello world.", snapshot: h.host.snapshot())
+        XCTAssertEqual(result.outcome, .insertPlain("Hello world."))
+        XCTAssertEqual(h.session.documentID, h.base.documentID)
+    }
+
+    func testWordsGoneBecauseTheCursorMovedAreStillWithheld() {
+        let h = Harness()
+        h.reachLive(with: "hello world")
+        h.host.userMovesCursor(toOffsetFromEnd: 6)
+        let result = h.session.final("Hello world.", snapshot: h.host.snapshot())
+        XCTAssertEqual(result.outcome, .withheld("detached"))
+    }
+
     func testTheHostChangingTheWordsDetaches() {
         let h = Harness()
         h.reachLive(with: "hello world")
         h.host.deleteBackward()
+        h.host.insert("zzz")
+        h.host.flush()
         h.settle()
         XCTAssertEqual(h.session.phase, .kept(.textChanged))
     }

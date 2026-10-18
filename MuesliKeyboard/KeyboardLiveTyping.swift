@@ -103,6 +103,13 @@ final class KeyboardLiveTyper {
 
     var sessionRequestID: UUID? { session?.requestID }
 
+    /// The words are being typed into the field itself, so a second copy of them in the strip is redundant.
+    var isWritingToField: Bool { session?.writesToHost == true }
+
+    /// Fields whose host wrote its own text back over our marked words. Later dictations there use the strip from
+    /// the start instead of typing words that vanish.
+    private var rewritingDocuments: Set<UUID> = []
+
     // MARK: Streaming words
 
     /// The newest partial of a dictation. Only a keyboard with a host to write to ever starts a session.
@@ -111,10 +118,11 @@ final class KeyboardLiveTyper {
         if session?.requestID != requestID {
             endSessionForNewRequest()
             lastUpdatedAt = nil
+            let base = host.snapshot()
             session = LiveTypingSession(
                 requestID: requestID,
-                base: host.snapshot(),
-                isEnabled: isEnabled,
+                base: base,
+                isEnabled: isEnabled && !(base.documentID.map(rewritingDocuments.contains) ?? false),
                 hasHost: true,
                 isRewrite: isRewrite
             )
@@ -270,6 +278,9 @@ final class KeyboardLiveTyper {
         }
         if wrote { lastWriteAt = scheduler.now() }
         guard let session else { return }
+        if session.hostRewroteTheField, let documentID = session.documentID {
+            rewritingDocuments.insert(documentID)
+        }
         if session.isProbing {
             scheduleProbeChecks()
         } else if session.phase == .live, wrote {

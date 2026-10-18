@@ -224,9 +224,10 @@ final class KeyboardController {
     var showsLiveTranscript: Bool { livePreview != nil }
 
     /// The streaming words shown while recording, dimmed while the final pass runs. Display only: live typing into
-    /// the field is `liveTyper`'s job, and only a delivered result is ever handed to `textInserter`.
+    /// the field is `liveTyper`'s job, and only a delivered result is ever handed to `textInserter`. While the words
+    /// are being typed into the field the field is the preview, and the strip stays out of the way.
     var livePreview: KeyboardLivePreview? {
-        guard activeRequestID != nil else { return nil }
+        guard activeRequestID != nil, !liveTyper.isWritingToField else { return nil }
         return KeyboardLivePreview.make(
             isRecording: dictationPhase == .recording,
             isTranscribing: dictationPhase == .transcribing,

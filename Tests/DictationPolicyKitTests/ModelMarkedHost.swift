@@ -146,6 +146,14 @@ final class ModelMarkedHost {
         if !lags { flush() }
     }
 
+    /// A state-controlled host (React Native style) writes its own text back: the marked words are gone, the
+    /// cursor and the text after it are where they were.
+    func hostRewritesItsText() {
+        before = String(before.dropLast(markedLength))
+        markedLength = 0
+        if !lags { flush() }
+    }
+
     func userSwitchesField() {
         documentID = UUID()
         before = ""
