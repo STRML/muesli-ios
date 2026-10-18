@@ -620,6 +620,33 @@ final class LiveTypingSessionTests: XCTestCase {
         XCTAssertEqual(h.host.document, "Hello we can now", "the word in the deleted slot came back")
     }
 
+    func testARevisionThatLosesTheWordsBeforeTheDeletedOneDefersToTheEngine() {
+        let h = Harness()
+        h.reachLive(with: "we can leave")
+        XCTAssertTrue(backspace(h))
+        h.partial("we really might go now")
+        XCTAssertEqual(h.host.document, "Hello we really might go now", "dictated words were lost")
+        XCTAssertFalse(h.host.document.contains("leave"))
+    }
+
+    func testAnUnmatchedRevisionStillDropsTheDeletedWordWhenItIsThere() {
+        let h = Harness()
+        h.reachLive(with: "we can leave")
+        XCTAssertTrue(backspace(h))
+        h.partial("we kan leave now")
+        XCTAssertEqual(h.host.document, "Hello we kan now", "the deleted word came back")
+    }
+
+    func testAnUnmatchedFinalDefersToTheEngineToo() {
+        let h = Harness()
+        h.reachLive(with: "we can leave")
+        XCTAssertTrue(backspace(h))
+        let result = h.session.final("We really might go now", snapshot: h.host.snapshot())
+        XCTAssertEqual(result.outcome, .replacedInPlace)
+        h.host.perform(result.commands)
+        XCTAssertEqual(h.host.document, "Hello We really might go now")
+    }
+
     func testBackspaceKeepsThePunctuationThatEndsThePreviousSentence() {
         let h = Harness()
         h.reachLive(with: "we left. tomorrow")

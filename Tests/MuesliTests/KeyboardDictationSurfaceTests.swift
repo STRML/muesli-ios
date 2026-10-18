@@ -303,7 +303,6 @@ final class KeyboardDictationSurfaceTypingTests: XCTestCase {
             ("space", { $0.insertSpace() }, "Note "),
             ("return", { $0.insertReturn() }, "Note\n"),
             ("punctuation", { $0.insertTextKey(",") }, "Note,"),
-            ("delete", { $0.deleteBackward() }, "Not"),
         ]
         for (name, press, expected) in keys {
             try make()
@@ -322,6 +321,20 @@ final class KeyboardDictationSurfaceTypingTests: XCTestCase {
             XCTAssertEqual(d.controller.surface, .type, name)
             d.tearDown()
         }
+    }
+
+    // D1b: the delete key takes back the last dictated word, and the dictation stays in the field.
+    func testTheDictatePagesDeleteKeyTakesBackTheLastDictatedWord() throws {
+        try make()
+        try d.startRecording()
+        try d.hear("dictated words")
+        d.controller.deleteBackward()
+        XCTAssertEqual(d.document, "Notedictated")
+        XCTAssertEqual(d.controller.dictationPhase, .recording)
+        XCTAssertNil(d.controller.livePreview, "the words are in the field, not the strip")
+        try d.stopAndTranscribe()
+        try d.finish("Dictated words.")
+        XCTAssertEqual(d.document, "Notedictated.", "the final keeps the edit and the punctuation after the deleted slot")
     }
 
     // D2: letters are on the Type page only. ABC mid-recording brings them back, and a typed letter then yields as in PR 18.
