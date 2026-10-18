@@ -8,6 +8,7 @@ final class KeyboardViewController: UIInputViewController {
     private var keyboardHeightConstraint: NSLayoutConstraint?
     private var hasEnteredAppearance = false
     private var isKeyboardPresented = false
+    private var inputModeObserver: NSObjectProtocol?
     private var hasActivatedKeyboardRuntime = false
     private var appearanceGuard = MuesliKeyboardAppearanceGuard()
     private var stableGeometryFrameCount = 0
@@ -128,6 +129,7 @@ final class KeyboardViewController: UIInputViewController {
         refreshTypingTraits()
         controller.typing.loadLexicon(from: self)
 
+        observeSystemDictation()
         isKeyboardPresented = true
         hasEnteredAppearance = true
         hasActivatedKeyboardRuntime = false
@@ -198,10 +200,28 @@ final class KeyboardViewController: UIInputViewController {
         launchSnapshotView.isHidden = false
 
         controller.stopObservingSharedState()
+        if let inputModeObserver { NotificationCenter.default.removeObserver(inputModeObserver) }
+        inputModeObserver = nil
     }
 }
 
 private extension KeyboardViewController {
+    /// The mic iOS draws under the keyboard cannot be hidden, and tapping it while Muesli records leaves both
+    /// dictations stuck. When the system takes the input mode over, Muesli's dictation ends first.
+    func observeSystemDictation() {
+        guard inputModeObserver == nil else { return }
+        inputModeObserver = NotificationCenter.default.addObserver(
+            forName: UITextInputMode.currentInputModeDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, SystemDictation.isDictationMode(self.textInputMode) else { return }
+                self.controller.systemDictationDidStart()
+            }
+        }
+    }
+
     /// Traits can arrive late or change when focus moves to another field, so they are re-read on every host
     /// change instead of once at launch. The host's keyboard appearance picks light or dark for the whole panel.
     func refreshTypingTraits() {

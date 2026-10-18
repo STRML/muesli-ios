@@ -714,6 +714,13 @@ final class KeyboardController {
         statusText = "Deleted"
     }
 
+    /// iOS's own dictation started under this keyboard. Two dictations cannot share the mic, so Muesli's ends.
+    func systemDictationDidStart() {
+        guard [.requested, .recording].contains(dictationPhase) else { return }
+        cancelActiveDictation()
+        statusText = "iOS dictation took over"
+    }
+
     func cancelActiveDictation() {
         refreshLatestDictation()
         guard canCancelActiveDictation else {
