@@ -38,6 +38,8 @@ enum LiveTypingOff: String, Equatable, Sendable {
     case hidden
     /// The capability probe failed.
     case noChange, notAtCursor, appended
+    /// The words showed up, then the host wrote its own text back over them (a state-controlled field).
+    case hostRewrote
 }
 
 /// Why the words were left in the field as plain text.
@@ -82,6 +84,9 @@ struct LiveTypingSession: Sendable {
     private(set) var phase: LiveTypingPhase = .awaitingFirstPartial
     private(set) var committed = ""
     private(set) var marked = ""
+    /// This field showed no marked words, took them as plain text, or wrote its own text back over them. Stays true
+    /// after the dictation ends, so the keyboard can remember the field and skip live typing there next time.
+    private(set) var fieldCannotTakeLiveWords = false
     private var previousMarked = ""
     private let base: LiveTypingSnapshot
     private let chunkThreshold: Int
@@ -112,6 +117,7 @@ struct LiveTypingSession: Sendable {
         }
     }
 
+    var documentID: UUID? { base.documentID }
     var mirroredText: String { committed + marked }
     var isProbing: Bool { phase == .probingAppearance || phase == .probingReplace }
     var writesToHost: Bool { phase == .live || isProbing }
@@ -201,6 +207,7 @@ struct LiveTypingSession: Sendable {
         // The host inserted the words as plain text again: the first copy is the only one that should remain.
         if seen.count > first.count, seen.hasPrefix(first), seen.hasSuffix(doubled) {
             phase = .stripOnly(.appended)
+            fieldCannotTakeLiveWords = true
             return [.deleteBackward(marked.count * 2), .log(event: "live_typing.unsupported", reason: "appended")]
         }
         if !isAtCursor(snapshot) { return unsupported(.notAtCursor) }
@@ -209,6 +216,8 @@ struct LiveTypingSession: Sendable {
 
     private mutating func unsupported(_ reason: LiveTypingOff) -> [LiveTypingCommand] {
         phase = .stripOnly(reason)
+        // The words never showed up in this field. A moved cursor is no verdict on the field, so it stays out.
+        if reason == .noChange { fieldCannotTakeLiveWords = true }
         marked = ""
         held = nil
         return [.clearMarked, .log(event: "live_typing.unsupported", reason: reason.rawValue)]
@@ -228,8 +237,27 @@ struct LiveTypingSession: Sendable {
         return .textChanged
     }
 
+    /// The words are gone but the field is otherwise as it was before this session (the cursor and the text after
+    /// it are unchanged): the host wrote its own text back over the marked words. Nothing the user did.
+    private func hostDroppedTheWords(_ snapshot: LiveTypingSnapshot) -> Bool {
+        guard isAtCursor(snapshot) else { return false }
+        let seen = LiveTypingText.folded(snapshot.before)
+        return seen == LiveTypingText.folded(base.before) || seen == LiveTypingText.folded(base.before + committed)
+    }
+
+    /// Stops writing into this field and falls back to the strip: the final text is inserted once at the cursor.
+    private mutating func hostRewrote(_ snapshot: LiveTypingSnapshot) -> [LiveTypingCommand] {
+        if LiveTypingText.folded(snapshot.before) == LiveTypingText.folded(base.before) { committed = "" }
+        phase = .stripOnly(.hostRewrote)
+        fieldCannotTakeLiveWords = true
+        marked = ""
+        held = nil
+        return [.clearMarked, .log(event: "live_typing.detached", reason: LiveTypingKept.textChanged.rawValue)]
+    }
+
     private mutating func observeAttachment(_ snapshot: LiveTypingSnapshot) -> [LiveTypingCommand] {
         guard !isAttached(snapshot) else { return [] }
+        if hostDroppedTheWords(snapshot) { return hostRewrote(snapshot) }
         let reason = detachReason(snapshot)
         phase = .kept(reason)
         return [.unmark, .log(event: "live_typing.detached", reason: reason.rawValue)]
@@ -328,7 +356,8 @@ struct LiveTypingSession: Sendable {
     /// No live typing at the end: the text goes in at the cursor, minus whatever this session already committed.
     private func finishPlain(_ text: String) -> LiveTypingFinal {
         guard !committed.isEmpty else { return LiveTypingFinal(commands: [], outcome: .insertPlain(text)) }
-        guard text.hasPrefix(committed) else {
+        // A host may have capitalized or re-quoted the committed sentences, so the prefix is compared folded.
+        guard LiveTypingText.folded(String(text.prefix(committed.count))) == LiveTypingText.folded(committed) else {
             return LiveTypingFinal(commands: [], outcome: .withheld("committed"))
         }
         let rest = String(text.dropFirst(committed.count))
@@ -337,6 +366,11 @@ struct LiveTypingSession: Sendable {
 
     private mutating func finishLive(_ text: String, snapshot: LiveTypingSnapshot) -> LiveTypingFinal {
         guard phase == .live else { return finish(text, snapshot: snapshot) }
+        if !isAttached(snapshot), hostDroppedTheWords(snapshot) {
+            let commands = hostRewrote(snapshot)
+            let plain = finish(text, snapshot: snapshot)
+            return LiveTypingFinal(commands: commands + plain.commands, outcome: plain.outcome)
+        }
         guard isAttached(snapshot) else {
             phase = .finished
             return LiveTypingFinal(
