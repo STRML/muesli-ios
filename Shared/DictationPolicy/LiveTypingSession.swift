@@ -88,6 +88,25 @@ struct LiveTypingSession: Sendable {
     /// after the dictation ends, so the keyboard can remember the field and skip live typing there next time.
     private(set) var fieldCannotTakeLiveWords = false
     private var previousMarked = ""
+    /// Words the user deleted while dictating. Partials are cumulative, so later ones still hold those words: the
+    /// edit keeps what the user left and how many words of the stream it has already used up.
+    private struct Edit {
+        var kept: String
+        var keptWords: Int
+        /// The stream's words before the deleted one, folded. A revised partial may add, drop or change words, so
+        /// these are matched in order inside it, and the word right after the last match is the deleted one.
+        var prefixWords: [String]
+        /// The deleted word, folded: all that is left to go on when a revision leaves the words before it unmatched.
+        var deleted: String
+    }
+    private var edit: Edit?
+    /// Words in the newest partial, before any edit is applied.
+    private var rawWords: [String] = []
+    /// How far a final may differ in word count from the last partial before the keyboard stops trusting its word
+    /// positions (a final that turns "twenty five" into "25" shifts them).
+    private static let maxWordDrift = 2
+    /// How far from its old position a word in a revised partial may sit and still be the deleted one.
+    private static let deletedWordWindow = 2
     private let base: LiveTypingSnapshot
     private let chunkThreshold: Int
     /// What the field reported once the first words were marked; marking the same words again must not change it.
@@ -129,6 +148,7 @@ struct LiveTypingSession: Sendable {
     mutating func partial(_ raw: String) -> [LiveTypingCommand] {
         let text = LiveTypingText.trimmedPartial(raw)
         guard !text.isEmpty else { return [] }
+        rawWords = LiveTypingText.foldedWords(text)
         switch phase {
         case .awaitingFirstPartial:
             marked = text
@@ -138,10 +158,85 @@ struct LiveTypingSession: Sendable {
             held = text
             return []
         case .live:
-            return write(text)
+            return write(applyingEdit(to: text))
         case .stripOnly, .kept, .cancelled, .finished:
             return []
         }
+    }
+
+    /// The streamed words with the user's deletions applied: what they left, then the words that came after.
+    private func applyingEdit(to raw: String) -> String {
+        guard let edit else { return raw }
+        guard let consumed = consumedWords(of: edit, in: raw) else { return removingDeletedWord(of: edit, from: raw) }
+        return LiveTypingText.joined(edit.kept, LiveTypingText.text(of: raw, afterWords: consumed))
+    }
+
+    /// The words before the deleted one are no longer in `raw`, so there is no way to tell where the deleted word
+    /// went: the engine's text stands, minus the deleted word if it is still there. Nothing the engine said is
+    /// lost, and the deleted word does not come back.
+    private func removingDeletedWord(of edit: Edit, from raw: String) -> String {
+        // Only an occurrence near where the word was counts: a later one is a word the user dictated since.
+        let slot = edit.prefixWords.count
+        let ranges = LiveTypingText.wordRanges(raw)
+        let near = ranges.indices.filter {
+            abs($0 - slot) <= Self.deletedWordWindow && LiveTypingText.folded(String(raw[ranges[$0]])) == edit.deleted
+        }
+        guard let index = near.min(by: { abs($0 - slot) < abs($1 - slot) }) else { return raw }
+        let range = ranges[index]
+        var text = raw
+        text.removeSubrange(range)
+        return text.replacingOccurrences(of: "  ", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// How many words of `raw` the edit has used up. A revised partial can add, drop or change words anywhere, so a
+    /// plain count would land on the wrong word and bring the deleted one back. The words that came before the
+    /// deleted one are found in order instead, and the word right after the last of them is the deleted one,
+    /// whatever the engine now thinks it is. Nil when they cannot be found.
+    private func consumedWords(of edit: Edit, in raw: String) -> Int? {
+        let words = LiveTypingText.foldedWords(raw)
+        // With no words before it, the deleted word has no anchor but itself: it must still be the first word.
+        if edit.prefixWords.isEmpty { return words.first == edit.deleted ? 1 : nil }
+        var next = 0
+        var last = -1
+        for word in edit.prefixWords {
+            guard let index = words[next...].firstIndex(of: word) else { return nil }
+            last = index
+            next = index + 1
+        }
+        return last + 2
+    }
+
+    /// Backspace during a live dictation removes the last dictated word and dictation carries on, instead of ending
+    /// live typing. Nil when there is no such word in the marked words (none yet, or it was already committed as
+    /// plain text): the keyboard then edits the field the way it does for any other key. An empty list means the
+    /// key was taken and there is nothing to change (punctuation only).
+    mutating func deleteLastWord() -> [LiveTypingCommand]? {
+        guard phase == .live else { return nil }
+        let mirror = mirroredText
+        let ranges = LiveTypingText.wordRanges(mirror)
+        if ranges.isEmpty { return marked.isEmpty ? nil : [] }
+        guard var kept = LiveTypingText.droppingLastWord(of: mirror) else { return nil }
+        // The word after committed text leaves the committed text, with its trailing space, in place.
+        if committed.hasPrefix(kept) { kept = committed }
+        guard kept.hasPrefix(committed) else { return nil }
+        // A word from the stream uses up one more word of it; deleting one the user already trimmed to does not.
+        let fromStream = edit.map { ranges.count > $0.keptWords } ?? true
+        edit = Edit(
+            kept: kept,
+            keptWords: ranges.count - 1,
+            prefixWords: fromStream ? Array(rawWords.dropLast()) : edit?.prefixWords ?? [],
+            deleted: fromStream ? rawWords.last ?? "" : edit?.deleted ?? ""
+        )
+        previousMarked = marked
+        marked = String(kept.dropFirst(committed.count))
+        return marked.isEmpty ? [.clearMarked] : [.setMarked(marked)]
+    }
+
+    private func editedFinal(_ text: String) -> String {
+        guard let edit else { return text }
+        guard abs(LiveTypingText.wordCount(text) - rawWords.count) <= Self.maxWordDrift else { return mirroredText }
+        guard let consumed = consumedWords(of: edit, in: text) else { return removingDeletedWord(of: edit, from: text) }
+        return LiveTypingText.joined(edit.kept, LiveTypingText.text(of: text, afterWords: consumed))
     }
 
     /// Replaces the whole marked range with the newest tail, or commits finished sentences of a long dictation.
@@ -364,8 +459,9 @@ struct LiveTypingSession: Sendable {
         return LiveTypingFinal(commands: [], outcome: rest.isEmpty ? .replacedInPlace : .insertPlain(rest))
     }
 
-    private mutating func finishLive(_ text: String, snapshot: LiveTypingSnapshot) -> LiveTypingFinal {
-        guard phase == .live else { return finish(text, snapshot: snapshot) }
+    private mutating func finishLive(_ modelText: String, snapshot: LiveTypingSnapshot) -> LiveTypingFinal {
+        guard phase == .live else { return finish(modelText, snapshot: snapshot) }
+        let text = editedFinal(modelText)
         if !isAttached(snapshot), hostDroppedTheWords(snapshot) {
             let commands = hostRewrote(snapshot)
             let plain = finish(text, snapshot: snapshot)

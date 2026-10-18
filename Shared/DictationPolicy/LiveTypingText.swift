@@ -39,6 +39,47 @@ enum LiveTypingText {
         raw.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    // MARK: Words, for editing a dictation as it streams
+
+    /// Word ranges by the system's word segmentation, which finds the words of scripts written without spaces
+    /// (Japanese, Thai) and leaves punctuation out.
+    static func wordRanges(_ text: String) -> [Range<String.Index>] {
+        var ranges: [Range<String.Index>] = []
+        text.enumerateSubstrings(in: text.startIndex..<text.endIndex, options: [.byWords, .substringNotRequired]) { _, range, _, _ in
+            ranges.append(range)
+        }
+        return ranges
+    }
+
+    static func wordCount(_ text: String) -> Int { wordRanges(text).count }
+
+    /// `text` without its last word and the white space before it, so the punctuation that ends the sentence before
+    /// stays. Nil when there is no word to remove.
+    static func droppingLastWord(of text: String) -> String? {
+        guard let last = wordRanges(text).last else { return nil }
+        return String(text[..<last.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// What follows the first `count` words of `text`, with the separator the speech engine put in front of it.
+    static func text(of text: String, afterWords count: Int) -> String {
+        guard count > 0 else { return text }
+        let ranges = wordRanges(text)
+        guard count <= ranges.count else { return "" }
+        return String(text[ranges[count - 1].upperBound...])
+    }
+
+    /// `head` and `tail` as one text: the tail keeps its own separator, and a head that ends in white space does
+    /// not get a second one.
+    static func joined(_ head: String, _ tail: String) -> String {
+        guard head.last?.isWhitespace == true else { return head + tail }
+        return head + tail.drop(while: \.isWhitespace)
+    }
+
+    /// The words of `text`, folded for comparison.
+    static func foldedWords(_ text: String) -> [String] {
+        wordRanges(text).map { folded(String(text[$0])) }
+    }
+
     /// The `selectedRange` for `setMarkedText`: it is relative to the marked text and counts UTF-16 units. The
     /// cursor goes at the end, where the next words will be.
     static func markedSelection(for text: String) -> NSRange {
