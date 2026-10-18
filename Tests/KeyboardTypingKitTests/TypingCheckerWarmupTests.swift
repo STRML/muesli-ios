@@ -29,7 +29,6 @@ private final class FakeWarmer: TypingCheckerWarming {
         self.data = data
         data.noteInstance()
     }
-    var availableLanguages: [String] { ["en_US"] }
     func completions(forPartial partial: String, language: String) -> [String] {
         let answer = data.isWarm ? ["\(partial)ox"] : []
         data.noteLookup()
@@ -133,15 +132,16 @@ final class TypingCheckerWarmupTests: XCTestCase {
             traits: { engine.state.traits },
             isEnabled: { true }
         )
-        warmup?.start(languages: ["en-US"])
+        warmup?.start(languages: ["en-US"], available: ["en_US"])
         if drain { await scheduler.drain() }
         "teh".forEach { engine.type(String($0)) }
         engine.tapSpace()
         return document.before
     }
 
-    // The failure being guarded: a cold checker leaves the first typo alone.
-    func testFirstTypoIsLeftAloneWhenNothingWarmedTheChecker() async {
+    // The accepted window: a word finished before the background warm-up has run reaches a cold checker and is
+    // left alone. Removing it would mean blocking the main thread on the lookups (36.5 ms warm, on the simulator).
+    func testAcceptedWindowWordFinishedBeforeTheWarmUpRunsIsLeftAlone() async {
         let result = await firstWordCorrectsToThe(with: nil, drain: false)
         XCTAssertEqual(result, "teh ")
     }
@@ -155,7 +155,7 @@ final class TypingCheckerWarmupTests: XCTestCase {
 
     func testAppearingDoesNotWarmOnTheCallingThread() async {
         let warmup = makeWarmup()
-        warmup.start(languages: ["en-US"])
+        warmup.start(languages: ["en-US"], available: ["en_US"])
         // Nothing has run yet: the work is queued for the scheduler, not done inline.
         XCTAssertEqual(data.instancesCreated, 0)
         XCTAssertFalse(data.isWarm)
@@ -170,7 +170,7 @@ final class TypingCheckerWarmupTests: XCTestCase {
             makeWarmer: { observed.note(); return FakeWarmer(data: data) },
             scheduler: scheduler
         )
-        warmup.start(languages: ["en-US"])
+        warmup.start(languages: ["en-US"], available: ["en_US"])
         await scheduler.drain(backgroundOffMain: true)
         XCTAssertEqual(observed.mainThreadHits, 0)
         XCTAssertGreaterThan(observed.hits, 0)
@@ -178,7 +178,7 @@ final class TypingCheckerWarmupTests: XCTestCase {
 
     func testDisappearingBeforeTheWorkRunsDoesNoLookups() async {
         let warmup = makeWarmup()
-        warmup.start(languages: ["en-US"])
+        warmup.start(languages: ["en-US"], available: ["en_US"])
         warmup.cancel()
         await scheduler.drain()
         XCTAssertFalse(data.isWarm)
@@ -190,7 +190,7 @@ final class TypingCheckerWarmupTests: XCTestCase {
         let warmer = CancellingWarmer()
         let warmup = TypingCheckerWarmup(makeWarmer: { warmer }, scheduler: scheduler)
         warmer.onFirstLookup = { MainActor.assumeIsolated { warmup.cancel() } }
-        warmup.start(languages: ["en-US"])
+        warmup.start(languages: ["en-US"], available: ["en_US"])
         await scheduler.drain()
         XCTAssertEqual(warmer.lookups, 1, "the lookup in flight finishes, none after it")
         XCTAssertEqual(warmup.state, .idle)
@@ -198,22 +198,22 @@ final class TypingCheckerWarmupTests: XCTestCase {
 
     func testMemoryReleaseCancelsAndForgetsAWarmChecker() async {
         let warmup = makeWarmup()
-        warmup.start(languages: ["en-US"])
+        warmup.start(languages: ["en-US"], available: ["en_US"])
         await scheduler.drain()
         XCTAssertEqual(warmup.state, .warm)
         warmup.releaseMemory()
         XCTAssertEqual(warmup.state, .idle)
-        warmup.start(languages: ["en-US"])
+        warmup.start(languages: ["en-US"], available: ["en_US"])
         XCTAssertEqual(warmup.state, .warming, "after a memory release the next appearance warms again")
     }
 
     func testAWarmCheckerIsKeptAcrossAppearances() async {
         let warmup = makeWarmup()
-        warmup.start(languages: ["en-US"])
+        warmup.start(languages: ["en-US"], available: ["en_US"])
         await scheduler.drain()
         let created = data.instancesCreated
         warmup.cancel()
-        warmup.start(languages: ["en-US"])
+        warmup.start(languages: ["en-US"], available: ["en_US"])
         await scheduler.drain()
         XCTAssertEqual(data.instancesCreated, created)
         XCTAssertEqual(warmup.state, .warm)
@@ -221,8 +221,8 @@ final class TypingCheckerWarmupTests: XCTestCase {
 
     func testAppearingTwiceWhileWarmingQueuesOneJob() async {
         let warmup = makeWarmup()
-        warmup.start(languages: ["en-US"])
-        warmup.start(languages: ["en-US"])
+        warmup.start(languages: ["en-US"], available: ["en_US"])
+        warmup.start(languages: ["en-US"], available: ["en_US"])
         XCTAssertEqual(scheduler.pendingBackground, 1)
     }
 
@@ -230,7 +230,7 @@ final class TypingCheckerWarmupTests: XCTestCase {
     func testEmptyCompletionsRetryOnceThenStop() async {
         let stuckCold = FakeLanguageData(lookupsUntilWarm: Int.max)
         let warmup = makeWarmup(data: stuckCold)
-        warmup.start(languages: ["en-US"])
+        warmup.start(languages: ["en-US"], available: ["en_US"])
         await scheduler.drain()
         XCTAssertEqual(warmup.state, .cold)
         XCTAssertEqual(stuckCold.instancesCreated, 2, "one first try and one retry with a fresh checker")
@@ -244,7 +244,7 @@ final class TypingCheckerWarmupTests: XCTestCase {
         // Cold for the first pass over the 26 letters, warm by the retry.
         let warmsAfterOnePass = FakeLanguageData(lookupsUntilWarm: TypingCheckerWarmup.probeLetters.count)
         let warmup = makeWarmup(data: warmsAfterOnePass)
-        warmup.start(languages: ["en-US"])
+        warmup.start(languages: ["en-US"], available: ["en_US"])
         await scheduler.drain()
         XCTAssertEqual(warmup.state, .warm)
         XCTAssertEqual(warmsAfterOnePass.instancesCreated, 2)
@@ -253,16 +253,41 @@ final class TypingCheckerWarmupTests: XCTestCase {
     func testAnotherAppearanceAfterGivingUpMayTryAgain() async {
         let stuckCold = FakeLanguageData(lookupsUntilWarm: Int.max)
         let warmup = makeWarmup(data: stuckCold)
-        warmup.start(languages: ["en-US"])
+        warmup.start(languages: ["en-US"], available: ["en_US"])
         await scheduler.drain()
         XCTAssertEqual(warmup.state, .cold)
-        warmup.start(languages: ["en-US"])
+        warmup.start(languages: ["en-US"], available: ["en_US"])
         XCTAssertEqual(warmup.state, .warming)
+    }
+
+    // P1c: a language the checker has no dictionary for must not count as a finished warm-up.
+    func testUnsupportedLanguageThenEnglishStillWarmsEnglish() async {
+        let warmup = makeWarmup()
+        warmup.start(languages: ["zh-Hans"], available: ["en_US"])
+        await scheduler.drain()
+        XCTAssertNotEqual(warmup.state, .warm, "nothing was warmed for zh-Hans")
+        warmup.start(languages: ["en-US"], available: ["en_US"])
+        await scheduler.drain()
+        XCTAssertTrue(data.isWarm, "English must be warmed by the later start")
+        XCTAssertEqual(warmup.state, .warm)
+    }
+
+    func testAnotherLanguageWarmsAgainButTheSameOneDoesNot() async {
+        let warmup = makeWarmup()
+        warmup.start(languages: ["en-US"], available: ["en_US", "fr_FR"])
+        await scheduler.drain()
+        let created = data.instancesCreated
+        warmup.start(languages: ["en-US"], available: ["en_US", "fr_FR"])
+        XCTAssertEqual(scheduler.pendingBackground, 0)
+        warmup.start(languages: ["fr-FR"], available: ["en_US", "fr_FR"])
+        XCTAssertEqual(warmup.state, .warming)
+        await scheduler.drain()
+        XCTAssertGreaterThan(data.instancesCreated, created)
     }
 
     func testNonEnglishIsWarmedButNeverCalledCold() async {
         let warmup = TypingCheckerWarmup(makeWarmer: { FakeWarmer(data: FakeLanguageData(lookupsUntilWarm: Int.max)) }, scheduler: scheduler)
-        warmup.start(languages: ["fr-FR"])
+        warmup.start(languages: ["fr-FR"], available: ["fr_FR"])
         await scheduler.drain()
         XCTAssertEqual(warmup.state, .warm)
     }
@@ -306,7 +331,6 @@ private final class CancellingWarmer: TypingCheckerWarming, @unchecked Sendable 
     private var count = 0
     var onFirstLookup: (@Sendable () -> Void)?
     var lookups: Int { lock.withLock { count } }
-    var availableLanguages: [String] { ["en_US"] }
     func completions(forPartial partial: String, language: String) -> [String] {
         let first = lock.withLock { () -> Bool in count += 1; return count == 1 }
         if first { onFirstLookup?() }

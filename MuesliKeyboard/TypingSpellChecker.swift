@@ -45,8 +45,6 @@ nonisolated final class UITextCheckerWarmer: TypingCheckerWarming {
     private nonisolated(unsafe) let checker: BackgroundTextChecking =
         unsafeBitCast((UITextChecker.self as NSObject.Type).init(), to: BackgroundTextChecking.self)
 
-    var availableLanguages: [String] { UITextChecker.availableLanguages }
-
     func completions(forPartial partial: String, language: String) -> [String] {
         let range = NSRange(location: 0, length: (partial as NSString).length)
         return checker.completions(forPartialWordRange: range, in: partial, language: language) ?? []

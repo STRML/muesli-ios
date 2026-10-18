@@ -47,7 +47,7 @@ final class AutocorrectFootprintTests: XCTestCase {
         let start = footprintKB()
         let began = ProcessInfo.processInfo.systemUptime
         var appeared = began
-        warmup.start(languages: ["en-US"])
+        warmup.start(languages: ["en-US"], available: UITextChecker.availableLanguages)
         appeared = ProcessInfo.processInfo.systemUptime
         while warmup.state == .warming, ProcessInfo.processInfo.systemUptime - began < 30 {
             try await Task.sleep(nanoseconds: 5_000_000)

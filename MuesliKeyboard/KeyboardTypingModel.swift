@@ -137,7 +137,7 @@ final class KeyboardTypingModel {
 
     /// The keyboard is on screen: load the checker's language data off the main thread, ahead of the first word.
     func keyboardDidAppear() {
-        checkerWarmup.start(languages: languageSource.candidates)
+        checkerWarmup.start(languages: languageSource.candidates, available: UITextChecker.availableLanguages)
     }
 
     /// The keyboard is going away: stop a warm-up in flight. A warm checker stays warm.

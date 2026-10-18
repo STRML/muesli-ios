@@ -4,7 +4,6 @@ import Foundation
 /// checker of its own that no other thread touches. `UITextChecker` loads its language data once per process, so
 /// lookups through this instance warm the checker the keyboard types with.
 protocol TypingCheckerWarming: AnyObject {
-    var availableLanguages: [String] { get }
     func completions(forPartial partial: String, language: String) -> [String]
     func guesses(forWord word: String, language: String) -> [String]
 }
@@ -67,8 +66,13 @@ struct TypingColdCheckerPolicy: Equatable {
 /// answers no completions for the first few lookups, which is all the autocorrect rule needs to decline.
 ///
 /// It does no more than it must: 26 single-letter completions and a short list of common typos through `guesses`,
-/// once per process. It never blocks the main actor, stops at the next lookup when cancelled, and a result that
+/// once per process and language. It never blocks the main actor, stops at the next lookup when cancelled, and a result that
 /// arrives after a cancel is dropped.
+///
+/// Accepted window: a word finished before the job completes (36.5 ms of lookups on a warm simulator, more on a
+/// cold device) still reaches a cold checker and may be left uncorrected. Closing it would mean blocking the main
+/// thread on the lookups, which is the cost this type exists to avoid. The language list and the checker's
+/// available languages are read on the main actor and passed in, so the job never touches UIKit class state.
 @MainActor
 final class TypingCheckerWarmup {
     enum State: Equatable {
@@ -90,6 +94,8 @@ final class TypingCheckerWarmup {
     private let scheduler: TypingWarmupScheduler
     private var policy: TypingColdCheckerPolicy
     private var token = CancelToken()
+    /// The language the current job or finished warm-up is for.
+    private var language: String?
 
     init(
         makeWarmer: @escaping @Sendable () -> TypingCheckerWarming,
@@ -101,45 +107,57 @@ final class TypingCheckerWarmup {
         self.policy = policy
     }
 
-    /// The keyboard appeared. A warm checker and a warm-up already under way are left alone.
-    func start(languages: [String]) {
-        guard state == .idle || state == .cold else { return }
+    /// The keyboard appeared. `available` is `UITextChecker.availableLanguages`, read by the caller on the main
+    /// actor. A language with no dictionary warms nothing and is not recorded as warm. A warm checker, and a
+    /// warm-up already under way, for the same language are left alone; another language warms again.
+    func start(languages: [String], available: [String]) {
+        guard let resolved = TypingLanguageResolver.resolve(candidates: languages, available: available) else { return }
+        switch state {
+        case .warm, .warming:
+            guard language != resolved else { return }
+            token.cancel()
+        case .idle, .cold:
+            break
+        }
         state = .warming
+        language = resolved
         policy = TypingColdCheckerPolicy(retryDelay: policy.retryDelay, maximumRetries: policy.maximumRetries)
         token = CancelToken()
-        schedule(languages: languages, token: token, delay: 0)
+        schedule(language: resolved, token: token, delay: 0)
     }
 
     /// The keyboard went away. Work in flight stops at its next lookup; a warm checker stays warm.
     func cancel() {
         token.cancel()
-        if state == .warming { state = .idle }
+        if state == .warming {
+            state = .idle
+            language = nil
+        }
     }
 
     /// Memory is tight: stop, and warm again on the next appearance.
     func releaseMemory() {
         token.cancel()
         state = .idle
+        language = nil
     }
 
-    private func schedule(languages: [String], token: CancelToken, delay: TimeInterval) {
+    private func schedule(language: String, token: CancelToken, delay: TimeInterval) {
         let makeWarmer = makeWarmer
         let scheduler = scheduler
         scheduler.runInBackground(after: delay) {
             guard !token.isCancelled else { return }
-            let emptyLetters = TypingCheckerWarmup.lookups(using: makeWarmer(), languages: languages, token: token)
+            let emptyLetters = TypingCheckerWarmup.lookups(using: makeWarmer(), language: language, token: token)
             scheduler.runOnMain { [weak self] in
-                self?.finish(emptyLetters: emptyLetters, languages: languages, token: token)
+                self?.finish(emptyLetters: emptyLetters, language: language, token: token)
             }
         }
     }
 
     /// The first-letter completions that came back empty, or nil when cancelled part way.
     nonisolated private static func lookups(
-        using warmer: TypingCheckerWarming, languages: [String], token: CancelToken
+        using warmer: TypingCheckerWarming, language: String, token: CancelToken
     ) -> [String]? {
-        guard let language = TypingLanguageResolver.resolve(candidates: languages, available: warmer.availableLanguages)
-        else { return [] }
         // Only English is known to have completions for every letter.
         let guarded = TypingLanguageResolver.baseCode(of: language) == "en"
         var empty: [String] = []
@@ -154,12 +172,12 @@ final class TypingCheckerWarmup {
         return empty
     }
 
-    private func finish(emptyLetters: [String]?, languages: [String], token: CancelToken) {
+    private func finish(emptyLetters: [String]?, language: String, token: CancelToken) {
         guard !token.isCancelled, token === self.token, let emptyLetters else { return }
         switch policy.verdict(emptyLetters: emptyLetters) {
         case .warm: state = .warm
         case .cold: state = .cold
-        case .retry(let delay): schedule(languages: languages, token: token, delay: delay)
+        case .retry(let delay): schedule(language: language, token: token, delay: delay)
         }
     }
 }
