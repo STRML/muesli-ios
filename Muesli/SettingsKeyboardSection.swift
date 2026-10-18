@@ -45,7 +45,7 @@ extension SettingsView {
                 SettingsToggleRow(
                     icon: "rectangle.on.rectangle",
                     title: "Dictation panel while recording",
-                    detail: "On: the full keyboard switches to the dictation panel when you start dictating. Off: the typing keys stay and the strip shows the live status. Needs Allow Full Access to follow this switch; without it, the typing keys stay.",
+                    detail: "On: the full keyboard switches to the dictation panel when you start dictating. Off: the keyboard stays on the page you were using, and on the typing keys the strip shows the live status. Needs Allow Full Access to follow this switch; without it, the keyboard stays on the page you were using.",
                     isOn: keyboardDictatePanelWhileRecordingBinding
                 )
             }
