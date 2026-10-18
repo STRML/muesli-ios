@@ -532,6 +532,38 @@ final class LiveTypingSessionTests: XCTestCase {
         XCTAssertEqual(h.host.document, before)
     }
 
+    func testAHostRewriteAfterChunkingStillInsertsTheRestWhenTheHostChangedTheCase() {
+        let h = Harness(chunkThreshold: 120)
+        h.reachLive(with: "This is sentence number 1.")
+        let long = sentences(6).joined(separator: " ") + " And one more"
+        h.partial(long)
+        h.host.hostRewritesItsText()
+        let first = long.prefix(1)
+        let flipped = (first == first.uppercased() ? first.lowercased() : first.uppercased()) + long.dropFirst()
+        let result = h.session.final(flipped + " words.", snapshot: h.host.snapshot())
+        guard case .insertPlain(let rest) = result.outcome else {
+            return XCTFail("the final was withheld: \(result.outcome)")
+        }
+        XCTAssertFalse(rest.isEmpty)
+        XCTAssertTrue(h.session.fieldCannotTakeLiveWords)
+    }
+
+    func testAProbeThatNeverSawTheWordsRemembersTheField() {
+        let h = Harness(behavior: .ignoresMarked)
+        h.partial("hello")
+        h.settle(forced: true)
+        XCTAssertEqual(h.session.phase, .stripOnly(.noChange))
+        XCTAssertTrue(h.session.fieldCannotTakeLiveWords)
+    }
+
+    func testAMovedCursorDoesNotCondemnTheField() {
+        let h = Harness()
+        h.reachLive(with: "hello world")
+        h.host.userMovesCursor(toOffsetFromEnd: 6)
+        h.settle()
+        XCTAssertFalse(h.session.fieldCannotTakeLiveWords)
+    }
+
     func testARewriteIsRefusedBeyondTheDeleteCap() {
         let h = Harness(chunkThreshold: 120)
         h.reachLive(with: "This is sentence number 1.")

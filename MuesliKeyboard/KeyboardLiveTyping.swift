@@ -278,7 +278,7 @@ final class KeyboardLiveTyper {
         }
         if wrote { lastWriteAt = scheduler.now() }
         guard let session else { return }
-        if session.hostRewroteTheField, let documentID = session.documentID {
+        if session.fieldCannotTakeLiveWords, let documentID = session.documentID {
             rewritingDocuments.insert(documentID)
         }
         if session.isProbing {
