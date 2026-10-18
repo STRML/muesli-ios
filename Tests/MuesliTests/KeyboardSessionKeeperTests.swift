@@ -6,6 +6,9 @@ import XCTest
 final class KeyboardSessionKeeperTests: XCTestCase {
     @MainActor
     func testCoordinatorRefreshesStandbyReadinessAndMicOffStopsHeartbeat() async throws {
+        guard ProcessInfo.processInfo.environment["MUESLI_HARDWARE_AUDIO_TESTS"] == "1" else {
+            throw XCTSkip("Opens the real microphone engine. Set TEST_RUNNER_MUESLI_HARDWARE_AUDIO_TESTS=1 to run it.")
+        }
         guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else {
             throw XCTSkip("Microphone permission is required for the standby integration test")
         }
