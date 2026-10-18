@@ -187,7 +187,7 @@ enum MeetingSummaryClient {
             )
         case .chatGPT:
             do {
-                let text = try await callWHAM(systemPrompt: system, userPrompt: user, model: model)
+                let text = try await callWHAM(systemPrompt: system, userPrompt: user, model: model, timeout: timeout)
                 guard !text.isEmpty else { throw MeetingSummaryError.emptyResponse("ChatGPT") }
                 return text
             } catch {
@@ -359,7 +359,12 @@ enum MeetingSummaryClient {
         return parts.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private static func callWHAM(systemPrompt: String, userPrompt: String, model: String) async throws -> String {
+    private static func callWHAM(
+        systemPrompt: String,
+        userPrompt: String,
+        model: String,
+        timeout: TimeInterval
+    ) async throws -> String {
         let (token, accountId) = try await ChatGPTAuthManager.shared.validAccessToken()
         let body: [String: Any] = [
             "model": model,
@@ -378,6 +383,7 @@ enum MeetingSummaryClient {
 
         var request = URLRequest(url: whamURL)
         request.httpMethod = "POST"
+        request.timeoutInterval = timeout
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         if !accountId.isEmpty {

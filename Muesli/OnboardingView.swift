@@ -998,7 +998,7 @@ struct OnboardingView: View {
 
     private var customLLMSummarySetup: some View {
         VStack(alignment: .leading, spacing: MuesliTheme.spacing12) {
-            Text("Any OpenAI-compatible server, for example your own over Tailscale. Notes and titles are sent only to this address.")
+            Text("Any OpenAI-compatible server, for example your own over Tailscale. Notes, titles and Quill rewrites are sent only to this address.")
                 .font(MuesliTheme.caption())
                 .foregroundStyle(MuesliTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
