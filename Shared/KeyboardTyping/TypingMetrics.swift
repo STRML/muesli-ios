@@ -70,6 +70,9 @@ enum TypingStripContent: Sendable, Equatable {
         if canUndoRewrite { return .undoEdit }
         return suggestions.isEmpty ? .empty : .suggestions(suggestions)
     }
+
+    /// With nothing to suggest the strip carries a settings gear at its left and a Start pill in the middle.
+    var offersSettingsAndStart: Bool { self == .empty }
 }
 
 enum TypingRecordKey {
