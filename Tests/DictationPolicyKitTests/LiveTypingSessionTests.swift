@@ -637,6 +637,22 @@ final class LiveTypingSessionTests: XCTestCase {
         XCTAssertEqual(h.host.document, "Hello we kan now", "the deleted word came back")
     }
 
+    func testDeletingTheFirstWordThenARevisionThatPutsAWordBeforeItDoesNotBringItBack() {
+        let h = Harness()
+        h.reachLive(with: "leave")
+        XCTAssertTrue(backspace(h))
+        h.partial("we leave now")
+        XCTAssertEqual(h.host.document, "Hello we now", "the deleted word came back, or a word was dropped")
+    }
+
+    func testAnUnmatchedRevisionKeepsALaterOccurrenceOfTheDeletedWord() {
+        let h = Harness()
+        h.reachLive(with: "we can leave")
+        XCTAssertTrue(backspace(h))
+        h.partial("we really might go and then we will all leave now")
+        XCTAssertTrue(h.host.document.contains("all leave now"), "a new word was lost: \(h.host.document)")
+    }
+
     func testAnUnmatchedFinalDefersToTheEngineToo() {
         let h = Harness()
         h.reachLive(with: "we can leave")

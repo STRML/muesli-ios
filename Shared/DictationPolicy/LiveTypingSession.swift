@@ -105,6 +105,8 @@ struct LiveTypingSession: Sendable {
     /// How far a final may differ in word count from the last partial before the keyboard stops trusting its word
     /// positions (a final that turns "twenty five" into "25" shifts them).
     private static let maxWordDrift = 2
+    /// How far from its old position a word in a revised partial may sit and still be the deleted one.
+    private static let deletedWordWindow = 2
     private let base: LiveTypingSnapshot
     private let chunkThreshold: Int
     /// What the field reported once the first words were marked; marking the same words again must not change it.
@@ -173,9 +175,14 @@ struct LiveTypingSession: Sendable {
     /// went: the engine's text stands, minus the deleted word if it is still there. Nothing the engine said is
     /// lost, and the deleted word does not come back.
     private func removingDeletedWord(of edit: Edit, from raw: String) -> String {
+        // Only an occurrence near where the word was counts: a later one is a word the user dictated since.
+        let slot = edit.prefixWords.count
         let ranges = LiveTypingText.wordRanges(raw)
-        guard let range = ranges.dropFirst(edit.keptWords)
-            .first(where: { LiveTypingText.folded(String(raw[$0])) == edit.deleted }) else { return raw }
+        let near = ranges.indices.filter {
+            abs($0 - slot) <= Self.deletedWordWindow && LiveTypingText.folded(String(raw[ranges[$0]])) == edit.deleted
+        }
+        guard let index = near.min(by: { abs($0 - slot) < abs($1 - slot) }) else { return raw }
+        let range = ranges[index]
         var text = raw
         text.removeSubrange(range)
         return text.replacingOccurrences(of: "  ", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -187,6 +194,8 @@ struct LiveTypingSession: Sendable {
     /// whatever the engine now thinks it is. Nil when they cannot be found.
     private func consumedWords(of edit: Edit, in raw: String) -> Int? {
         let words = LiveTypingText.foldedWords(raw)
+        // With no words before it, the deleted word has no anchor but itself: it must still be the first word.
+        if edit.prefixWords.isEmpty { return words.first == edit.deleted ? 1 : nil }
         var next = 0
         var last = -1
         for word in edit.prefixWords {
