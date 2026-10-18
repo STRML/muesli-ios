@@ -16,6 +16,7 @@ struct SettingsView: View {
     @AppStorage(MuesliPreferences.keyboardLayoutKey) var keyboardLayout = KeyboardLayout.fallback.storedValue
     @AppStorage(MuesliPreferences.keyboardAutocorrectKey) var keyboardAutocorrect = true
     @AppStorage(MuesliPreferences.keyboardLiveTypingKey) var keyboardLiveTyping = true
+    @AppStorage(MuesliPreferences.keyboardDictatePanelWhileRecordingKey) var keyboardDictatePanelWhileRecording = false
     @AppStorage(MuesliPreferences.keyboardMicAutoOffMinutesKey) var keyboardMicAutoOffMinutes = KeyboardMicAutoOff.defaultMinutes
     @AppStorage(MuesliPreferences.recordingMicrophonePreferenceKey) var microphonePreference = RecordingMicrophonePreference.automatic.rawValue
     @AppStorage(MuesliPreferences.keepDictationAudioRecordingsKey) var keepDictationAudioRecordings = false

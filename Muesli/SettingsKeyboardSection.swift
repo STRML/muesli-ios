@@ -41,6 +41,13 @@ extension SettingsView {
                     isOn: keyboardLiveTypingBinding
                 )
                 typingSwitchNote(.liveTyping)
+                Divider().overlay(MuesliTheme.surfaceBorder)
+                SettingsToggleRow(
+                    icon: "rectangle.on.rectangle",
+                    title: "Dictation panel while recording",
+                    detail: "On: the full keyboard switches to the dictation panel when you start dictating. Off: the typing keys stay and the strip shows the live status. Needs Allow Full Access to follow this switch; without it, the typing keys stay.",
+                    isOn: keyboardDictatePanelWhileRecordingBinding
+                )
             }
 
             SettingsGroup(title: "Dictation", footer: "Mic changes apply to the next dictation.") {
@@ -116,6 +123,13 @@ extension SettingsView {
         Binding(get: { keyboardLiveTyping }, set: { enabled in
             keyboardLiveTyping = enabled
             coordinator.setKeyboardLiveTypingEnabled(enabled)
+        })
+    }
+
+    var keyboardDictatePanelWhileRecordingBinding: Binding<Bool> {
+        Binding(get: { keyboardDictatePanelWhileRecording }, set: { enabled in
+            keyboardDictatePanelWhileRecording = enabled
+            coordinator.setKeyboardDictatePanelWhileRecording(enabled)
         })
     }
 

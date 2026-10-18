@@ -4036,14 +4036,21 @@ final class DictationCoordinator {
         publishKeyboardTypingSettings()
     }
 
+    func setKeyboardDictatePanelWhileRecording(_ enabled: Bool) {
+        UserDefaults.standard.set(enabled, forKey: MuesliPreferences.keyboardDictatePanelWhileRecordingKey)
+        publishKeyboardTypingSettings()
+    }
+
     /// Hands the keyboard its typing settings. Without Full Access the keyboard cannot read them and
-    /// autocorrect and live typing stay on and the layout stays Full, their defaults.
+    /// autocorrect and live typing stay on, the layout stays Full and the Type page stays up while recording,
+    /// their defaults.
     private func publishKeyboardTypingSettings() {
         try? store.saveKeyboardTypingSettings(
             KeyboardTypingSettings(
                 autocorrect: MuesliPreferences.keyboardAutocorrectEnabled,
                 liveTyping: MuesliPreferences.keyboardLiveTypingEnabled,
-                layout: MuesliPreferences.keyboardLayout
+                layout: MuesliPreferences.keyboardLayout,
+                showsDictatePanelWhileRecording: MuesliPreferences.keyboardDictatePanelWhileRecordingEnabled
             )
         )
     }

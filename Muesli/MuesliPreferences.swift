@@ -12,6 +12,7 @@ enum MuesliPreferences {
     static let keyboardAutocorrectKey = "muesli.keyboard.autocorrect"
     static let keyboardLiveTypingKey = "muesli.keyboard.liveTyping"
     static let keyboardLayoutKey = "muesli.keyboard.layout"
+    static let keyboardDictatePanelWhileRecordingKey = "muesli.keyboard.dictatePanelWhileRecording"
     static let retiredKeyboardSessionModeKey = "muesli.keyboardSession.keepReadyBetweenDictations"
 
     static func migrateKeyboardSessionPreference(in defaults: UserDefaults = .standard) {
@@ -91,6 +92,12 @@ enum MuesliPreferences {
     /// from the shared store, which the coordinator fills from here.
     static var keyboardLiveTypingEnabled: Bool {
         bool(for: keyboardLiveTypingKey, defaultValue: true)
+    }
+
+    /// Whether the Full keyboard switches to the Dictate panel while recording. Off until the user turns it on: the
+    /// Type page stays. The keyboard reads it from the shared store, which the coordinator fills from here.
+    static var keyboardDictatePanelWhileRecordingEnabled: Bool {
+        bool(for: keyboardDictatePanelWhileRecordingKey, defaultValue: false)
     }
 
     /// Full or minimal keyboard. Full until the user picks Minimal; a stored value this build does not know is Full
