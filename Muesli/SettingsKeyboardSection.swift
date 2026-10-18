@@ -20,6 +20,14 @@ extension SettingsView {
                 }
             }
 
+            SettingsGroup(title: "iOS dictation mic") {
+                Text("iOS draws its own mic under the keyboard. Tapping it while Muesli dictates runs two dictations at once and leaves both stuck until the keyboard closes. To remove it, open the iOS Settings app, go to General > Keyboard and turn off Enable Dictation. That also removes the mic from every other keyboard.")
+                    .font(MuesliTheme.caption())
+                    .foregroundStyle(MuesliTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("settings.systemDictationNote")
+            }
+
             SettingsGroup(
                 title: "Layout and typing",
                 footer: "Autocorrect and live typing apply at once with Allow Full Access. The layout applies the next time the keyboard opens."
