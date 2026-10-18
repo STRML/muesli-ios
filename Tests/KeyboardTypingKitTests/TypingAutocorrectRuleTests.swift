@@ -88,10 +88,10 @@ final class TypingAutocorrectRuleTests: XCTestCase {
     // R9: more edits for longer words, when the budget allows and the margin holds. The tuned budget is one
     // vowel swap plus one dropped letter short of this word, so it is declined until the budget is raised.
     func testALongWordMayTakeTwoSlipsOnlyWithinTheBudget() {
-        XCTAssertNil(fix("definatly", [candidate("definitely", guess: 0)]))
+        XCTAssertNil(fix("definatly", [candidate("definitely", guess: 0), candidate("unrelated", guess: 1, listedAt: nil)]))
         var tuning = TypingAutocorrectTuning.standard
         tuning.budgetEightOrMore = 2.0
-        XCTAssertEqual(TypingAutocorrectRule.correction(for: "definatly", candidates: [candidate("definitely")], tuning: tuning), "definitely")
+        XCTAssertEqual(TypingAutocorrectRule.correction(for: "definatly", candidates: [candidate("definitely"), candidate("unrelated", guess: 1, listedAt: nil)], tuning: tuning), "definitely")
         XCTAssertNil(fix("flxm", [candidate("film")]), "a four-letter word is not given two slips")
     }
 
@@ -159,5 +159,57 @@ final class TypingAutocorrectRuleTests: XCTestCase {
     func testCasingOfTheTypedWordDoesNotChangeTheDecision() {
         XCTAssertEqual(fix("Teh", [candidate("the")]), "the")
         XCTAssertEqual(fix("TEH", [candidate("the")]), "the")
+    }
+
+    // R17: when the checker offers exactly one candidate there is no runner-up to confuse it with, so the edit
+    // budget is looser. Measured on the hand-made list: "truely", "maintainance", "tommorow", "arguement",
+    // "dissapear" were each rejected only by the budget.
+    func testASoleCandidateTakesALooserBudget() {
+        XCTAssertEqual(fix("truely", [candidate("truly")]), "truly")
+        XCTAssertEqual(fix("maintainance", [candidate("maintenance")]), "maintenance")
+        XCTAssertEqual(fix("tommorow", [candidate("tomorrow")]), "tomorrow")
+        XCTAssertEqual(fix("arguement", [candidate("argument")]), "argument")
+        XCTAssertEqual(fix("dissapear", [candidate("disappear")]), "disappear")
+    }
+
+    func testTwoCandidatesAtEqualCostAreStillAmbiguous() {
+        XCTAssertNil(fix("wich", [candidate("witch", position: 3), candidate("which", position: 3)]))
+    }
+
+    func testTheLooserBudgetDoesNotApplyWithTwoCandidates() {
+        // "truly" costs 1.4, over the strict 1.0, and the second candidate is not a sole-pool excuse.
+        XCTAssertNil(fix("truely", [candidate("truly"), candidate("trussly", guess: nil, listedAt: nil)]))
+    }
+
+    func testASoleCandidateBeyondTheLooserBudgetIsStillDeclined() {
+        XCTAssertNil(fix("kubectl", [candidate("cubicle")]))
+        XCTAssertNil(fix("flxm", [candidate("film")]), "a four-letter word is not given two slips")
+    }
+
+    func testAThreeLetterWordKeepsItsSwapOnlyRuleForASoleCandidate() {
+        XCTAssertEqual(fix("adn", [candidate("and")]), "and")
+        XCTAssertNil(fix("wel", [candidate("well")]))
+        XCTAssertNil(fix("thw", [candidate("the")]))
+    }
+
+    func testTheStrictBoundaryStillNeedsASingleEditForASoleCandidate() {
+        XCTAssertEqual(fix("truely", [candidate("truly")], strict: true), "truly", "one deletion")
+        XCTAssertNil(fix("dissapear", [candidate("disappear")], strict: true), "a swap and a dropped letter: two edits")
+    }
+
+    // R18: a missing-apostrophe possessive ("oenologys" for "oenology's") has the typed word minus its "s" as the
+    // sole candidate; the looser budget would turn it into the plain word, so it keeps the strict budget.
+    func testAPossessiveWithoutItsApostropheKeepsTheStrictBudget() {
+        XCTAssertNil(fix("kwashiorkors", [candidate("kwashiorkor")]))
+        XCTAssertNil(fix("oenologys", [candidate("oenology")]))
+        XCTAssertNil(fix("OenologyS", [candidate("oenology")]))
+    }
+
+    func testTheLooserBudgetStillAppliesToWordsThatDoNotEndInTheDroppedS() {
+        XCTAssertEqual(fix("truely", [candidate("truly")]), "truly")
+        XCTAssertEqual(fix("tommorow", [candidate("tomorrow")]), "tomorrow")
+        XCTAssertEqual(fix("arguement", [candidate("argument")]), "argument")
+        XCTAssertEqual(fix("arguements", [candidate("arguments")]), "arguments", "ends in s, but the candidate keeps it")
+        XCTAssertEqual(fix("recieves", [candidate("receives")]), "receives")
     }
 }

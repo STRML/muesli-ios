@@ -40,6 +40,12 @@ struct TypingAutocorrectTuning: Sendable, Equatable {
     var budgetSixOrSeven = 1.0
     var budgetEightOrMore = 1.3
 
+    /// The same budgets when the checker offers exactly one candidate: with no runner-up to confuse it with, the
+    /// only risk is the edit itself ("truely" for "truly" costs 1.4). Three-letter words are unchanged.
+    var soleBudgetFourOrFive = 1.6
+    var soleBudgetSixOrSeven = 1.6
+    var soleBudgetEightOrMore = 2.2
+
     /// What a candidate's use costs it: per extra letter of prefix before the checker's completions list it, per
     /// place down that list, and when they never list it.
     var usageStepPerLetter = 0.1
@@ -58,13 +64,13 @@ struct TypingAutocorrectTuning: Sendable, Equatable {
     var margin = 0.6
     var marginPerExtraCost = 0.0
 
-    func budget(forWordLength length: Int) -> Double {
+    func budget(forWordLength length: Int, soleCandidate: Bool = false) -> Double {
         switch length {
         case ..<3: 0
         case 3: weights.transposition + weights.firstLetter
-        case 4...5: budgetFourOrFive
-        case 6...7: budgetSixOrSeven
-        default: budgetEightOrMore
+        case 4...5: soleCandidate ? soleBudgetFourOrFive : budgetFourOrFive
+        case 6...7: soleCandidate ? soleBudgetSixOrSeven : budgetSixOrSeven
+        default: soleCandidate ? soleBudgetEightOrMore : budgetEightOrMore
         }
     }
 
@@ -97,12 +103,19 @@ enum TypingAutocorrectRule {
         for typed: String, candidates: [TypingCandidate], costs: [Double], tuning: TypingAutocorrectTuning
     ) -> [Scored] {
         let word = typed.lowercased()
-        let limit = tuning.budget(forWordLength: word.count)
         return zip(candidates, costs).compactMap { candidate, cost in
+            let limit = tuning.budget(forWordLength: word.count, soleCandidate: isSoleCandidate(candidates, for: word))
             guard candidate.word != word, abs(candidate.word.count - word.count) <= 2, cost <= limit else { return nil }
             guard word.count != 3 || (isAdjacentSwap(word, candidate.word) && candidate.usage.first.map({ $0 >= 0 }) == true) else { return nil }
             return Scored(word: candidate.word, cost: cost, score: cost + prior(candidate, tuning: tuning))
         }.sorted { ($0.score, $0.word) < ($1.score, $1.word) }
+    }
+
+    /// The looser budget is for a pool of one, unless that one is the typed word minus its final "s": a possessive
+    /// typed without its apostrophe ("oenologys" for "oenology's") would be turned into the plain word.
+    private static func isSoleCandidate(_ candidates: [TypingCandidate], for word: String) -> Bool {
+        guard candidates.count == 1, let only = candidates.first else { return false }
+        return !(word.hasSuffix("s") && only.word == String(word.dropLast()))
     }
 
     /// The guess to type instead of `typed`, or nil. `strict` is for a word that may be the start of a host name
