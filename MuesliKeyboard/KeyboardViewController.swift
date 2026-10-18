@@ -18,6 +18,10 @@ final class KeyboardViewController: UIInputViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
 
+        // The Record key is this keyboard's dictation. UIKit documents that setting this disables the system
+        // dictation key under the keyboard, which when started here runs against ours and leaves both stuck.
+        hasDictationKey = true
+
         // Keep UIKit's system-created input view, but declare the keyboard's
         // settled height before its first presentation. The host temporarily
         // supplies full-screen and intermediate required heights on iOS 26;
