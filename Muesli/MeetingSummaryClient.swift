@@ -23,9 +23,12 @@ enum MeetingSummaryError: Error, LocalizedError {
 enum MeetingSummaryClient {
     static let openRouterAPIKeyAccount = "openrouter_api_key"
     static let customLLMAPIKeyAccount = "custom_llm_api_key"
+    static let anthropicAPIKeyAccount = "anthropic_api_key"
 
     private static let openRouterURL = URL(string: "https://openrouter.ai/api/v1/chat/completions")!
     private static let whamURL = URL(string: "https://chatgpt.com/backend-api/wham/responses")!
+    private static let anthropicURL = URL(string: "https://api.anthropic.com/v1/messages")!
+    private static let anthropicVersion = "2023-06-01"
     private static let maxOutputTokens = 2500
     private static let keychain = KeychainStore(service: "\(MuesliAppConstants.bundleIdentifier).summary")
 
@@ -66,25 +69,31 @@ enum MeetingSummaryClient {
         }
     }
 
-    /// One chat completion against the Custom LLM, for voice rewrite. A short timeout: the user is
+    static func storedAnthropicAPIKey() -> String {
+        (try? keychain.string(for: anthropicAPIKeyAccount)) ?? ""
+    }
+
+    static func saveAnthropicAPIKey(_ apiKey: String) throws {
+        let trimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            keychain.delete(account: anthropicAPIKeyAccount)
+        } else {
+            try keychain.set(trimmed, for: anthropicAPIKeyAccount)
+        }
+    }
+
+    /// One completion on the provider chosen in Settings, for voice rewrite (Quill). A short timeout: the user is
     /// waiting at the keyboard.
-    static func completeWithCustomLLM(system: String, user: String) async throws -> String {
-        guard let url = CustomLLMEndpoint.chatCompletionsURL(from: MuesliPreferences.customLLMBaseURL),
-              !MuesliPreferences.customLLMModel.isEmpty
-        else {
+    static func completeForQuill(system: String, user: String) async throws -> String {
+        guard MuesliPreferences.isVoiceRewriteConfigured else {
             throw VoiceRewriteError.notConfigured
         }
-        return try await callChatCompletions(
-            url: url,
-            backend: "Custom",
-            apiKey: storedCustomLLMAPIKey(),
-            model: MuesliPreferences.customLLMModel,
-            systemPrompt: system,
-            userPrompt: user,
+        return try await complete(
+            backend: MuesliPreferences.meetingSummaryBackend,
+            system: system,
+            user: user,
             maxTokens: 8_000,
-            extraHeaders: [:],
-            timeout: 30,
-            session: CustomLLMSession.shared
+            timeout: 30
         )
     }
 
@@ -94,61 +103,97 @@ enum MeetingSummaryClient {
         manualNotesToRetain: String? = nil
     ) async throws -> MeetingSummaryResult {
         let backend = MuesliPreferences.meetingSummaryBackend
+        guard MuesliPreferences.isProviderConfigured(backend) else {
+            throw MeetingSummaryError.missingCredentials(backend)
+        }
+        let notes = try await complete(
+            backend: backend,
+            system: baseSummaryInstructions,
+            user: summaryPrompt(
+                transcript: transcript,
+                meetingTitle: meetingTitle,
+                manualNotesToRetain: manualNotesToRetain
+            ),
+            maxTokens: maxOutputTokens,
+            timeout: 60
+        )
+        let title = (try? await complete(
+            backend: backend,
+            system: titleInstructions,
+            user: String(transcript.prefix(1500)),
+            maxTokens: 80,
+            timeout: 60
+        ))?.trimmingCharacters(in: .whitespacesAndNewlines.union(.init(charactersIn: "\""))) ?? meetingTitle
+        return MeetingSummaryResult(
+            notes: notes,
+            title: title,
+            backend: backend,
+            model: MuesliPreferences.model(for: backend)
+        )
+    }
+
+    /// The one place a request is routed: summaries, titles and Quill all go through the provider config here.
+    private static func complete(
+        backend: MeetingSummaryBackend,
+        system: String,
+        user: String,
+        maxTokens: Int,
+        timeout: TimeInterval
+    ) async throws -> String {
+        let model = MuesliPreferences.model(for: backend)
         switch backend {
         case .customLLM:
             guard let url = CustomLLMEndpoint.chatCompletionsURL(from: MuesliPreferences.customLLMBaseURL),
-                  !MuesliPreferences.customLLMModel.isEmpty
+                  !model.isEmpty
             else {
                 throw MeetingSummaryError.missingCredentials(.customLLM)
             }
-            let model = MuesliPreferences.customLLMModel
-            let notes = try await callChatCompletions(
+            return try await callChatCompletions(
                 url: url,
                 backend: "Custom",
                 apiKey: storedCustomLLMAPIKey(),
                 model: model,
-                systemPrompt: baseSummaryInstructions,
-                userPrompt: summaryPrompt(
-                    transcript: transcript,
-                    meetingTitle: meetingTitle,
-                    manualNotesToRetain: manualNotesToRetain
-                ),
-                maxTokens: maxOutputTokens,
+                systemPrompt: system,
+                userPrompt: user,
+                maxTokens: maxTokens,
                 extraHeaders: [:],
+                timeout: timeout,
                 session: CustomLLMSession.shared
             )
-            let title = (try? await callChatCompletions(
-                url: url,
-                backend: "Custom",
-                apiKey: storedCustomLLMAPIKey(),
-                model: model,
-                systemPrompt: titleInstructions,
-                userPrompt: String(transcript.prefix(1500)),
-                maxTokens: 80,
-                extraHeaders: [:],
-                session: CustomLLMSession.shared
-            ))?.trimmingCharacters(in: .whitespacesAndNewlines.union(.init(charactersIn: "\""))) ?? meetingTitle
-            return MeetingSummaryResult(notes: notes, title: title, backend: backend, model: model)
         case .openRouter:
-            let model = MuesliPreferences.openRouterModel
-            let notes = try await summarizeWithOpenRouter(
-                transcript: transcript,
-                meetingTitle: meetingTitle,
-                manualNotesToRetain: manualNotesToRetain,
-                model: model
+            let apiKey = storedOpenRouterAPIKey()
+            guard !apiKey.isEmpty else { throw MeetingSummaryError.missingCredentials(.openRouter) }
+            return try await callChatCompletions(
+                url: openRouterURL,
+                backend: "OpenRouter",
+                apiKey: apiKey,
+                model: model,
+                systemPrompt: system,
+                userPrompt: user,
+                maxTokens: maxTokens,
+                extraHeaders: ["X-OpenRouter-Title": "Muesli"],
+                timeout: timeout
             )
-            let title = await generateTitleWithOpenRouter(transcript: transcript, model: model) ?? meetingTitle
-            return MeetingSummaryResult(notes: notes, title: title, backend: backend, model: model)
+        case .anthropic:
+            let apiKey = storedAnthropicAPIKey()
+            guard !apiKey.isEmpty else { throw MeetingSummaryError.missingCredentials(.anthropic) }
+            return try await callAnthropic(
+                apiKey: apiKey,
+                model: model,
+                systemPrompt: system,
+                userPrompt: user,
+                maxTokens: maxTokens,
+                timeout: timeout
+            )
         case .chatGPT:
-            let model = MuesliPreferences.chatGPTModel
-            let notes = try await summarizeWithChatGPT(
-                transcript: transcript,
-                meetingTitle: meetingTitle,
-                manualNotesToRetain: manualNotesToRetain,
-                model: model
-            )
-            let title = await generateTitleWithChatGPT(transcript: transcript, model: model) ?? meetingTitle
-            return MeetingSummaryResult(notes: notes, title: title, backend: backend, model: model)
+            do {
+                let text = try await callWHAM(systemPrompt: system, userPrompt: user, model: model)
+                guard !text.isEmpty else { throw MeetingSummaryError.emptyResponse("ChatGPT") }
+                return text
+            } catch {
+                if error is MeetingSummaryError { throw error }
+                throw MeetingSummaryError.requestFailed(backend: "ChatGPT", underlying: error)
+            }
         }
     }
 
@@ -177,60 +222,6 @@ enum MeetingSummaryClient {
 
         \(transcript)
         """
-    }
-
-    private static func summarizeWithOpenRouter(
-        transcript: String,
-        meetingTitle: String,
-        manualNotesToRetain: String?,
-        model: String
-    ) async throws -> String {
-        let apiKey = storedOpenRouterAPIKey()
-        guard !apiKey.isEmpty else {
-            throw MeetingSummaryError.missingCredentials(.openRouter)
-        }
-        return try await callChatCompletions(
-            url: openRouterURL,
-            backend: "OpenRouter",
-            apiKey: apiKey,
-            model: model,
-            systemPrompt: baseSummaryInstructions,
-            userPrompt: summaryPrompt(
-                transcript: transcript,
-                meetingTitle: meetingTitle,
-                manualNotesToRetain: manualNotesToRetain
-            ),
-            maxTokens: maxOutputTokens,
-            extraHeaders: ["X-OpenRouter-Title": "Muesli"]
-        )
-    }
-
-    private static func summarizeWithChatGPT(
-        transcript: String,
-        meetingTitle: String,
-        manualNotesToRetain: String?,
-        model: String
-    ) async throws -> String {
-        do {
-            let text = try await callWHAM(
-                systemPrompt: baseSummaryInstructions,
-                userPrompt: summaryPrompt(
-                    transcript: transcript,
-                    meetingTitle: meetingTitle,
-                    manualNotesToRetain: manualNotesToRetain
-                ),
-                model: model
-            )
-            guard !text.isEmpty else {
-                throw MeetingSummaryError.emptyResponse("ChatGPT")
-            }
-            return text
-        } catch {
-            if error is MeetingSummaryError {
-                throw error
-            }
-            throw MeetingSummaryError.requestFailed(backend: "ChatGPT", underlying: error)
-        }
     }
 
     private static func summaryPrompt(
@@ -269,33 +260,6 @@ enum MeetingSummaryClient {
 
         \(header)\(separator)\(trimmedNotes)
         """
-    }
-
-    private static func generateTitleWithOpenRouter(transcript: String, model: String) async -> String? {
-        let apiKey = storedOpenRouterAPIKey()
-        guard !apiKey.isEmpty else { return nil }
-        return try? await callChatCompletions(
-            url: openRouterURL,
-            backend: "OpenRouter",
-            apiKey: apiKey,
-            model: model,
-            systemPrompt: titleInstructions,
-            userPrompt: String(transcript.prefix(1500)),
-            maxTokens: 80,
-            extraHeaders: ["X-OpenRouter-Title": "Muesli"]
-        )
-        .trimmingCharacters(in: .whitespacesAndNewlines.union(.init(charactersIn: "\"")))
-    }
-
-    private static func generateTitleWithChatGPT(transcript: String, model: String) async -> String? {
-        guard let text = try? await callWHAM(
-            systemPrompt: titleInstructions,
-            userPrompt: String(transcript.prefix(1500)),
-            model: model
-        ) else {
-            return nil
-        }
-        return text.trimmingCharacters(in: .whitespacesAndNewlines.union(.init(charactersIn: "\"")))
     }
 
     private static func callChatCompletions(
@@ -346,6 +310,53 @@ enum MeetingSummaryClient {
             }
             throw MeetingSummaryError.requestFailed(backend: backend, underlying: error)
         }
+    }
+
+    private static func callAnthropic(
+        apiKey: String,
+        model: String,
+        systemPrompt: String,
+        userPrompt: String,
+        maxTokens: Int,
+        timeout: TimeInterval
+    ) async throws -> String {
+        let body: [String: Any] = [
+            "model": model,
+            "max_tokens": maxTokens,
+            "system": systemPrompt,
+            "messages": [["role": "user", "content": userPrompt]],
+        ]
+        var request = URLRequest(url: anthropicURL)
+        request.httpMethod = "POST"
+        request.timeoutInterval = timeout
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        request.setValue(anthropicVersion, forHTTPHeaderField: "anthropic-version")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            try validateHTTPResponse(response, data: data, backend: "Anthropic")
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let text = extractAnthropicText(from: json),
+                  !text.isEmpty else {
+                throw MeetingSummaryError.emptyResponse("Anthropic")
+            }
+            return text
+        } catch {
+            if error is MeetingSummaryError { throw error }
+            throw MeetingSummaryError.requestFailed(backend: "Anthropic", underlying: error)
+        }
+    }
+
+    private static func extractAnthropicText(from payload: [String: Any]) -> String? {
+        let blocks = payload["content"] as? [[String: Any]] ?? []
+        let parts = blocks.compactMap { block -> String? in
+            guard (block["type"] as? String) == "text" else { return nil }
+            return block["text"] as? String
+        }
+        guard !parts.isEmpty else { return nil }
+        return parts.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func callWHAM(systemPrompt: String, userPrompt: String, model: String) async throws -> String {

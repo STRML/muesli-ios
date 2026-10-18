@@ -141,7 +141,41 @@ final class MuesliPreferencesTests: XCTestCase {
             MeetingSummaryBackend.chatGPT.cloudDestinationNote,
             "Meeting transcripts and your notes are sent to OpenAI through your ChatGPT account."
         )
+        XCTAssertEqual(
+            MeetingSummaryBackend.anthropic.cloudDestinationNote,
+            "Meeting transcripts and your notes are sent to Anthropic."
+        )
         XCTAssertNil(MeetingSummaryBackend.customLLM.cloudDestinationNote)
+    }
+
+    func testEveryHostedProviderSaysWhereQuillTextGoes() {
+        for backend in MeetingSummaryBackend.allCases where backend != .customLLM {
+            XCTAssertNotNil(backend.quillDestinationNote, "\(backend) sends Quill text away without saying so")
+        }
+        XCTAssertNil(MeetingSummaryBackend.customLLM.quillDestinationNote)
+    }
+
+    func testAnthropicModelDefaultsAndKeepsACustomChoice() {
+        let defaults = UserDefaults.standard
+        let original = defaults.object(forKey: MuesliPreferences.anthropicModelKey)
+        defer {
+            if let original { defaults.set(original, forKey: MuesliPreferences.anthropicModelKey) }
+            else { defaults.removeObject(forKey: MuesliPreferences.anthropicModelKey) }
+        }
+        defaults.removeObject(forKey: MuesliPreferences.anthropicModelKey)
+        XCTAssertEqual(MuesliPreferences.anthropicModel, MeetingSummaryBackend.defaultAnthropicModel)
+        XCTAssertEqual(MuesliPreferences.model(for: .anthropic), MeetingSummaryBackend.defaultAnthropicModel)
+        defaults.set("  claude-haiku-5-5 ", forKey: MuesliPreferences.anthropicModelKey)
+        XCTAssertEqual(MuesliPreferences.anthropicModel, "claude-haiku-5-5")
+        XCTAssertTrue(SummaryModelPreset.anthropicModels.contains { $0.id == MeetingSummaryBackend.defaultAnthropicModel })
+    }
+
+    func testAnthropicModelsAreReportedByPresetOnly() {
+        XCTAssertEqual(
+            SummaryModelPreset.telemetryIdentifier(for: "claude-haiku-5-5", backend: .anthropic),
+            "claude-haiku-5-5"
+        )
+        XCTAssertEqual(SummaryModelPreset.telemetryIdentifier(for: "my-private-model", backend: .anthropic), "custom")
     }
 
     func testOpenRouterModelReturnsCustomStoredValue() {

@@ -51,6 +51,7 @@ enum SettingsPresentation {
         case yourServer
         case openRouter
         case chatGPT
+        case anthropic
     }
 
     enum TypingFeature {
@@ -69,6 +70,7 @@ enum SettingsPresentation {
         case .customLLM: return yourServerConfigured ? .yourServer : .none
         case .openRouter: return .openRouter
         case .chatGPT: return .chatGPT
+        case .anthropic: return .anthropic
         }
     }
 
@@ -105,6 +107,7 @@ enum SettingsPresentation {
         case .yourServer: return "\(speech); summaries on your server"
         case .openRouter: return "\(speech); summaries sent to OpenRouter"
         case .chatGPT: return "\(speech); summaries sent to OpenAI"
+        case .anthropic: return "\(speech); summaries sent to Anthropic"
         }
     }
 
@@ -119,6 +122,7 @@ enum SettingsPresentation {
         case .yourServer: sentences.append("Meeting transcripts and notes go to your server for summaries.")
         case .openRouter: sentences.append("Meeting transcripts and notes go to OpenRouter for summaries.")
         case .chatGPT: sentences.append("Meeting transcripts and notes go to OpenAI through your ChatGPT account for summaries.")
+        case .anthropic: sentences.append("Meeting transcripts and notes go to Anthropic for summaries.")
         }
         sentences.append("Only text is eligible for private iCloud sync when you enable it.")
         return sentences.joined(separator: " ")
@@ -127,7 +131,7 @@ enum SettingsPresentation {
     // MARK: Why a row is unavailable
 
     static func summaryProviderDisabledReason(summariesEnabled: Bool) -> String? {
-        summariesEnabled ? nil : "Turn on Meeting Summaries (under Meetings) to use these."
+        summariesEnabled ? nil : "Meeting Summaries are off (under Meetings). This provider still powers Quill."
     }
 
     static func syncNowDisabledReason(syncEnabled: Bool) -> String? {

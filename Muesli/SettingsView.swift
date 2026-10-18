@@ -27,6 +27,7 @@ struct SettingsView: View {
     @AppStorage(MuesliPreferences.meetingSummaryBackendKey) var meetingSummaryBackend = MeetingSummaryBackend.defaultBackend.rawValue
     @AppStorage(MuesliPreferences.openRouterModelKey) var openRouterModel = MeetingSummaryBackend.defaultOpenRouterModel
     @AppStorage(MuesliPreferences.chatGPTModelKey) var chatGPTModel = MeetingSummaryBackend.defaultChatGPTModel
+    @AppStorage(MuesliPreferences.anthropicModelKey) var anthropicModel = MeetingSummaryBackend.defaultAnthropicModel
     @AppStorage(MuesliPreferences.customLLMBaseURLKey) var customLLMBaseURL = ""
     @AppStorage(MuesliPreferences.customLLMModelKey) var customLLMModel = ""
     @AppStorage(MuesliPreferences.remoteProcessingEnabledKey) var remoteProcessingEnabled = false
@@ -36,6 +37,7 @@ struct SettingsView: View {
     @State var keyboardSetupStatus = KeyboardSetupStatus.unknown
     @State var systemDictationEnabled = false
     @State var openRouterAPIKey = ""
+    @State var anthropicAPIKey = ""
     @State var summaryStatusText: String?
     @State var chatGPTSignedIn = false
     @State var appleSyncSnapshot = AppleSyncAccountSnapshot.checking
@@ -103,6 +105,9 @@ struct SettingsView: View {
                 }
                 .onChange(of: openRouterAPIKey) { _, newValue in
                     saveOpenRouterAPIKey(newValue)
+                }
+                .onChange(of: anthropicAPIKey) { _, newValue in
+                    saveAnthropicAPIKey(newValue)
                 }
                 .onChange(of: customLLMAPIKey) { _, newValue in
                     saveCustomLLMAPIKey(newValue)

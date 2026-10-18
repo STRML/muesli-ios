@@ -3,49 +3,20 @@ import SwiftUI
 extension SettingsView {
     var aiServicesSettings: some View {
         VStack(alignment: .leading, spacing: MuesliTheme.spacing16) {
-            SettingsGroup(title: "Your server") {
-                Text("Select text, or put the cursor after it, tap Quill on the Muesli keyboard and say what to change. Quill rewrites the selection, or the last paragraph before the cursor. Undo restores it.")
+            SettingsGroup(title: "Provider") {
+                Text("Meeting summaries and Quill use the same provider. Select text, or put the cursor after it, tap Quill on the Muesli keyboard and say what to change. Quill rewrites the selection, or the last paragraph before the cursor. Undo restores it.")
                     .font(MuesliTheme.caption())
                     .foregroundStyle(MuesliTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Divider().overlay(MuesliTheme.surfaceBorder)
-
-                SettingsRow(
-                    icon: "server.rack",
-                    title: "Writing model source",
-                    value: "Custom LLM",
-                    iconColor: isCustomLLMReady ? MuesliTheme.success : MuesliTheme.accent
-                )
-
-                if selectedSummaryBackend == .customLLM {
-                    Text(remoteProcessingEnabled
-                        ? "Any OpenAI-compatible server, for example your own over Tailscale. Notes, titles and dictation recordings are sent only to this address. Quill uses the same server."
-                        : "Any OpenAI-compatible server, for example your own over Tailscale. Notes and titles are sent only to this address. Quill uses the same server.")
-                        .font(MuesliTheme.caption())
-                        .foregroundStyle(MuesliTheme.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                Picker("Provider", selection: $meetingSummaryBackend) {
+                    ForEach(MeetingSummaryBackend.allCases) { backend in
+                        Text(backend.label).tag(backend.rawValue)
+                    }
                 }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("settings.provider")
 
-                customLLMFields
-
-                if selectedSummaryBackend == .customLLM,
-                   RemoteTranscriptionPolicy.showsCheckbox(
-                       endpointConfigured: CustomLLMEndpoint.transcriptionsURL(from: customLLMBaseURL) != nil
-                   ) {
-                    // Outside the summaries switch: it is about dictation, not notes.
-                    RemoteProcessingRow(isOn: $remoteProcessingEnabled, baseURL: customLLMBaseURL, apiKey: customLLMAPIKey)
-                }
-
-                if !isCustomLLMReady {
-                    Text("Quill stays off until a server URL and model are set.")
-                        .font(MuesliTheme.caption())
-                        .foregroundStyle(MuesliTheme.textTertiary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-
-            SettingsGroup(title: "Summary provider") {
                 if let reason = SettingsPresentation.summaryProviderDisabledReason(summariesEnabled: meetingSummariesEnabled) {
                     Text(reason)
                         .font(MuesliTheme.caption())
@@ -54,72 +25,28 @@ extension SettingsView {
                         .accessibilityIdentifier("settings.summaryProvider.disabledReason")
                 }
 
-                Picker("Summary Backend", selection: $meetingSummaryBackend) {
-                    ForEach(MeetingSummaryBackend.allCases) { backend in
-                        Text(backend.label).tag(backend.rawValue)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .disabled(!meetingSummariesEnabled)
-
-                if let note = selectedSummaryBackend.cloudDestinationNote {
+                if meetingSummariesEnabled, let note = selectedSummaryBackend.cloudDestinationNote {
                     Text(note)
                         .font(MuesliTheme.caption())
                         .foregroundStyle(MuesliTheme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                if selectedSummaryBackend == .openRouter {
-                    SettingsTextFieldRow(
-                        icon: "key",
-                        title: "OpenRouter API Key",
-                        placeholder: "sk-or-...",
-                        text: $openRouterAPIKey,
-                        isSecure: true
-                    )
-                    .disabled(!meetingSummariesEnabled)
+                if let note = selectedSummaryBackend.quillDestinationNote {
+                    Text(note)
+                        .font(MuesliTheme.caption())
+                        .foregroundStyle(MuesliTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
-                    SettingsModelPickerRow(
-                        icon: "cpu",
-                        title: "OpenRouter Model",
-                        selection: $openRouterModel,
-                        presets: SummaryModelPreset.openRouterModels
-                    )
-                    .disabled(!meetingSummariesEnabled)
-                } else if selectedSummaryBackend == .chatGPT {
-                    SettingsRow(
-                        icon: "person.crop.circle.badge.checkmark",
-                        title: "ChatGPT",
-                        value: chatGPTSignedIn ? "Signed in" : "Not signed in",
-                        iconColor: chatGPTSignedIn ? MuesliTheme.success : MuesliTheme.accent,
-                        valueColor: chatGPTSignedIn ? MuesliTheme.success : MuesliTheme.textTertiary
-                    )
+                providerFields
 
-                    Button(action: toggleChatGPTSignIn) {
-                        Label(
-                            chatGPTSignedIn ? "Signed in · Sign Out" : "Sign In with ChatGPT",
-                            systemImage: chatGPTSignedIn ? "checkmark.circle.fill" : "person.crop.circle"
-                        )
-                            .font(MuesliTheme.headline())
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 44)
-                            .foregroundStyle(.white)
-                            .background(chatGPTSignedIn ? MuesliTheme.success : MuesliTheme.accent)
-                            .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall))
-                            .contentShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall))
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!meetingSummariesEnabled)
-
-                    SettingsModelPickerRow(
-                        icon: "cpu",
-                        title: "ChatGPT Model",
-                        selection: $chatGPTModel,
-                        presets: SummaryModelPreset.chatGPTModels,
-                        preserveCustomValue: false,
-                        fallbackSelection: MeetingSummaryBackend.defaultChatGPTModel
-                    )
-                    .disabled(!meetingSummariesEnabled)
+                if !isSelectedProviderReady {
+                    Text("Quill stays off until \(selectedSummaryBackend.setupRequirement).")
+                        .font(MuesliTheme.caption())
+                        .foregroundStyle(MuesliTheme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("settings.provider.quillOff")
                 }
             }
 
@@ -129,6 +56,105 @@ extension SettingsView {
                     .foregroundStyle(MuesliTheme.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
+
+    @ViewBuilder
+    var providerFields: some View {
+        switch selectedSummaryBackend {
+        case .openRouter:
+            SettingsTextFieldRow(
+                icon: "key",
+                title: "OpenRouter API Key",
+                placeholder: "sk-or-...",
+                text: $openRouterAPIKey,
+                isSecure: true
+            )
+            SettingsModelPickerRow(
+                icon: "cpu",
+                title: "OpenRouter Model",
+                selection: $openRouterModel,
+                presets: SummaryModelPreset.openRouterModels
+            )
+        case .anthropic:
+            SettingsTextFieldRow(
+                icon: "key",
+                title: "Anthropic API Key",
+                placeholder: "sk-ant-...",
+                text: $anthropicAPIKey,
+                isSecure: true
+            )
+            SettingsModelPickerRow(
+                icon: "cpu",
+                title: "Anthropic Model",
+                selection: $anthropicModel,
+                presets: SummaryModelPreset.anthropicModels
+            )
+        case .chatGPT:
+            chatGPTFields
+        case .customLLM:
+            Text(remoteProcessingEnabled
+                ? "Any OpenAI-compatible server, for example your own over Tailscale. Notes, titles, Quill rewrites and dictation recordings are sent only to this address."
+                : "Any OpenAI-compatible server, for example your own over Tailscale. Notes, titles and Quill rewrites are sent only to this address.")
+                .font(MuesliTheme.caption())
+                .foregroundStyle(MuesliTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            customLLMFields
+
+            if RemoteTranscriptionPolicy.showsCheckbox(
+                endpointConfigured: CustomLLMEndpoint.transcriptionsURL(from: customLLMBaseURL) != nil
+            ) {
+                // About dictation, not notes or Quill.
+                RemoteProcessingRow(isOn: $remoteProcessingEnabled, baseURL: customLLMBaseURL, apiKey: customLLMAPIKey)
+            }
+        }
+    }
+
+    @ViewBuilder
+    var chatGPTFields: some View {
+        SettingsRow(
+            icon: "person.crop.circle.badge.checkmark",
+            title: "ChatGPT",
+            value: chatGPTSignedIn ? "Signed in" : "Not signed in",
+            iconColor: chatGPTSignedIn ? MuesliTheme.success : MuesliTheme.accent,
+            valueColor: chatGPTSignedIn ? MuesliTheme.success : MuesliTheme.textTertiary
+        )
+
+        Button(action: toggleChatGPTSignIn) {
+            Label(
+                chatGPTSignedIn ? "Signed in · Sign Out" : "Sign In with ChatGPT",
+                systemImage: chatGPTSignedIn ? "checkmark.circle.fill" : "person.crop.circle"
+            )
+                .font(MuesliTheme.headline())
+                .frame(maxWidth: .infinity)
+                .frame(height: 44)
+                .foregroundStyle(.white)
+                .background(chatGPTSignedIn ? MuesliTheme.success : MuesliTheme.accent)
+                .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall))
+                .contentShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall))
+        }
+        .buttonStyle(.plain)
+
+        SettingsModelPickerRow(
+            icon: "cpu",
+            title: "ChatGPT Model",
+            selection: $chatGPTModel,
+            presets: SummaryModelPreset.chatGPTModels,
+            preserveCustomValue: false,
+            fallbackSelection: MeetingSummaryBackend.defaultChatGPTModel
+        )
+    }
+
+    /// Whether the chosen provider can answer, from what this screen shows, so the line under the fields updates as
+    /// the user types a key or signs in.
+    var isSelectedProviderReady: Bool {
+        func filled(_ value: String) -> Bool { !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        return switch selectedSummaryBackend {
+        case .customLLM: isCustomLLMReady
+        case .openRouter: filled(openRouterAPIKey)
+        case .anthropic: filled(anthropicAPIKey)
+        case .chatGPT: chatGPTSignedIn
         }
     }
 
@@ -164,6 +190,7 @@ extension SettingsView {
 
     func refreshSummarySettings() {
         openRouterAPIKey = MeetingSummaryClient.storedOpenRouterAPIKey()
+        anthropicAPIKey = MeetingSummaryClient.storedAnthropicAPIKey()
         customLLMAPIKey = MeetingSummaryClient.storedCustomLLMAPIKey()
         chatGPTSignedIn = ChatGPTAuthManager.shared.isAuthenticated
     }
@@ -174,6 +201,17 @@ extension SettingsView {
             summaryStatusText = apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 ? "OpenRouter key cleared."
                 : "OpenRouter key saved in Keychain."
+        } catch {
+            summaryStatusText = error.localizedDescription
+        }
+    }
+
+    func saveAnthropicAPIKey(_ apiKey: String) {
+        do {
+            try MeetingSummaryClient.saveAnthropicAPIKey(apiKey)
+            summaryStatusText = apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? "Anthropic key cleared."
+                : "Anthropic key saved in Keychain."
         } catch {
             summaryStatusText = error.localizedDescription
         }

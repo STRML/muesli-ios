@@ -87,6 +87,18 @@ final class SettingsPresentationTests: XCTestCase {
         XCTAssertTrue(detail(.yourServer).contains("your server for summaries"), detail(.yourServer))
         XCTAssertTrue(detail(.openRouter).contains("OpenRouter for summaries"), detail(.openRouter))
         XCTAssertTrue(detail(.chatGPT).contains("OpenAI through your ChatGPT account for summaries"), detail(.chatGPT))
+        XCTAssertTrue(detail(.anthropic).contains("Anthropic for summaries"), detail(.anthropic))
+    }
+
+    func testAnthropicIsASummaryDestinationAndSaysSo() {
+        XCTAssertEqual(
+            SettingsPresentation.summaryDestination(summariesEnabled: true, backend: .anthropic, yourServerConfigured: false),
+            .anthropic
+        )
+        XCTAssertEqual(
+            SettingsPresentation.aboutProcessing(remoteProcessingActive: false, summaryDestination: .anthropic),
+            "On device; summaries sent to Anthropic"
+        )
     }
 
     func testRemoteProcessingActiveFollowsTheRealPolicy() {
@@ -103,7 +115,7 @@ final class SettingsPresentationTests: XCTestCase {
     func testSummaryProviderReasonAppearsOnlyWhileSummariesAreOff() {
         XCTAssertEqual(
             SettingsPresentation.summaryProviderDisabledReason(summariesEnabled: false),
-            "Turn on Meeting Summaries (under Meetings) to use these."
+            "Meeting Summaries are off (under Meetings). This provider still powers Quill."
         )
         XCTAssertNil(SettingsPresentation.summaryProviderDisabledReason(summariesEnabled: true))
     }

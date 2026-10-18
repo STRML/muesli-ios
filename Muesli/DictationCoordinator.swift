@@ -107,7 +107,7 @@ final class DictationCoordinator {
     private var keyboardWaveformLevelThrottle = MuesliWaveformLevelThrottle()
     private var keyboardRuntimeStatusPublishPolicy = KeyboardRuntimeStatusPublishPolicy()
     @ObservationIgnored private let voiceRewriteService = VoiceRewriteService { system, user in
-        try await MeetingSummaryClient.completeWithCustomLLM(system: system, user: user)
+        try await MeetingSummaryClient.completeForQuill(system: system, user: user)
     }
     private let keyboardRuntimeStatusQueue = DispatchQueue(
         label: "com.samuelreed.muesli.keyboard-runtime-status",
@@ -7426,11 +7426,7 @@ final class DictationCoordinator {
                 summaryState = .failed
                 let backend = MuesliPreferences.meetingSummaryBackend
                 summaryBackend = backend.rawValue
-                summaryModel = switch backend {
-                case .chatGPT: MuesliPreferences.chatGPTModel
-                case .customLLM: MuesliPreferences.customLLMModel
-                case .openRouter: MuesliPreferences.openRouterModel
-                }
+                summaryModel = MuesliPreferences.model(for: backend)
                 summaryErrorMessage = error.localizedDescription
                 AppTelemetry.failure(
                     "meeting_summary_failed",
