@@ -3,6 +3,8 @@ import SwiftUI
 struct KeyboardRootView: View {
     /// The one height of the keyboard, for the Type and the Dictate page alike (see `TypingMetrics`).
     static let preferredHeight = CGFloat(TypingMetrics.preferredHeight)
+    /// How far the surface paints above `preferredHeight` when the host region is taller.
+    static let surfaceOverscan: CGFloat = 32
 
     /// Three slots that never move: a side button, the primary pill, a side button. Only their content changes.
     private static let controlHeight: CGFloat = 64
@@ -34,7 +36,9 @@ struct KeyboardRootView: View {
                 transaction.animation = nil
             }
         }
-        .background(
+        .background(alignment: .bottom) {
+            // The surface reaches a little above the envelope, so a host region a few points taller than the
+            // keyboard shows Muesli's color at its top edge and not iOS's own backdrop as a second gray band.
             LinearGradient(
                 colors: [
                     MuesliTheme.backgroundRaised.opacity(0.98),
@@ -43,10 +47,12 @@ struct KeyboardRootView: View {
                 startPoint: .top,
                 endPoint: .bottom
             )
-        )
+            .frame(height: Self.preferredHeight + Self.surfaceOverscan)
+        }
         // iOS temporarily hosts third-party keyboards at full-screen and at
         // an intermediate height. Keep those extra host regions transparent;
-        // only the final keyboard envelope should paint Muesli's surface.
+        // only the final keyboard envelope (plus the small overscan above)
+        // should paint Muesli's surface.
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
     }
 
