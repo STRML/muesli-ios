@@ -46,6 +46,14 @@ extension SettingsView {
             }
 
             SettingsGroup(title: "Summary provider") {
+                if let reason = SettingsPresentation.summaryProviderDisabledReason(summariesEnabled: meetingSummariesEnabled) {
+                    Text(reason)
+                        .font(MuesliTheme.caption())
+                        .foregroundStyle(MuesliTheme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("settings.summaryProvider.disabledReason")
+                }
+
                 Picker("Summary Backend", selection: $meetingSummaryBackend) {
                     ForEach(MeetingSummaryBackend.allCases) { backend in
                         Text(backend.label).tag(backend.rawValue)
@@ -243,6 +251,8 @@ struct RemoteProcessingRow: View {
                     Button("Test") { Task { await runTest() } }
                         .font(MuesliTheme.headline())
                         .foregroundStyle(MuesliTheme.accent)
+                        .frame(minWidth: SettingsAccessibility.minimumTapTarget, minHeight: SettingsAccessibility.minimumTapTarget)
+                        .contentShape(Rectangle())
                         .accessibilityIdentifier("settings.remoteProcessing.test")
                 }
             }
@@ -287,6 +297,7 @@ struct CustomLLMModelRow: View {
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(MuesliTheme.accent)
                     .frame(width: 22)
+                    .accessibilityHidden(true)
                 Text("Model")
                     .font(MuesliTheme.headline())
                     .foregroundStyle(MuesliTheme.textPrimary)

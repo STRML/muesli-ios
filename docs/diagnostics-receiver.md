@@ -88,8 +88,8 @@ warning and sends nothing until you acknowledge that host.
 
 1. Open Settings > Privacy and Sync > Diagnostics.
 2. Set **Diagnostics server** to `https://my-mac.tail1234.ts.net:8444/v1`. The app adds `/diagnostics`, so it posts to
-   `/v1/diagnostics`. A pasted full address ending in `/diagnostics` works too. Leave the field empty to use the AI
-   Summaries server instead.
+   `/v1/diagnostics`. A pasted full address ending in `/diagnostics` works too.
+   Leave the field empty to use the AI Services server instead.
 3. The API key is the one under Settings > AI Services. Put the key from step 2 there.
 4. Turn on **Send diagnostics to my server**, then tap **Send now**. The server holds events from then on.
 5. Confirm from the machine:

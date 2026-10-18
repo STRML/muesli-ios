@@ -241,7 +241,7 @@ out of the field and the dictation continues strip-only (`KeyboardDictationSurfa
 
 ## Live typing
 
-With "Type live into the field" on (Settings, Keyboard; on by default; stored as
+With "Live typing" on (Settings, Keyboard; on by default; stored as
 `muesli.keyboard.liveTyping` and read by the keyboard from `KeyboardTypingSettings.liveTyping`
 in the shared store), the streaming words appear in the host field as the user speaks,
 the way system dictation does, and the final text replaces them.

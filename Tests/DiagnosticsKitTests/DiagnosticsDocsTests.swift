@@ -68,6 +68,28 @@ final class DiagnosticsDocsTests: XCTestCase {
         XCTAssertTrue(DiagnosticsShippingCopy.noEndpoint.contains(DiagnosticsShippingCopy.receiverGuideTitle))
     }
 
+    /// The Settings section that holds the server is named "AI Services". The docs wrap lines, so a stale
+    /// "AI\nSummaries" counts too.
+    func testNoDocOrCopyCallsTheServerSectionAISummaries() throws {
+        let stale = try NSRegularExpression(pattern: "AI\\s+Summaries")
+        let texts = [
+            try read("docs/diagnostics-receiver.md"),
+            try read("docs/diagnostics-shipping.md"),
+            try read("README.md"),
+            try read("Shared/RemoteTranscription/DiagnosticsServerResolver.swift"),
+            DiagnosticsShippingCopy.toggleDetail,
+            DiagnosticsShippingCopy.noEndpoint,
+            DiagnosticsShippingCopy.serverFieldPlaceholder,
+            DiagnosticsShippingCopy.keyNote,
+            DiagnosticsShippingCopy.fromAISummaries,
+            DiagnosticsShippingCopy.keyRejected,
+        ]
+        for text in texts {
+            XCTAssertNil(stale.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)), "stale section name in: \(text.prefix(80))")
+        }
+        XCTAssertTrue(try read("docs/diagnostics-receiver.md").contains("AI Services server"))
+    }
+
     func testTheREADMEAndThePrivacyManifestMentionDiagnosticsShipping() throws {
         XCTAssertTrue(try read("README.md").contains("docs/diagnostics-shipping.md"))
         let manifest = try read("Muesli/PrivacyInfo.xcprivacy")

@@ -393,6 +393,36 @@ final class MuesliSmokeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["SQLite"].exists)
     }
 
+    func testSettingsToggleRowIsOneVoiceOverElementThatStillToggles() {
+        let app = launchApp()
+
+        XCTAssertTrue(app.buttons["tab.settings"].waitForExistence(timeout: 8))
+        app.buttons["tab.settings"].tap()
+        let dictionary = app.scrollViews.staticTexts["Dictionary"].firstMatch
+        for _ in 0..<4 where !dictionary.exists || !dictionary.isHittable {
+            app.swipeUp()
+        }
+        dictionary.tap()
+
+        // One element for the row: it spans the whole row and its label is the title and the detail. The switch
+        // inside it still reports and flips the value.
+        let title = "Remove Filler Words"
+        let detail = "Remove common speech fillers before voice notes and meeting transcripts are saved."
+        let row = app.switches["\(title). \(detail)"].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        XCTAssertGreaterThan(row.frame.width, 250, "the combined element covers the row, not just the switch")
+        let before = row.value as? String
+        let control = app.switches.matching(NSPredicate(format: "label == %@", "\(title). \(detail)")).element(boundBy: 1)
+        XCTAssertTrue(control.exists)
+        control.tap()
+        XCTAssertNotEqual(row.value as? String, before, "tapping the switch did not flip the row's value")
+
+        // The back control says where it goes and is a full-size tap target.
+        let back = app.buttons["Back to Settings"]
+        XCTAssertTrue(back.exists)
+        XCTAssertGreaterThanOrEqual(back.frame.height, 44)
+    }
+
     func testModelsSettingsPrepareAutomaticallyWithoutPersistentPrepareButton() {
         let app = launchApp()
 

@@ -32,7 +32,7 @@ struct SettingsView: View {
     @State var customLLMAPIKey = ""
     @AppStorage(MuesliPreferences.meetingTemplateKey) var meetingTemplate = MeetingTemplatePreset.general.rawValue
     @AppStorage(MuesliPreferences.iCloudSyncEnabledKey) var iCloudSyncEnabled = false
-    @State var keyboardStatusText = "Unknown"
+    @State var keyboardSetupStatus = KeyboardSetupStatus.unknown
     @State var openRouterAPIKey = ""
     @State var summaryStatusText: String?
     @State var chatGPTSignedIn = false
@@ -161,7 +161,10 @@ struct SettingsView: View {
                     .frame(width: 28)
                     .contentShape(Rectangle())
                     .gesture(edgeBackSwipe)
+                    .accessibilityHidden(true)
             }
+            // VoiceOver's two-finger scrub goes back, like the edge swipe does for touch.
+            .accessibilityAction(.escape, closeSettingsSection)
         } else {
             ScrollView {
                 VStack(alignment: .leading, spacing: MuesliTheme.spacing16) {
@@ -182,6 +185,12 @@ struct SettingsView: View {
                 }
                 .padding(MuesliTheme.spacing20)
             }
+        }
+    }
+
+    func closeSettingsSection() {
+        withAnimation(.snappy(duration: 0.22)) {
+            selectedSettingsSection = nil
         }
     }
 
@@ -225,8 +234,13 @@ struct SettingsView: View {
                 Label("Settings", systemImage: "chevron.left")
                     .font(MuesliTheme.headline())
                     .foregroundStyle(MuesliTheme.accent)
+                    .frame(minHeight: SettingsAccessibility.minimumTapTarget, alignment: .leading)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Back to Settings")
+            .accessibilityHint("Returns to the list of settings sections")
+            .accessibilityIdentifier("settings.back")
 
             VStack(alignment: .leading, spacing: MuesliTheme.spacing4) {
                 Text(section.title)

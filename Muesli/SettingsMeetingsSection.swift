@@ -46,6 +46,7 @@ struct SettingsMeetingTemplatePicker: View {
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(MuesliTheme.accent)
                     .frame(width: 22)
+                    .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: MuesliTheme.spacing4) {
                     Text("Meeting Template")
                         .font(MuesliTheme.headline())
@@ -53,6 +54,10 @@ struct SettingsMeetingTemplatePicker: View {
                     Text(selectedTemplate.detail)
                         .font(MuesliTheme.caption())
                         .foregroundStyle(MuesliTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(SettingsPresentation.meetingTemplateNote)
+                        .font(MuesliTheme.caption())
+                        .foregroundStyle(MuesliTheme.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }

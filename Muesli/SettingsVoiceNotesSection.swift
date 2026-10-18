@@ -2,34 +2,34 @@ import SwiftUI
 
 extension SettingsView {
     var voiceNoteSettings: some View {
-        MuesliSurface {
-            VStack(alignment: .leading, spacing: MuesliTheme.spacing12) {
-                SettingsMicrophonePicker(selection: $microphonePreference)
+        SettingsGroup(
+            title: "Recording and long notes",
+            footer: "The microphone applies to your next dictation or recording."
+        ) {
+            SettingsMicrophonePicker(selection: $microphonePreference)
+            Divider().overlay(MuesliTheme.surfaceBorder)
+            SettingsToggleRow(
+                icon: "waveform.circle",
+                title: "Save voice note audio",
+                detail: "Includes keyboard dictations. Audio stays on this iPhone and never syncs.",
+                isOn: $keepDictationAudioRecordings
+            )
+            Divider().overlay(MuesliTheme.surfaceBorder)
+            LongVoiceNoteSettingsRow(
+                isEnabled: $longVoiceNoteModeEnabled,
+                thresholdSeconds: $longVoiceNoteThresholdSeconds
+            )
+            if #available(iOS 18.0, *), ActionButtonHardware.isSupported {
                 Divider().overlay(MuesliTheme.surfaceBorder)
-                SettingsToggleRow(
-                    icon: "waveform.circle",
-                    title: "Save Voice Note Audio",
-                    detail: "Keep original voice note audio locally on this iPhone for playback and troubleshooting. Audio does not sync.",
-                    isOn: $keepDictationAudioRecordings
-                )
-                Divider().overlay(MuesliTheme.surfaceBorder)
-                LongVoiceNoteSettingsRow(
-                    isEnabled: $longVoiceNoteModeEnabled,
-                    thresholdSeconds: $longVoiceNoteThresholdSeconds
-                )
-                if #available(iOS 18.0, *), ActionButtonHardware.isSupported {
-                    Divider().overlay(MuesliTheme.surfaceBorder)
-                    SettingsNavigationRow(
-                        icon: "button.programmable",
-                        title: "Action Button",
-                        detail: "Set up or reconfigure dictation and meeting-note shortcuts."
-                    ) {
-                        isActionButtonOnboardingPresented = true
-                        AppTelemetry.signal("action_button_settings_opened")
-                    }
+                SettingsNavigationRow(
+                    icon: "button.programmable",
+                    title: "Action Button",
+                    detail: "Set up or reconfigure dictation and meeting-note shortcuts."
+                ) {
+                    isActionButtonOnboardingPresented = true
+                    AppTelemetry.signal("action_button_settings_opened")
                 }
             }
-            .padding(MuesliTheme.spacing16)
         }
     }
 }
@@ -46,14 +46,14 @@ struct LongVoiceNoteSettingsRow: View {
         VStack(alignment: .leading, spacing: MuesliTheme.spacing12) {
             SettingsToggleRow(
                 icon: "waveform.path.ecg",
-                title: "Long Voice Note Mode",
+                title: "Long Voice Notes",
                 detail: "Open Long Voice Note after longer recordings.",
                 isOn: $isEnabled
             )
 
             if isEnabled {
                 HStack(spacing: MuesliTheme.spacing12) {
-                    Text("Switch after")
+                    Text("Open after")
                         .font(MuesliTheme.captionMedium())
                         .foregroundStyle(MuesliTheme.textSecondary)
 
@@ -71,6 +71,7 @@ struct LongVoiceNoteSettingsRow: View {
                             Text(MuesliPreferences.longVoiceNoteThresholdLabel(thresholdSeconds))
                             Image(systemName: "chevron.up.chevron.down")
                                 .font(.system(size: 11, weight: .semibold))
+                                .accessibilityHidden(true)
                         }
                         .font(MuesliTheme.captionMedium())
                         .foregroundStyle(MuesliTheme.accent)
@@ -157,24 +158,7 @@ struct SettingsMicrophonePicker: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: MuesliTheme.spacing12) {
-            Image(systemName: "mic")
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(MuesliTheme.accent)
-                .frame(width: 22)
-
-            VStack(alignment: .leading, spacing: MuesliTheme.spacing4) {
-                Text("Microphone")
-                    .font(MuesliTheme.headline())
-                    .foregroundStyle(MuesliTheme.textPrimary)
-                Text(preference.detail)
-                    .font(MuesliTheme.caption())
-                    .foregroundStyle(MuesliTheme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer(minLength: MuesliTheme.spacing12)
-
+        SettingsAccessoryRow(icon: "mic", title: "Microphone", detail: preference.detail) {
             Picker("Microphone", selection: $selection) {
                 ForEach(availableOptions) { option in
                     Text(option.label).tag(option.rawValue)

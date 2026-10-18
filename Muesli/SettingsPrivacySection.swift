@@ -36,11 +36,19 @@ extension SettingsView {
                 Label(SettingsSection.syncPrivacy.title, systemImage: "chevron.left")
                     .font(MuesliTheme.headline())
                     .foregroundStyle(MuesliTheme.accent)
+                    .frame(minHeight: SettingsAccessibility.minimumTapTarget, alignment: .leading)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Back to \(SettingsSection.syncPrivacy.title)")
 
             DiagnosticsShippingSettings()
             CopyKeyboardDiagnosticsRow()
+        }
+        .accessibilityAction(.escape) {
+            withAnimation(.snappy(duration: 0.22)) {
+                isDiagnosticsScreenPresented = false
+            }
         }
     }
 
@@ -91,6 +99,14 @@ extension SettingsView {
                 }
                 .buttonStyle(.plain)
                 .disabled(!iCloudSyncEnabled)
+
+                if let reason = SettingsPresentation.syncNowDisabledReason(syncEnabled: iCloudSyncEnabled) {
+                    Text(reason)
+                        .font(MuesliTheme.caption())
+                        .foregroundStyle(MuesliTheme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("settings.syncNow.disabledReason")
+                }
 
                 Text(appleSyncStatusText ?? appleSyncSnapshot.detail)
                     .font(MuesliTheme.caption())
