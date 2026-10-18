@@ -95,13 +95,13 @@ struct LiveTypingSession: Sendable {
         var keptWords: Int
         /// Words of the stream used up when nothing better is known.
         var consumedWords: Int
-        /// The deleted word that closes the used-up part of the stream, folded. When a revised partial moves it, it
-        /// is found again instead of trusting a word count.
-        var deleted: String
+        /// The stream's words before the deleted one, folded. A revised partial may add, drop or change words, so
+        /// these are matched in order inside it, and the word right after the last match is the deleted one.
+        var prefixWords: [String]
     }
     private var edit: Edit?
     /// Words in the newest partial, before any edit is applied.
-    private var rawWordCount = 0
+    private var rawWords: [String] = []
     /// How far a final may differ in word count from the last partial before the keyboard stops trusting its word
     /// positions (a final that turns "twenty five" into "25" shifts them).
     private static let maxWordDrift = 2
@@ -146,7 +146,7 @@ struct LiveTypingSession: Sendable {
     mutating func partial(_ raw: String) -> [LiveTypingCommand] {
         let text = LiveTypingText.trimmedPartial(raw)
         guard !text.isEmpty else { return [] }
-        rawWordCount = LiveTypingText.wordCount(text)
+        rawWords = LiveTypingText.foldedWords(text)
         switch phase {
         case .awaitingFirstPartial:
             marked = text
@@ -168,26 +168,32 @@ struct LiveTypingSession: Sendable {
         return LiveTypingText.joined(edit.kept, LiveTypingText.text(of: raw, afterWords: consumedWords(of: edit, in: raw)))
     }
 
-    /// How many words of `raw` the edit has used up. A revision that adds or drops words before the deleted word
-    /// would shift a plain count, and bring the deleted word back, so the deleted word is looked for first.
+    /// How many words of `raw` the edit has used up. A revised partial can add, drop or change words anywhere, so a
+    /// plain count would land on the wrong word and bring the deleted one back. The words that came before the
+    /// deleted one are found in order instead, and the word right after the last of them is the deleted one,
+    /// whatever the engine now thinks it is. If they cannot be found, the count from the time of the edit stands.
     private func consumedWords(of edit: Edit, in raw: String) -> Int {
-        let count = LiveTypingText.wordCount(raw)
-        for index in edit.keptWords..<max(edit.keptWords, count)
-        where LiveTypingText.foldedWord(at: index, in: raw) == edit.deleted {
-            return index + 1
+        let words = LiveTypingText.foldedWords(raw)
+        var next = 0
+        var last = -1
+        for word in edit.prefixWords {
+            guard let index = words[next...].firstIndex(of: word) else { return edit.consumedWords }
+            last = index
+            next = index + 1
         }
-        return edit.consumedWords
+        return last + 2
     }
 
     /// Backspace during a live dictation removes the last dictated word and dictation carries on, instead of ending
     /// live typing. Nil when there is no such word in the marked words (none yet, or it was already committed as
-    /// plain text): the keyboard then edits the field the way it does for any other key.
+    /// plain text): the keyboard then edits the field the way it does for any other key. An empty list means the
+    /// key was taken and there is nothing to change (punctuation only).
     mutating func deleteLastWord() -> [LiveTypingCommand]? {
+        guard phase == .live else { return nil }
         let mirror = mirroredText
         let ranges = LiveTypingText.wordRanges(mirror)
-        guard phase == .live, let lastWord = ranges.last, var kept = LiveTypingText.droppingLastWord(of: mirror) else {
-            return nil
-        }
+        if ranges.isEmpty { return marked.isEmpty ? nil : [] }
+        guard var kept = LiveTypingText.droppingLastWord(of: mirror) else { return nil }
         // The word after committed text leaves the committed text, with its trailing space, in place.
         if committed.hasPrefix(kept) { kept = committed }
         guard kept.hasPrefix(committed) else { return nil }
@@ -196,8 +202,8 @@ struct LiveTypingSession: Sendable {
         edit = Edit(
             kept: kept,
             keptWords: ranges.count - 1,
-            consumedWords: fromStream ? rawWordCount : edit?.consumedWords ?? rawWordCount,
-            deleted: fromStream ? LiveTypingText.folded(String(mirror[lastWord])) : edit?.deleted ?? ""
+            consumedWords: fromStream ? rawWords.count : edit?.consumedWords ?? rawWords.count,
+            prefixWords: fromStream ? Array(rawWords.dropLast()) : edit?.prefixWords ?? []
         )
         previousMarked = marked
         marked = String(kept.dropFirst(committed.count))
@@ -206,7 +212,7 @@ struct LiveTypingSession: Sendable {
 
     private func editedFinal(_ text: String) -> String {
         guard let edit else { return text }
-        guard abs(LiveTypingText.wordCount(text) - rawWordCount) <= Self.maxWordDrift else { return mirroredText }
+        guard abs(LiveTypingText.wordCount(text) - rawWords.count) <= Self.maxWordDrift else { return mirroredText }
         return LiveTypingText.joined(edit.kept, LiveTypingText.text(of: text, afterWords: consumedWords(of: edit, in: text)))
     }
 

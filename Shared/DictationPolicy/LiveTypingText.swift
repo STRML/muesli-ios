@@ -53,12 +53,11 @@ enum LiveTypingText {
 
     static func wordCount(_ text: String) -> Int { wordRanges(text).count }
 
-    /// `text` up to the end of its second-to-last word, or nil when there is no word to remove.
+    /// `text` without its last word and the white space before it, so the punctuation that ends the sentence before
+    /// stays. Nil when there is no word to remove.
     static func droppingLastWord(of text: String) -> String? {
-        let ranges = wordRanges(text)
-        guard !ranges.isEmpty else { return nil }
-        guard ranges.count > 1 else { return "" }
-        return String(text[..<ranges[ranges.count - 2].upperBound])
+        guard let last = wordRanges(text).last else { return nil }
+        return String(text[..<last.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// What follows the first `count` words of `text`, with the separator the speech engine put in front of it.
@@ -76,11 +75,9 @@ enum LiveTypingText {
         return head + tail.drop(while: \.isWhitespace)
     }
 
-    /// The word at `index` of `text`, folded for comparison.
-    static func foldedWord(at index: Int, in text: String) -> String? {
-        let ranges = wordRanges(text)
-        guard ranges.indices.contains(index) else { return nil }
-        return folded(String(text[ranges[index]]))
+    /// The words of `text`, folded for comparison.
+    static func foldedWords(_ text: String) -> [String] {
+        wordRanges(text).map { folded(String(text[$0])) }
     }
 
     /// The `selectedRange` for `setMarkedText`: it is relative to the marked text and counts UTF-16 units. The

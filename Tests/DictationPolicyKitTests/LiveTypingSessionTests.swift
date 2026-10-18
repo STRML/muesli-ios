@@ -612,6 +612,31 @@ final class LiveTypingSessionTests: XCTestCase {
         XCTAssertEqual(h.host.document, "Hello we can now", "the deleted word came back")
     }
 
+    func testARevisionThatReplacesTheDeletedWordDoesNotKeepTheReplacement() {
+        let h = Harness()
+        h.reachLive(with: "we can leave")
+        XCTAssertTrue(backspace(h))
+        h.partial("we really can go now")
+        XCTAssertEqual(h.host.document, "Hello we can now", "the word in the deleted slot came back")
+    }
+
+    func testBackspaceKeepsThePunctuationThatEndsThePreviousSentence() {
+        let h = Harness()
+        h.reachLive(with: "we left. tomorrow")
+        XCTAssertTrue(backspace(h))
+        XCTAssertEqual(h.host.document, "Hello we left.")
+        h.partial("we left. tomorrow we go")
+        XCTAssertEqual(h.host.document, "Hello we left. we go")
+    }
+
+    func testBackspaceOnPunctuationOnlyIsTakenAndChangesNothing() {
+        let h = Harness()
+        h.reachLive(with: ".")
+        let commands = h.session.deleteLastWord()
+        XCTAssertEqual(commands, [], "the key was passed to the host text")
+        XCTAssertEqual(h.host.document, "Hello .")
+    }
+
     func testBackspaceTakesTheOnlyWordLeftAfterCommittedSentences() {
         let h = Harness(chunkThreshold: 120)
         h.reachLive(with: "This is sentence number 1.")
