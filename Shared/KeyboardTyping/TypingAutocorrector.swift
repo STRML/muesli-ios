@@ -76,6 +76,9 @@ final class TypingAutocorrector: TypingWordCompletionHandling {
         replacements = shortcuts
     }
 
+    /// Autocorrect would look at a finished word in this field right now.
+    var isCorrecting: Bool { isEnabled() && isCorrectableField() }
+
     func replacementWasRejected(_ undo: TypingReplacementUndo) {
         learned.reject(undo.originalWord)
         store?.save(learned)
@@ -118,7 +121,9 @@ final class TypingAutocorrector: TypingWordCompletionHandling {
             for: word, candidates: candidates, strict: boundary.isStrict, tuning: tuning
         )
         guard case .correct(let guess) = decision else {
-            if case .declined(let reason) = decision { noteDeclined(reason, word, boundary, checker: checker, language: language) }
+            if case .declined(let reason) = decision {
+                noteDeclined(reason, word, boundary, candidates: candidates, checker: checker, language: language)
+            }
             noteLeftAsTyped(word)
             return nil
         }
@@ -127,13 +132,19 @@ final class TypingAutocorrector: TypingWordCompletionHandling {
     }
 
     /// Tells diagnostics a word was left alone. For a decline on score or margin it also looks up the completions
-    /// for the word's first letter, because an empty list means no guess could be shown to be a used word.
+    /// under the same prefixes the candidate pool reads usage from (each looked-up candidate's first one to
+    /// `usageDepth` letters): all of them empty means no guess could be shown to be a used word.
     private func noteDeclined(
-        _ reason: TypingDeclineReason, _ word: String, _ boundary: Boundary, checker: TypingSpellChecking, language: String
+        _ reason: TypingDeclineReason, _ word: String, _ boundary: Boundary, candidates: [TypingCandidate],
+        checker: TypingSpellChecking, language: String
     ) {
         guard let diagnostics else { return }
-        let first = String(word.prefix(1)).lowercased()
-        let empty = checker.completions(forPartial: first, language: language).isEmpty
+        var prefixes = Set<String>()
+        for candidate in candidates where !candidate.usage.isEmpty {
+            for length in 1...candidate.usage.count { prefixes.insert(String(candidate.word.prefix(length))) }
+        }
+        if prefixes.isEmpty { prefixes.insert(String(word.prefix(1)).lowercased()) }
+        let empty = prefixes.allSatisfy { checker.completions(forPartial: $0, language: language).isEmpty }
         let scoreBound = reason == .maxScore || reason == .margin
         report(empty && scoreBound ? .usageUnavailable : reason, word, boundary, completionsEmpty: empty, to: diagnostics)
     }

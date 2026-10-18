@@ -17,6 +17,7 @@ final class TypingAutocorrectDiagnosticsTests: XCTestCase {
     private var recorded: [(name: String, attrs: [String: String])] = []
     private var diagnostics: TypingAutocorrectDiagnostics!
     private var languages = ["en-US"]
+    private var enabled = true
     private var store = WordStore()
     private var corrector: TypingAutocorrector!
     private var engine: TypingEngine!
@@ -39,7 +40,7 @@ final class TypingAutocorrectDiagnosticsTests: XCTestCase {
             checker: { [unowned self] in self.checker },
             languageCandidates: { [unowned self] in self.languages },
             traits: { [unowned self] in self.engine.state.traits },
-            isEnabled: { true },
+            isEnabled: { [unowned self] in self.enabled },
             learnedWords: store,
             diagnostics: diagnostics
         )
@@ -201,6 +202,49 @@ final class TypingAutocorrectDiagnosticsTests: XCTestCase {
         XCTAssertEqual(declines.map { $0["count"] }, ["1", "2"])
         XCTAssertEqual(declines.first?["word_len"], "3")
         XCTAssertEqual(declines.first?["boundary"], "space")
+    }
+
+    /// "w" has no completions but "wh" and "wi" list the guesses, so usage is available. "which" and "witch" cost
+    /// 0.6 each plus 0.1 for being listed under the second letter: 0.7 and 0.7, a gap of 0 < margin 0.6.
+    func testUsageListedUnderTheSecondLetterIsNotUnavailable() {
+        flag("wich", guesses: ["which", "witch"], listed: false)
+        checker.completionTable["wh"] = ["which"]
+        checker.completionTable["wi"] = ["witch"]
+        XCTAssertNil(finish("wich"))
+        assertOneDecline("margin")
+        XCTAssertEqual(declines.first?["completions_empty"], "false")
+    }
+
+    func testAProxyMismatchIsNotLoggedWhileAutocorrectIsOff() {
+        enabled = false
+        "teh".forEach { engine.type(String($0)) }
+        document.staleBefore = "something else"
+        engine.tapSpace()
+        XCTAssertEqual(recorded.count, 0, "\(recorded)")
+    }
+
+    func testAProxyMismatchIsNotLoggedInAFieldThatGatesCorrection() {
+        var traits = TypingTraits()
+        traits.variant = .url
+        engine.apply(traits: traits)
+        recorded = []
+        "teh".forEach { engine.type(String($0)) }
+        document.staleBefore = "something else"
+        engine.tapSpace()
+        XCTAssertEqual(recorded.count, 0, "\(recorded)")
+    }
+
+    func testMovingBetweenTwoGatedFieldsWithTheSameTraitsLogsEachField() {
+        var traits = TypingTraits()
+        traits.suggestionsDisabled = true
+        engine.apply(traits: traits)
+        document.documentIdentifier = UUID()
+        engine.apply(traits: traits)
+        XCTAssertEqual(declines.map { $0["decline_reason"] }, ["traits_gate", "traits_gate"])
+        XCTAssertEqual(declines.map { $0["count"] }, ["1", "2"])
+        // The same field echoing its traits again is not a new field.
+        engine.apply(traits: traits)
+        XCTAssertEqual(declines.count, 2)
     }
 
     func testAFieldThatForbidsCorrectionLogsOncePerChangeNotPerKeystroke() {
