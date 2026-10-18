@@ -89,14 +89,13 @@ final class CustomLLMBackendTests: XCTestCase {
     ) async rethrows {
         let defaults = UserDefaults.standard
         let original = defaults.object(forKey: MuesliPreferences.meetingSummaryBackendKey)
-        let originalKey = MeetingSummaryClient.storedAnthropicAPIKey()
         defer {
             if let original { defaults.set(original, forKey: MuesliPreferences.meetingSummaryBackendKey) }
             else { defaults.removeObject(forKey: MuesliPreferences.meetingSummaryBackendKey) }
-            try? MeetingSummaryClient.saveAnthropicAPIKey(originalKey)
+            MeetingSummaryClient.anthropicAPIKeyOverrideForTesting = nil
         }
         defaults.set(backend.rawValue, forKey: MuesliPreferences.meetingSummaryBackendKey)
-        try? MeetingSummaryClient.saveAnthropicAPIKey(anthropicKey)
+        MeetingSummaryClient.anthropicAPIKeyOverrideForTesting = anthropicKey
         try await body()
     }
 

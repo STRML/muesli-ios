@@ -69,8 +69,16 @@ enum MeetingSummaryClient {
         }
     }
 
+    #if DEBUG
+    /// Tests set this so they never touch the Keychain, which the CI test host cannot use.
+    nonisolated(unsafe) static var anthropicAPIKeyOverrideForTesting: String?
+    #endif
+
     static func storedAnthropicAPIKey() -> String {
-        (try? keychain.string(for: anthropicAPIKeyAccount)) ?? ""
+        #if DEBUG
+        if let override = anthropicAPIKeyOverrideForTesting { return override }
+        #endif
+        return (try? keychain.string(for: anthropicAPIKeyAccount)) ?? ""
     }
 
     static func saveAnthropicAPIKey(_ apiKey: String) throws {
