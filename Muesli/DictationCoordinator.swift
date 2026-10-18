@@ -4575,10 +4575,20 @@ final class DictationCoordinator {
         startUserRequestedModelLoad()
         // Arming the mic session first is what lets iOS keep the app running if the user swipes back while the
         // model compiles; without it the load stops with the app and the keyboard shows Open Muesli again.
-        if MuesliPreferences.keyboardSessionModeEnabled {
+        if MuesliPreferences.keyboardSessionModeEnabled, !isTestHost {
             Task { await startKeyboardSessionMode() }
         }
         advancePrepareTrip()
+    }
+
+    /// A test host must not open a real mic engine: the simulator's audio server can time out in
+    /// `engine.inputNode` and CoreAudio aborts the process.
+    private var isTestHost: Bool {
+        #if DEBUG
+        Self.shouldSkipModelPrewarmForTesting()
+        #else
+        false
+        #endif
     }
 
     private func startUserRequestedModelLoad() {

@@ -116,6 +116,10 @@ final class ActionButtonDictationTests: XCTestCase {
     }
 
     func testRecorderCapturesSamplesWithPlaybackDisabled() async throws {
+        // The simulator's audio server can time out in engine.inputNode, and CoreAudio then aborts the host.
+        guard ProcessInfo.processInfo.environment["MUESLI_HARDWARE_AUDIO_TESTS"] == "1" else {
+            throw XCTSkip("Opens the real microphone engine. Set TEST_RUNNER_MUESLI_HARDWARE_AUDIO_TESTS=1 to run it.")
+        }
         guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else {
             throw XCTSkip("Grant microphone permission to the simulator host before running the hardware capture test.")
         }
