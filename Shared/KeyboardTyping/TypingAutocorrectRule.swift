@@ -103,12 +103,19 @@ enum TypingAutocorrectRule {
         for typed: String, candidates: [TypingCandidate], costs: [Double], tuning: TypingAutocorrectTuning
     ) -> [Scored] {
         let word = typed.lowercased()
-        let limit = tuning.budget(forWordLength: word.count, soleCandidate: candidates.count == 1)
         return zip(candidates, costs).compactMap { candidate, cost in
+            let limit = tuning.budget(forWordLength: word.count, soleCandidate: isSoleCandidate(candidates, for: word))
             guard candidate.word != word, abs(candidate.word.count - word.count) <= 2, cost <= limit else { return nil }
             guard word.count != 3 || (isAdjacentSwap(word, candidate.word) && candidate.usage.first.map({ $0 >= 0 }) == true) else { return nil }
             return Scored(word: candidate.word, cost: cost, score: cost + prior(candidate, tuning: tuning))
         }.sorted { ($0.score, $0.word) < ($1.score, $1.word) }
+    }
+
+    /// The looser budget is for a pool of one, unless that one is the typed word minus its final "s": a possessive
+    /// typed without its apostrophe ("oenologys" for "oenology's") would be turned into the plain word.
+    private static func isSoleCandidate(_ candidates: [TypingCandidate], for word: String) -> Bool {
+        guard candidates.count == 1, let only = candidates.first else { return false }
+        return !(word.hasSuffix("s") && only.word == String(word.dropLast()))
     }
 
     /// The guess to type instead of `typed`, or nil. `strict` is for a word that may be the start of a host name

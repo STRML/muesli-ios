@@ -88,10 +88,10 @@ final class TypingAutocorrectRuleTests: XCTestCase {
     // R9: more edits for longer words, when the budget allows and the margin holds. The tuned budget is one
     // vowel swap plus one dropped letter short of this word, so it is declined until the budget is raised.
     func testALongWordMayTakeTwoSlipsOnlyWithinTheBudget() {
-        XCTAssertNil(fix("definatly", [candidate("definitely", guess: 0), candidate("definately", guess: 1, listedAt: nil)]))
+        XCTAssertNil(fix("definatly", [candidate("definitely", guess: 0), candidate("unrelated", guess: 1, listedAt: nil)]))
         var tuning = TypingAutocorrectTuning.standard
         tuning.budgetEightOrMore = 2.0
-        XCTAssertEqual(TypingAutocorrectRule.correction(for: "definatly", candidates: [candidate("definitely"), candidate("definately", guess: 1, listedAt: nil)], tuning: tuning), "definitely")
+        XCTAssertEqual(TypingAutocorrectRule.correction(for: "definatly", candidates: [candidate("definitely"), candidate("unrelated", guess: 1, listedAt: nil)], tuning: tuning), "definitely")
         XCTAssertNil(fix("flxm", [candidate("film")]), "a four-letter word is not given two slips")
     }
 
@@ -195,5 +195,21 @@ final class TypingAutocorrectRuleTests: XCTestCase {
     func testTheStrictBoundaryStillNeedsASingleEditForASoleCandidate() {
         XCTAssertEqual(fix("truely", [candidate("truly")], strict: true), "truly", "one deletion")
         XCTAssertNil(fix("dissapear", [candidate("disappear")], strict: true), "a swap and a dropped letter: two edits")
+    }
+
+    // R18: a missing-apostrophe possessive ("oenologys" for "oenology's") has the typed word minus its "s" as the
+    // sole candidate; the looser budget would turn it into the plain word, so it keeps the strict budget.
+    func testAPossessiveWithoutItsApostropheKeepsTheStrictBudget() {
+        XCTAssertNil(fix("kwashiorkors", [candidate("kwashiorkor")]))
+        XCTAssertNil(fix("oenologys", [candidate("oenology")]))
+        XCTAssertNil(fix("OenologyS", [candidate("oenology")]))
+    }
+
+    func testTheLooserBudgetStillAppliesToWordsThatDoNotEndInTheDroppedS() {
+        XCTAssertEqual(fix("truely", [candidate("truly")]), "truly")
+        XCTAssertEqual(fix("tommorow", [candidate("tomorrow")]), "tomorrow")
+        XCTAssertEqual(fix("arguement", [candidate("argument")]), "argument")
+        XCTAssertEqual(fix("arguements", [candidate("arguments")]), "arguments", "ends in s, but the candidate keeps it")
+        XCTAssertEqual(fix("recieves", [candidate("receives")]), "receives")
     }
 }
