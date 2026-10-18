@@ -383,12 +383,11 @@ final class KeyboardLiveTypingTests: XCTestCase {
         XCTAssertEqual(d.document, "xHello world.")
     }
 
-    // E4: space, return and backspace behave the same way.
-    func testSpaceReturnAndBackspaceDuringTheDictationAlsoYield() throws {
+    // E4: space and return behave the same way. Backspace does not end the dictation (E4b).
+    func testSpaceAndReturnDuringTheDictationAlsoYield() throws {
         let keys: [(String, TypingKeyAction, String)] = [
             ("space", .space, "Note "),
             ("return", .returnKey, "Note\n"),
-            ("backspace", .backspace, "Not"),
         ]
         for (name, key, expected) in keys {
             try make(before: "Note")
@@ -404,12 +403,39 @@ final class KeyboardLiveTypingTests: XCTestCase {
         }
     }
 
+    // E4b: backspace takes back the last dictated word and the dictation goes on, like iOS dictation.
+    func testBackspaceDuringTheDictationTakesBackTheLastWordAndKeepsDictating() throws {
+        try make(before: "Note: ")
+        try d.startRecording()
+        try d.hear("buy milk and eggs")
+        d.controller.typing.perform(.backspace)
+        XCTAssertEqual(d.document, "Note: buy milk and")
+        XCTAssertEqual(phase, .live)
+        try d.hear("buy milk and eggs or bread")
+        XCTAssertEqual(d.document, "Note: buy milk and or bread", "the deleted word came back")
+        try d.stopAndTranscribe()
+        try d.finish("Buy milk and eggs or bread.")
+        XCTAssertEqual(d.document, "Note: buy milk and or bread.")
+        XCTAssertEqual(d.host.markedLength, 0)
+    }
+
+    // E4c: with no dictated word left to take back, backspace edits the field as it always did.
+    func testBackspaceWithNoDictatedWordLeftEditsTheField() throws {
+        try make(before: "Note: ")
+        try d.startRecording()
+        try d.hear("buy")
+        d.controller.typing.perform(.backspace)
+        XCTAssertEqual(d.document, "Note: ")
+        d.controller.typing.perform(.backspace)
+        XCTAssertEqual(d.document, "Note:")
+    }
+
     // E5: the keyboard's other edits (a Quill undo, an explicit clear) yield too.
     func testClearingTheLastInsertionDuringALiveDictationKeepsTheDictatedWordsOut() throws {
         try make(before: "Keep")
         try d.startRecording()
         try d.hear("dictated")
-        d.controller.deleteBackward()
+        d.controller.clearInsertedText()
         XCTAssertEqual(d.document, "Kee")
         XCTAssertEqual(phase, .stripOnly(.yielded))
     }

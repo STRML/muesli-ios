@@ -668,6 +668,10 @@ final class KeyboardController {
 
     func deleteTypedBackward() {
         lastRewrite = nil
+        if liveTyper.deleteLastDictatedWord() {
+            lastInsertedCharacterCount = 0
+            return
+        }
         deleteFromHost(1)
         lastInsertedCharacterCount = 0
     }
@@ -708,10 +712,9 @@ final class KeyboardController {
         statusText = deleteCount > 1 ? "Cleared" : "Deleted"
     }
 
+    /// The Dictate page's delete key.
     func deleteBackward() {
-        lastRewrite = nil
-        deleteFromHost(1)
-        lastInsertedCharacterCount = 0
+        deleteTypedBackward()
         statusText = "Deleted"
     }
 

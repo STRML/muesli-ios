@@ -39,6 +39,38 @@ enum LiveTypingText {
         raw.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    // MARK: Words, for editing a dictation as it streams
+
+    static func wordCount(_ text: String) -> Int {
+        text.split(whereSeparator: \.isWhitespace).count
+    }
+
+    /// `text` without its last word and the space before it, or nil when there is no word to remove.
+    static func droppingLastWord(of text: String) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        guard let space = trimmed.lastIndex(where: \.isWhitespace) else { return "" }
+        return String(trimmed[..<space]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// What follows the first `count` words of `text`, without the space in front of it.
+    static func text(of text: String, afterWords count: Int) -> String {
+        var index = text.startIndex
+        var seen = 0
+        while index < text.endIndex, seen < count {
+            while index < text.endIndex, text[index].isWhitespace { index = text.index(after: index) }
+            guard index < text.endIndex else { break }
+            while index < text.endIndex, !text[index].isWhitespace { index = text.index(after: index) }
+            seen += 1
+        }
+        return String(text[index...]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func joined(_ head: String, _ tail: String) -> String {
+        if head.isEmpty { return tail }
+        return tail.isEmpty ? head : head + " " + tail
+    }
+
     /// The `selectedRange` for `setMarkedText`: it is relative to the marked text and counts UTF-16 units. The
     /// cursor goes at the end, where the next words will be.
     static func markedSelection(for text: String) -> NSRange {

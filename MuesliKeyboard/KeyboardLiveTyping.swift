@@ -203,6 +203,14 @@ final class KeyboardLiveTyper {
         return result.outcome
     }
 
+    /// Backspace during a live dictation: the last dictated word comes out and the dictation goes on. False when
+    /// there is nothing of the dictation to take a word from; the caller then edits the field as for any key.
+    func deleteLastDictatedWord() -> Bool {
+        guard let commands = session?.deleteLastWord() else { return false }
+        perform(commands)
+        return true
+    }
+
     /// Something is about to edit the field, or the keyboard is going away.
     func yield(_ reason: LiveTypingOff) {
         guard session != nil else { return }

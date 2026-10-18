@@ -532,6 +532,79 @@ final class LiveTypingSessionTests: XCTestCase {
         XCTAssertEqual(h.host.document, before)
     }
 
+    // MARK: Backspace edits the dictation
+
+    private func backspace(_ h: Harness) -> Bool {
+        guard let commands = h.session.deleteLastWord() else { return false }
+        h.host.perform(commands)
+        return true
+    }
+
+    func testBackspaceTakesBackTheLastWordAndTheDictationCarriesOn() {
+        let h = Harness()
+        h.reachLive(with: "hello world how")
+        XCTAssertTrue(backspace(h))
+        XCTAssertEqual(h.host.document, "Hello hello world")
+        XCTAssertEqual(h.session.phase, .live)
+        h.partial("hello world how are")
+        XCTAssertEqual(h.host.document, "Hello hello world are", "the deleted word came back")
+        h.settle()
+        XCTAssertEqual(h.session.phase, .live, "the edit read as the host disturbing the words")
+    }
+
+    func testARevisionOfTheDeletedWordDoesNotBringItBack() {
+        let h = Harness()
+        h.reachLive(with: "hello wor")
+        XCTAssertTrue(backspace(h))
+        h.partial("hello world how")
+        XCTAssertEqual(h.host.document, "Hello hello how")
+    }
+
+    func testBackspaceTwiceTakesTwoWords() {
+        let h = Harness()
+        h.reachLive(with: "one two three")
+        XCTAssertTrue(backspace(h))
+        XCTAssertTrue(backspace(h))
+        XCTAssertEqual(h.host.document, "Hello one")
+        h.partial("one two three four")
+        XCTAssertEqual(h.host.document, "Hello one four")
+    }
+
+    func testTheFinalKeepsTheEditAndTakesTheModelsWordsAfterIt() {
+        let h = Harness()
+        h.reachLive(with: "hello world how")
+        XCTAssertTrue(backspace(h))
+        h.partial("hello world how are")
+        let result = h.session.final("Hello world, how are you?", snapshot: h.host.snapshot())
+        XCTAssertEqual(result.outcome, .replacedInPlace)
+        h.host.perform(result.commands)
+        XCTAssertEqual(h.host.document, "Hello hello world are you?")
+        XCTAssertEqual(h.host.markedLength, 0)
+    }
+
+    func testAFinalThatChangesTheWordCountALotKeepsWhatIsInTheField() {
+        let h = Harness()
+        h.reachLive(with: "a b c d")
+        XCTAssertTrue(backspace(h))
+        let result = h.session.final("Completely different long sentence that changes everything", snapshot: h.host.snapshot())
+        XCTAssertEqual(result.outcome, .replacedInPlace)
+        h.host.perform(result.commands)
+        XCTAssertEqual(h.host.document, "Hello a b c")
+    }
+
+    func testBackspaceBeforeAnyWordsLeavesTheKeyToTheField() {
+        let h = Harness()
+        XCTAssertNil(h.session.deleteLastWord())
+    }
+
+    func testBackspaceWithNoMarkedWordLeftLeavesTheKeyToTheField() {
+        let h = Harness()
+        h.reachLive(with: "hello")
+        XCTAssertTrue(backspace(h))
+        XCTAssertEqual(h.host.document, "Hello ")
+        XCTAssertNil(h.session.deleteLastWord(), "a second backspace should edit the user's own text")
+    }
+
     func testAHostRewriteAfterChunkingStillInsertsTheRestWhenTheHostChangedTheCase() {
         let h = Harness(chunkThreshold: 120)
         h.reachLive(with: "This is sentence number 1.")

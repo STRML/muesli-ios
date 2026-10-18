@@ -88,6 +88,18 @@ struct LiveTypingSession: Sendable {
     /// after the dictation ends, so the keyboard can remember the field and skip live typing there next time.
     private(set) var fieldCannotTakeLiveWords = false
     private var previousMarked = ""
+    /// Words the user deleted while dictating. Partials are cumulative, so later ones still hold those words: the
+    /// edit keeps what the user left and how many words of the stream it has already used up.
+    private struct Edit {
+        var kept: String
+        var consumedWords: Int
+    }
+    private var edit: Edit?
+    /// Words in the newest partial, before any edit is applied.
+    private var rawWordCount = 0
+    /// How far a final may differ in word count from the last partial before the keyboard stops trusting its word
+    /// positions (a final that turns "twenty five" into "25" shifts them).
+    private static let maxWordDrift = 2
     private let base: LiveTypingSnapshot
     private let chunkThreshold: Int
     /// What the field reported once the first words were marked; marking the same words again must not change it.
@@ -129,6 +141,7 @@ struct LiveTypingSession: Sendable {
     mutating func partial(_ raw: String) -> [LiveTypingCommand] {
         let text = LiveTypingText.trimmedPartial(raw)
         guard !text.isEmpty else { return [] }
+        rawWordCount = LiveTypingText.wordCount(text)
         switch phase {
         case .awaitingFirstPartial:
             marked = text
@@ -138,10 +151,34 @@ struct LiveTypingSession: Sendable {
             held = text
             return []
         case .live:
-            return write(text)
+            return write(applyingEdit(to: text))
         case .stripOnly, .kept, .cancelled, .finished:
             return []
         }
+    }
+
+    /// The streamed words with the user's deletions applied: what they left, then the words that came after.
+    private func applyingEdit(to raw: String) -> String {
+        guard let edit else { return raw }
+        return LiveTypingText.joined(edit.kept, LiveTypingText.text(of: raw, afterWords: edit.consumedWords))
+    }
+
+    /// Backspace during a live dictation removes the last dictated word and dictation carries on, instead of ending
+    /// live typing. Nil when there is no such word in the marked words (none yet, or it was already committed as
+    /// plain text): the keyboard then edits the field the way it does for any other key.
+    mutating func deleteLastWord() -> [LiveTypingCommand]? {
+        guard phase == .live, let shorter = LiveTypingText.droppingLastWord(of: mirroredText),
+              shorter.count >= committed.count, shorter.hasPrefix(committed) else { return nil }
+        edit = Edit(kept: shorter, consumedWords: rawWordCount)
+        previousMarked = marked
+        marked = String(shorter.dropFirst(committed.count))
+        return marked.isEmpty ? [.clearMarked] : [.setMarked(marked)]
+    }
+
+    private func editedFinal(_ text: String) -> String {
+        guard let edit else { return text }
+        guard abs(LiveTypingText.wordCount(text) - rawWordCount) <= Self.maxWordDrift else { return mirroredText }
+        return LiveTypingText.joined(edit.kept, LiveTypingText.text(of: text, afterWords: edit.consumedWords))
     }
 
     /// Replaces the whole marked range with the newest tail, or commits finished sentences of a long dictation.
@@ -364,8 +401,9 @@ struct LiveTypingSession: Sendable {
         return LiveTypingFinal(commands: [], outcome: rest.isEmpty ? .replacedInPlace : .insertPlain(rest))
     }
 
-    private mutating func finishLive(_ text: String, snapshot: LiveTypingSnapshot) -> LiveTypingFinal {
-        guard phase == .live else { return finish(text, snapshot: snapshot) }
+    private mutating func finishLive(_ modelText: String, snapshot: LiveTypingSnapshot) -> LiveTypingFinal {
+        guard phase == .live else { return finish(modelText, snapshot: snapshot) }
+        let text = editedFinal(modelText)
         if !isAttached(snapshot), hostDroppedTheWords(snapshot) {
             let commands = hostRewrote(snapshot)
             let plain = finish(text, snapshot: snapshot)
