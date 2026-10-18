@@ -17,7 +17,7 @@ struct DiagnosticsShippingSettings: View {
 
     private var publicWarning: String? {
         guard let server, !server.looksPrivate else { return nil }
-        return RemoteTranscriptionPolicy.publicEndpointWarningText
+        return DiagnosticsShippingCopy.publicServerWarning
     }
 
     var body: some View {
