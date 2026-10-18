@@ -259,6 +259,12 @@ jobs:
         run: tar -xzf products.tgz
       - name: Wait for simulator
         run: xcrun simctl bootstatus '${{ steps.simulator.outputs.udid }}' -b
+      # On a fresh device chronod queues widget-descriptor queries; until the
+      # one for the Live Activity extension completes, the Dynamic Island
+      # renders empty. Install the app now and wait for that query (issue #32).
+      # Never fails the job; see the script.
+      - name: Wait for Live Activity descriptor
+        run: scripts/ci-wait-live-activity-descriptor.sh '${{ steps.simulator.outputs.udid }}' Products/Debug-iphonesimulator/Muesli.app
       # A failed test is retried once. The job still passes only if the retry
       # passes, and a retry is reported as a warning and in the job summary so
       # flakiness stays visible.
@@ -316,21 +322,23 @@ jobs:
 
       # The Dynamic Island UI test depends on the system rendering the Live
       # Activity extension. Keep the renderer's logs and any crash reports so a
-      # blank island can be traced past the screenshots. Collected when the
-      # tests failed or needed a retry; the log query costs about a minute.
+      # blank island can be traced past the screenshots. Collected on every
+      # run, so clean runs also show the descriptor line before the request.
+      # Only the three relevant processes (plus the app's activity request)
+      # are kept, which keeps the artifact small.
       - name: Collect Live Activity diagnostics
-        if: failure() || steps.tests.outputs.retried == 'true'
+        if: always()
         run: |
           mkdir -p sim-diagnostics
           UDID='${{ steps.simulator.outputs.udid }}'
           xcrun simctl list devices | grep "$UDID" | tee sim-diagnostics/device-state.txt || true
-          xcrun simctl spawn "$UDID" log show --last 20m --style compact --info --debug \
-            --predicate 'process == "chronod" OR process == "liveactivitiesd" OR process BEGINSWITH "MuesliLiveActivity" OR process == "Muesli" OR subsystem BEGINSWITH "com.apple.activitykit" OR subsystem BEGINSWITH "com.apple.ActivityKit" OR subsystem BEGINSWITH "com.apple.chrono" OR (process == "SpringBoard" AND (category CONTAINS[c] "activit" OR category CONTAINS[c] "aperture" OR subsystem CONTAINS[c] "SystemAperture")) OR (process == "runningboardd" AND eventMessage CONTAINS "MuesliLiveActivity") OR eventMessage CONTAINS "MuesliLiveActivityExtension"' \
+          xcrun simctl spawn "$UDID" log show --last 40m --style compact --info --debug \
+            --predicate 'process == "chronod" OR process == "liveactivitiesd" OR process BEGINSWITH "MuesliLiveActivity" OR (process == "Muesli" AND eventMessage CONTAINS "Requesting an activity")' \
             > sim-diagnostics/live-activity.log 2>&1 || true
           wc -l sim-diagnostics/live-activity.log || true
           cp -R ~/Library/Logs/DiagnosticReports sim-diagnostics/ 2>/dev/null || true
       - name: Upload Live Activity diagnostics
-        if: failure() || steps.tests.outputs.retried == 'true'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: sim-diagnostics
