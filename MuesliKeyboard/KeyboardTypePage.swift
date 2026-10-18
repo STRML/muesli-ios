@@ -67,10 +67,10 @@ struct KeyboardTypePage: View {
                 Text("Start")
                     .font(.system(size: 14, weight: .semibold))
             }
-            .foregroundStyle(MuesliTheme.textPrimary)
+            .foregroundStyle(controller.isPrimaryButtonDisabled ? MuesliTheme.textTertiary : Color.white)
             .padding(.horizontal, 18)
             .frame(minHeight: 30)
-            .background(MuesliTheme.textPrimary.opacity(0.07), in: Capsule())
+            .keyboardPrimarySurface(muted: controller.isPrimaryButtonDisabled)
             .contentShape(Capsule())
         }
         .accessibilityLabel("Start dictation")
