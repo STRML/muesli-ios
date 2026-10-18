@@ -126,6 +126,7 @@ struct DiagnosticsShippingSettings: View {
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(MuesliTheme.accent)
                 .frame(width: 22)
+                .accessibilityHidden(true)
             Text("Last upload")
                 .font(MuesliTheme.headline())
                 .foregroundStyle(MuesliTheme.textPrimary)
@@ -208,6 +209,7 @@ struct DiagnosticsShippingSettings: View {
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(MuesliTheme.accent)
                 .frame(width: 22)
+                .accessibilityHidden(true)
             Text(title)
                 .font(MuesliTheme.headline())
                 .foregroundStyle(MuesliTheme.textPrimary)
@@ -218,6 +220,7 @@ struct DiagnosticsShippingSettings: View {
                     .foregroundStyle(MuesliTheme.textSecondary)
             }
         }
+        .frame(minHeight: SettingsAccessibility.minimumTapTarget)
         .contentShape(Rectangle())
     }
 }
@@ -257,6 +260,7 @@ struct CopyKeyboardDiagnosticsRow: View {
                         .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(MuesliTheme.accent)
                         .frame(width: 22)
+                        .accessibilityHidden(true)
                     Text("Copy keyboard diagnostics")
                         .font(MuesliTheme.headline())
                         .foregroundStyle(MuesliTheme.textPrimary)
@@ -265,6 +269,7 @@ struct CopyKeyboardDiagnosticsRow: View {
                         .font(MuesliTheme.callout())
                         .foregroundStyle(MuesliTheme.accent)
                 }
+                .frame(minHeight: SettingsAccessibility.minimumTapTarget)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)

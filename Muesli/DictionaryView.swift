@@ -32,14 +32,14 @@ struct DictionarySettingsContent: View {
     private var cleanupPanel: some View {
         MuesliSurface {
             VStack(alignment: .leading, spacing: MuesliTheme.spacing12) {
-                DictionaryToggleRow(
+                SettingsToggleRow(
                     icon: "text.word.spacing",
                     title: "Remove Filler Words",
                     detail: "Remove common speech fillers before voice notes and meeting transcripts are saved.",
                     isOn: $fillerWordRemoval
                 )
                 Divider().overlay(MuesliTheme.surfaceBorder)
-                DictionaryToggleRow(
+                SettingsToggleRow(
                     icon: "character.book.closed",
                     title: "Use Custom Dictionary",
                     detail: "Apply your word and phrase corrections after local transcription.",
@@ -122,6 +122,7 @@ struct DictionarySettingsContent: View {
             Image(systemName: "character.book.closed")
                 .font(.system(size: 22, weight: .semibold))
                 .foregroundStyle(MuesliTheme.accent)
+                .accessibilityHidden(true)
             Text("No custom entries yet")
                 .font(MuesliTheme.headline())
                 .foregroundStyle(MuesliTheme.textPrimary)
@@ -175,38 +176,6 @@ struct DictionarySettingsContent: View {
     }
 }
 
-private struct DictionaryToggleRow: View {
-    let icon: String
-    let title: String
-    let detail: String
-    @Binding var isOn: Bool
-
-    var body: some View {
-        HStack(alignment: .top, spacing: MuesliTheme.spacing12) {
-            Image(systemName: icon)
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(MuesliTheme.accent)
-                .frame(width: 22)
-
-            VStack(alignment: .leading, spacing: MuesliTheme.spacing4) {
-                Text(title)
-                    .font(MuesliTheme.headline())
-                    .foregroundStyle(MuesliTheme.textPrimary)
-                Text(detail)
-                    .font(MuesliTheme.caption())
-                    .foregroundStyle(MuesliTheme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer(minLength: MuesliTheme.spacing12)
-
-            Toggle(title, isOn: $isOn)
-                .labelsHidden()
-                .tint(MuesliTheme.accent)
-        }
-    }
-}
-
 private struct CustomWordRow: View {
     let customWord: CustomWord
     let onDelete: () -> Void
@@ -231,7 +200,8 @@ private struct CustomWordRow: View {
                     .foregroundStyle(MuesliTheme.destructive)
                     .background(MuesliTheme.destructive.opacity(0.12))
                     .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall))
-                    .contentShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall))
+                    .frame(width: SettingsAccessibility.minimumTapTarget, height: SettingsAccessibility.minimumTapTarget)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Delete dictionary entry")

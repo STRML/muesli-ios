@@ -91,6 +91,7 @@ struct AppearanceSettingsContent: View {
         HStack(spacing: MuesliTheme.spacing8) {
             Image(systemName: "mic.fill")
                 .font(.system(size: 15, weight: .semibold))
+                .accessibilityHidden(true)
             Text("Record")
                 .font(MuesliTheme.captionMedium())
         }
@@ -116,6 +117,7 @@ struct SettingsAppearanceModePicker: View {
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(MuesliTheme.accent)
                     .frame(width: 22)
+                    .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: MuesliTheme.spacing4) {
                     Text("Color Scheme")
                         .font(MuesliTheme.headline())
@@ -159,6 +161,7 @@ struct SettingsAccentThemePicker: View {
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(MuesliTheme.accent)
                     .frame(width: 22)
+                    .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: MuesliTheme.spacing4) {
                     Text("Accent")
                         .font(MuesliTheme.headline())

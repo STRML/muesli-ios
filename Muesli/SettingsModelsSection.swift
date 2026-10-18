@@ -35,7 +35,11 @@ extension SettingsView {
                     Divider().overlay(MuesliTheme.surfaceBorder)
                     SettingsRow(icon: "textformat", title: "Language", value: coordinator.selectedTranscriptionModel.capabilityLabel)
                     Divider().overlay(MuesliTheme.surfaceBorder)
-                    SettingsRow(icon: "iphone", title: "Execution", value: "On device")
+                    SettingsRow(
+                        icon: "iphone",
+                        title: "Execution",
+                        value: SettingsPresentation.executionLabel(remoteProcessingActive: SettingsPresentation.currentRemoteProcessingActive)
+                    )
                     Divider().overlay(MuesliTheme.surfaceBorder)
                     VStack(alignment: .leading, spacing: MuesliTheme.spacing8) {
                         Text(coordinator.modelPreparation.status)
@@ -129,6 +133,7 @@ extension SettingsView {
                 .frame(width: 34, height: 34)
                 .background(MuesliTheme.accentSubtle)
                 .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall))
+                .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: MuesliTheme.spacing4) {
                 HStack(spacing: MuesliTheme.spacing4) {
@@ -170,7 +175,8 @@ extension SettingsView {
                         .frame(width: 36, height: 36)
                         .background(MuesliTheme.destructive.opacity(0.10))
                         .clipShape(Circle())
-                        .contentShape(Circle())
+                        .frame(width: SettingsAccessibility.minimumTapTarget, height: SettingsAccessibility.minimumTapTarget)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .disabled(!coordinator.canRemoveDownloadedModels)
@@ -218,6 +224,7 @@ struct LivePreviewDownloadRow: View {
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(MuesliTheme.accent)
                 .frame(width: 22)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(MuesliTheme.headline())

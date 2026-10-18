@@ -5,7 +5,7 @@ import Foundation
 enum DiagnosticsServerSource: Equatable, Sendable {
     /// The "Diagnostics server" field in Settings.
     case ownField
-    /// The Server URL under AI Summaries, used while the field is empty.
+    /// The Server URL under AI Services, used while the field is empty.
     case aiSummaries
 }
 
@@ -17,9 +17,9 @@ struct ResolvedDiagnosticsServer: Equatable, Sendable {
 }
 
 enum DiagnosticsServerResolution: Equatable, Sendable {
-    /// Neither the field nor AI Summaries holds an https address.
+    /// Neither the field nor AI Services holds an https address.
     case none
-    /// The field is filled in but is not an https address. It is never replaced by the AI Summaries server: the
+    /// The field is filled in but is not an https address. It is never replaced by the AI Services server: the
     /// user asked for a different place, so sending the log somewhere else would be a surprise.
     case invalidOverride
     case resolved(ResolvedDiagnosticsServer)

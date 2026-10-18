@@ -18,9 +18,14 @@ struct AboutSettingsContent: View {
                 VStack(alignment: .leading, spacing: MuesliTheme.spacing12) {
                     AboutValueRow(icon: "app.badge", title: "Version", value: "\(version) (\(build))")
                     Divider().overlay(MuesliTheme.surfaceBorder)
-                    AboutValueRow(icon: "lock.shield", title: "Processing", value: "On device")
-                    Divider().overlay(MuesliTheme.surfaceBorder)
-                    AboutValueRow(icon: "externaldrive", title: "App data", value: "Local SQLite")
+                    AboutValueRow(
+                        icon: "lock.shield",
+                        title: "Processing",
+                        value: SettingsPresentation.aboutProcessing(
+                            remoteProcessingActive: SettingsPresentation.currentRemoteProcessingActive,
+                            summaryDestination: SettingsPresentation.currentSummaryDestination
+                        )
+                    )
                     Divider().overlay(MuesliTheme.surfaceBorder)
                     Link(destination: sourceURL) {
                         HStack(spacing: MuesliTheme.spacing12) {
@@ -28,6 +33,7 @@ struct AboutSettingsContent: View {
                                 .font(.system(size: 15, weight: .medium))
                                 .foregroundStyle(MuesliTheme.accent)
                                 .frame(width: 22)
+                                .accessibilityHidden(true)
                             Text("Source code")
                                 .font(MuesliTheme.headline())
                                 .foregroundStyle(MuesliTheme.textPrimary)
@@ -38,6 +44,7 @@ struct AboutSettingsContent: View {
                             Image(systemName: "arrow.up.right")
                                 .font(.system(size: 12, weight: .semibold))
                                 .foregroundStyle(MuesliTheme.accent)
+                                .accessibilityHidden(true)
                         }
                         .contentShape(Rectangle())
                     }
@@ -70,7 +77,10 @@ struct AboutSettingsContent: View {
                     Label("Local-first by design", systemImage: "hand.raised.fill")
                         .font(MuesliTheme.headline())
                         .foregroundStyle(MuesliTheme.textPrimary)
-                    Text("Voice recordings and downloaded speech models stay on this iPhone. Only text is eligible for private iCloud sync when you enable it.")
+                    Text(SettingsPresentation.localFirstDetail(
+                        remoteProcessingActive: SettingsPresentation.currentRemoteProcessingActive,
+                        summaryDestination: SettingsPresentation.currentSummaryDestination
+                    ))
                         .font(MuesliTheme.body())
                         .foregroundStyle(MuesliTheme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -92,6 +102,7 @@ private struct AboutValueRow: View {
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(MuesliTheme.accent)
                 .frame(width: 22)
+                .accessibilityHidden(true)
             Text(title)
                 .font(MuesliTheme.headline())
                 .foregroundStyle(MuesliTheme.textPrimary)
@@ -114,6 +125,7 @@ private struct OpenSourceLibraryRow: View {
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(MuesliTheme.accent)
                     .frame(width: 22, height: 22)
+                    .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: MuesliTheme.spacing4) {
                     HStack(spacing: MuesliTheme.spacing8) {
@@ -136,6 +148,7 @@ private struct OpenSourceLibraryRow: View {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(MuesliTheme.textTertiary)
                     .padding(.top, MuesliTheme.spacing4)
+                    .accessibilityHidden(true)
             }
             .padding(.vertical, MuesliTheme.spacing12)
             .contentShape(Rectangle())

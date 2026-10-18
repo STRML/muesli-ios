@@ -61,6 +61,7 @@ struct SettingsSectionRow: View {
                     .frame(width: 28, height: 28)
                     .background(MuesliTheme.accentSubtle)
                     .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall))
+                    .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: MuesliTheme.spacing4) {
                     Text(section.title)
@@ -78,6 +79,7 @@ struct SettingsSectionRow: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(MuesliTheme.textTertiary)
                     .padding(.top, MuesliTheme.spacing4)
+                    .accessibilityHidden(true)
             }
             .padding(.horizontal, MuesliTheme.spacing4)
             .padding(.vertical, MuesliTheme.spacing8)
@@ -101,6 +103,7 @@ struct SettingsNavigationRow: View {
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(MuesliTheme.accent)
                     .frame(width: 22)
+                    .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: MuesliTheme.spacing4) {
                     Text(title)
@@ -118,6 +121,7 @@ struct SettingsNavigationRow: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(MuesliTheme.textTertiary)
                     .padding(.top, 2)
+                    .accessibilityHidden(true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
@@ -139,6 +143,7 @@ struct SettingsRow: View {
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(iconColor)
                 .frame(width: 22)
+                .accessibilityHidden(true)
             Text(title)
                 .font(MuesliTheme.headline())
                 .foregroundStyle(MuesliTheme.textPrimary)
@@ -150,6 +155,78 @@ struct SettingsRow: View {
     }
 }
 
+/// A row with an icon, a title, a detail line and one control (a switch or a menu). VoiceOver reads it as one
+/// element: title and detail as its label, the control's own value after. At accessibility Dynamic Type sizes
+/// the text takes the full width and the control sits below it.
+struct SettingsAccessoryRow<Accessory: View>: View {
+    let icon: String
+    let title: String
+    let detail: String
+    let accessory: Accessory
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    init(icon: String, title: String, detail: String, @ViewBuilder accessory: () -> Accessory) {
+        self.icon = icon
+        self.title = title
+        self.detail = detail
+        self.accessory = accessory()
+    }
+
+    var body: some View {
+        layout
+            .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder
+    private var layout: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: MuesliTheme.spacing12) {
+                HStack(alignment: .top, spacing: MuesliTheme.spacing12) {
+                    iconView
+                    textColumn
+                }
+                spokenAccessory
+            }
+        } else {
+            HStack(alignment: .top, spacing: MuesliTheme.spacing12) {
+                iconView
+                textColumn
+                Spacer(minLength: MuesliTheme.spacing12)
+                spokenAccessory
+            }
+        }
+    }
+
+    private var iconView: some View {
+        Image(systemName: icon)
+            .font(.system(size: 15, weight: .medium))
+            .foregroundStyle(MuesliTheme.accent)
+            .frame(width: 22)
+            .accessibilityHidden(true)
+    }
+
+    /// Seen text only: the spoken label sits on the control, so the combined element does not repeat it.
+    private var textColumn: some View {
+        VStack(alignment: .leading, spacing: MuesliTheme.spacing4) {
+            Text(title)
+                .font(MuesliTheme.headline())
+                .foregroundStyle(MuesliTheme.textPrimary)
+                .accessibilityHidden(true)
+            if !detail.isEmpty {
+                Text(detail)
+                    .font(MuesliTheme.caption())
+                    .foregroundStyle(MuesliTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityHidden(true)
+            }
+        }
+    }
+
+    private var spokenAccessory: some View {
+        accessory.accessibilityLabel(SettingsAccessibility.label(title: title, detail: detail))
+    }
+}
+
 struct SettingsToggleRow: View {
     let icon: String
     let title: String
@@ -157,24 +234,7 @@ struct SettingsToggleRow: View {
     @Binding var isOn: Bool
 
     var body: some View {
-        HStack(alignment: .top, spacing: MuesliTheme.spacing12) {
-            Image(systemName: icon)
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(MuesliTheme.accent)
-                .frame(width: 22)
-
-            VStack(alignment: .leading, spacing: MuesliTheme.spacing4) {
-                Text(title)
-                    .font(MuesliTheme.headline())
-                    .foregroundStyle(MuesliTheme.textPrimary)
-                Text(detail)
-                    .font(MuesliTheme.caption())
-                    .foregroundStyle(MuesliTheme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer(minLength: MuesliTheme.spacing12)
-
+        SettingsAccessoryRow(icon: icon, title: title, detail: detail) {
             Toggle(title, isOn: $isOn)
                 .labelsHidden()
                 .tint(MuesliTheme.accent)
@@ -196,6 +256,7 @@ struct SettingsTextFieldRow: View {
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(MuesliTheme.accent)
                     .frame(width: 22)
+                    .accessibilityHidden(true)
                 Text(title)
                     .font(MuesliTheme.headline())
                     .foregroundStyle(MuesliTheme.textPrimary)
@@ -254,6 +315,7 @@ struct SettingsModelPickerRow: View {
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(MuesliTheme.accent)
                     .frame(width: 22)
+                    .accessibilityHidden(true)
                 Text(title)
                     .font(MuesliTheme.headline())
                     .foregroundStyle(MuesliTheme.textPrimary)

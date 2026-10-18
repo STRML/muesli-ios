@@ -4,21 +4,26 @@ extension SettingsView {
     var keyboardSettings: some View {
         VStack(alignment: .leading, spacing: MuesliTheme.spacing16) {
             SettingsGroup(title: "Status") {
-                SettingsRow(icon: "keyboard", title: "Keyboard Extension", value: keyboardStatusText)
+                SettingsRow(icon: "keyboard", title: "Keyboard Extension", value: keyboardSetupStatus.label)
                 Divider().overlay(MuesliTheme.surfaceBorder)
                 Link(destination: URL(string: UIApplication.openSettingsURLString)!) {
                     HStack {
                         Text("Open Muesli Settings")
                         Spacer()
                         Image(systemName: "arrow.up.right")
+                            .accessibilityHidden(true)
                     }
                     .font(MuesliTheme.headline())
                     .foregroundStyle(MuesliTheme.accent)
-                    .padding(.top, MuesliTheme.spacing4)
+                    .frame(minHeight: SettingsAccessibility.minimumTapTarget)
+                    .contentShape(Rectangle())
                 }
             }
 
-            SettingsGroup(title: "Layout and typing") {
+            SettingsGroup(
+                title: "Layout and typing",
+                footer: "Autocorrect and live typing apply at once with Allow Full Access. The layout applies the next time the keyboard opens."
+            ) {
                 SettingsKeyboardLayoutRow(selection: keyboardLayoutBinding)
                 Divider().overlay(MuesliTheme.surfaceBorder)
                 SettingsToggleRow(
@@ -27,16 +32,18 @@ extension SettingsView {
                     detail: "Fix typos when you type a space or punctuation on the full Muesli keyboard. Backspace right after a fix puts your word back. Needs Allow Full Access to follow this switch; without it, autocorrect stays on.",
                     isOn: keyboardAutocorrectBinding
                 )
+                typingSwitchNote(.autocorrect)
                 Divider().overlay(MuesliTheme.surfaceBorder)
                 SettingsToggleRow(
                     icon: "text.cursor",
-                    title: "Type live into the field",
-                    detail: "Your words appear in the text field as you speak and are replaced by the final text when you stop. Off: they show only in the keyboard's strip and the text is inserted once. Needs Allow Full Access to follow this switch; without it, live typing stays on.",
+                    title: "Live typing",
+                    detail: "Your words appear in the text field as you speak and are replaced by the final text when you stop. Off: they show only in the keyboard's strip and the text is inserted once. Needs a live model (see Models). Needs Allow Full Access to follow this switch; without it, live typing stays on.",
                     isOn: keyboardLiveTypingBinding
                 )
+                typingSwitchNote(.liveTyping)
             }
 
-            SettingsGroup(title: "Dictation") {
+            SettingsGroup(title: "Dictation", footer: "Mic changes apply to the next dictation.") {
                 SettingsToggleRow(
                     icon: "keyboard.badge.ellipsis",
                     title: "Turn mic off after each dictation",
@@ -59,15 +66,15 @@ extension SettingsView {
             SettingsGroup(title: "Lock Screen and Dynamic Island") {
                 SettingsToggleRow(
                     icon: "waveform.badge.mic",
-                    title: "Voice Note Live Activities",
-                    detail: "Show keyboard and in-app voice note progress on the Dynamic Island and Lock Screen.",
+                    title: "Dictation Live Activities",
+                    detail: "Show progress while you dictate with the keyboard, the Action Button or a voice note.",
                     isOn: $liveActivitiesForDictations
                 )
                 Divider().overlay(MuesliTheme.surfaceBorder)
                 SettingsToggleRow(
                     icon: "mic.circle",
                     title: "Keyboard mic card on the Lock Screen",
-                    detail: "Shows a card with a Turn mic off button while the keyboard mic is on. It is off by default, and needs Voice Note Live Activities on too.",
+                    detail: "Shows a card with a Turn mic off button while the keyboard mic is on. It is off by default, and needs Dictation Live Activities on too.",
                     isOn: $liveActivitiesForKeyboardMic
                 )
             }
@@ -126,21 +133,28 @@ extension SettingsView {
         "On: the mic turns off as soon as a dictation ends, and the next keyboard dictation has to open Muesli to start it. Off: the mic stays ready between dictations, so the keyboard starts instantly, until you turn it off in Muesli, on the Lock Screen or in the Dynamic Island, or it turns off by itself (see below)."
     }
 
+    /// A note under a typing switch when the keyboard cannot see the switch for lack of Allow Full Access.
+    @ViewBuilder
+    func typingSwitchNote(_ feature: SettingsPresentation.TypingFeature) -> some View {
+        if let note = SettingsPresentation.typingSwitchNote(feature, access: keyboardSetupStatus.fullAccess) {
+            Label(note, systemImage: "exclamationmark.triangle")
+                .font(MuesliTheme.caption())
+                .foregroundStyle(MuesliTheme.destructive)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
     func refreshKeyboardStatus() {
         let store = SharedStore()
         let extensionStatus = try? store.keyboardExtensionStatus()
         let confirmed = UserDefaults.standard.bool(forKey: OnboardingPreferenceKeys.keyboardEnabledConfirmed)
         let fullAccessConfirmed = UserDefaults.standard.bool(forKey: OnboardingPreferenceKeys.fullAccessConfirmed)
 
-        if extensionStatus?.hasOpenAccess == true {
-            keyboardStatusText = "Enabled"
-        } else if confirmed && fullAccessConfirmed {
-            keyboardStatusText = "Needs first use"
-        } else if confirmed {
-            keyboardStatusText = "Full Access needed"
-        } else {
-            keyboardStatusText = "Not confirmed"
-        }
+        keyboardSetupStatus = KeyboardSetupStatus.resolve(
+            hasOpenAccess: extensionStatus?.hasOpenAccess == true,
+            enabledConfirmed: confirmed,
+            fullAccessConfirmed: fullAccessConfirmed
+        )
     }
 }
 
@@ -154,6 +168,7 @@ struct SettingsKeyboardLayoutRow: View {
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(MuesliTheme.accent)
                 .frame(width: 22)
+                .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: MuesliTheme.spacing8) {
                 Text("Keyboard layout")
@@ -185,24 +200,7 @@ struct SettingsKeyboardMicAutoOffRow: View {
     let isAvailable: Bool
 
     var body: some View {
-        HStack(alignment: .top, spacing: MuesliTheme.spacing12) {
-            Image(systemName: "timer")
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(MuesliTheme.accent)
-                .frame(width: 22)
-
-            VStack(alignment: .leading, spacing: MuesliTheme.spacing4) {
-                Text("Turn mic off when idle")
-                    .font(MuesliTheme.headline())
-                    .foregroundStyle(MuesliTheme.textPrimary)
-                Text(detail)
-                    .font(MuesliTheme.caption())
-                    .foregroundStyle(MuesliTheme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer(minLength: MuesliTheme.spacing12)
-
+        SettingsAccessoryRow(icon: "timer", title: "Turn mic off when idle", detail: detail) {
             Picker("Turn mic off when idle", selection: $minutes) {
                 ForEach(KeyboardMicAutoOff.choices, id: \.self) { choice in
                     Text(KeyboardMicAutoOff.label(forMinutes: choice)).tag(choice)

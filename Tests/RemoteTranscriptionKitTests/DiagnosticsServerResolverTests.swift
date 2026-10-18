@@ -1,7 +1,7 @@
 import XCTest
 @testable import RemoteTranscriptionKit
 
-/// Where diagnostics are posted: the Diagnostics server field when it is filled in, otherwise the AI Summaries
+/// Where diagnostics are posted: the Diagnostics server field when it is filled in, otherwise the AI Services
 /// server. The settings screen and the uploader both call this one function, so they cannot disagree.
 final class DiagnosticsServerResolverTests: XCTestCase {
     private let summaries = "https://studio.tail13013.ts.net/v1"
@@ -61,7 +61,7 @@ final class DiagnosticsServerResolverTests: XCTestCase {
         XCTAssertFalse(publicHost.looksPrivate)
         let tailnet = try XCTUnwrap(DiagnosticsServerResolver.resolve(override: "https://100.101.102.103/v1", aiSummariesBaseURL: "").server)
         XCTAssertTrue(tailnet.looksPrivate)
-        // The warning follows the address that is used, not the AI Summaries one.
+        // The warning follows the address that is used, not the AI Services one.
         let fallback = try XCTUnwrap(DiagnosticsServerResolver.resolve(override: "", aiSummariesBaseURL: "https://logs.example.com/v1").server)
         XCTAssertFalse(fallback.looksPrivate)
     }
