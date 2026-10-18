@@ -15,11 +15,31 @@ final class SettingsPresentationTests: XCTestCase {
 
     func testSummaryDestinationIsNoneUnlessSummariesAreOn() {
         for backend in MeetingSummaryBackend.allCases {
-            XCTAssertEqual(SettingsPresentation.summaryDestination(summariesEnabled: false, backend: backend), .none)
+            XCTAssertEqual(
+                SettingsPresentation.summaryDestination(summariesEnabled: false, backend: backend, yourServerConfigured: true),
+                .none
+            )
         }
-        XCTAssertEqual(SettingsPresentation.summaryDestination(summariesEnabled: true, backend: .customLLM), .yourServer)
-        XCTAssertEqual(SettingsPresentation.summaryDestination(summariesEnabled: true, backend: .openRouter), .openRouter)
-        XCTAssertEqual(SettingsPresentation.summaryDestination(summariesEnabled: true, backend: .chatGPT), .chatGPT)
+        XCTAssertEqual(
+            SettingsPresentation.summaryDestination(summariesEnabled: true, backend: .customLLM, yourServerConfigured: true),
+            .yourServer
+        )
+        XCTAssertEqual(
+            SettingsPresentation.summaryDestination(summariesEnabled: true, backend: .openRouter, yourServerConfigured: false),
+            .openRouter
+        )
+        XCTAssertEqual(
+            SettingsPresentation.summaryDestination(summariesEnabled: true, backend: .chatGPT, yourServerConfigured: false),
+            .chatGPT
+        )
+    }
+
+    // A Custom backend with no server or model sends nothing, so About must not name a destination.
+    func testUnconfiguredCustomBackendHasNoDestination() {
+        XCTAssertEqual(
+            SettingsPresentation.summaryDestination(summariesEnabled: true, backend: .customLLM, yourServerConfigured: false),
+            .none
+        )
     }
 
     func testAboutProcessingNamesEveryPlaceDataCanGo() {

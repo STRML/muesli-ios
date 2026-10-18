@@ -58,10 +58,15 @@ enum SettingsPresentation {
         case liveTyping
     }
 
-    static func summaryDestination(summariesEnabled: Bool, backend: MeetingSummaryBackend) -> SummaryDestination {
+    /// A Custom backend with no usable server sends nothing: the summarizer throws before any request.
+    static func summaryDestination(
+        summariesEnabled: Bool,
+        backend: MeetingSummaryBackend,
+        yourServerConfigured: Bool
+    ) -> SummaryDestination {
         guard summariesEnabled else { return .none }
         switch backend {
-        case .customLLM: return .yourServer
+        case .customLLM: return yourServerConfigured ? .yourServer : .none
         case .openRouter: return .openRouter
         case .chatGPT: return .chatGPT
         }
@@ -82,7 +87,8 @@ enum SettingsPresentation {
     static var currentSummaryDestination: SummaryDestination {
         summaryDestination(
             summariesEnabled: MuesliPreferences.meetingSummariesEnabled,
-            backend: MuesliPreferences.meetingSummaryBackend
+            backend: MuesliPreferences.meetingSummaryBackend,
+            yourServerConfigured: MuesliPreferences.isVoiceRewriteConfigured
         )
     }
 
