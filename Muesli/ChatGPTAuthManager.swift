@@ -48,13 +48,18 @@ final class ChatGPTAuthManager: NSObject, ASWebAuthenticationPresentationContext
     private static let redirectURI = "http://localhost:1455/auth/callback"
     private static let scopes = "openid profile email offline_access"
     private static let callbackTimeoutSeconds: TimeInterval = 300
-    private static let keychainService = "\(MuesliAppConstants.bundleIdentifier).chatgpt-auth"
+    nonisolated private static let keychainService = "\(MuesliAppConstants.bundleIdentifier).chatgpt-auth"
 
     private let keychain = KeychainStore(service: keychainService)
     private var activeSession: ASWebAuthenticationSession?
 
     var isAuthenticated: Bool {
-        (try? keychain.string(for: "access_token")) != nil
+        Self.hasStoredSession
+    }
+
+    /// Whether a ChatGPT sign-in is stored. It reads the keychain only, so any actor can ask.
+    nonisolated static var hasStoredSession: Bool {
+        (try? KeychainStore(service: keychainService).string(for: "access_token")) != nil
     }
 
     func signIn() async throws {

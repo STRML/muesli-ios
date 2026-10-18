@@ -35,6 +35,7 @@ enum MuesliPreferences {
     static let meetingSummaryBackendKey = "muesli.meetings.summary.backend"
     static let openRouterModelKey = "muesli.meetings.summary.openRouter.model"
     static let chatGPTModelKey = "muesli.meetings.summary.chatGPT.model"
+    static let anthropicModelKey = "muesli.meetings.summary.anthropic.model"
     static let customLLMBaseURLKey = "muesli.meetings.summary.customLLM.baseURL"
     static let customLLMModelKey = "muesli.meetings.summary.customLLM.model"
     static let remoteProcessingEnabledKey = "muesli.transcription.remoteProcessing.enabled"
@@ -195,6 +196,13 @@ enum MuesliPreferences {
         return trimmedValue
     }
 
+    static var anthropicModel: String {
+        let value = UserDefaults.standard.string(forKey: anthropicModelKey) ?? ""
+        let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedValue.isEmpty else { return MeetingSummaryBackend.defaultAnthropicModel }
+        return trimmedValue
+    }
+
     static var customLLMBaseURL: String {
         (UserDefaults.standard.string(forKey: customLLMBaseURLKey) ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -254,9 +262,33 @@ enum MuesliPreferences {
         )
     }
 
-    /// Voice rewrite runs on the Custom LLM, so it is offered only when one is set up.
+    /// Voice rewrite (Quill) runs on the same provider as meeting summaries, so it is offered only when that
+    /// provider is ready to answer: a server URL and model, an API key, or a ChatGPT sign-in.
     static var isVoiceRewriteConfigured: Bool {
-        CustomLLMEndpoint.chatCompletionsURL(from: customLLMBaseURL) != nil && !customLLMModel.isEmpty
+        isProviderConfigured(meetingSummaryBackend)
+    }
+
+    /// The model the stored settings pick for a provider.
+    static func model(for backend: MeetingSummaryBackend) -> String {
+        switch backend {
+        case .customLLM: customLLMModel
+        case .openRouter: openRouterModel
+        case .chatGPT: chatGPTModel
+        case .anthropic: anthropicModel
+        }
+    }
+
+    static func isProviderConfigured(_ backend: MeetingSummaryBackend) -> Bool {
+        switch backend {
+        case .customLLM:
+            CustomLLMEndpoint.chatCompletionsURL(from: customLLMBaseURL) != nil && !customLLMModel.isEmpty
+        case .openRouter:
+            !MeetingSummaryClient.storedOpenRouterAPIKey().isEmpty
+        case .anthropic:
+            !MeetingSummaryClient.storedAnthropicAPIKey().isEmpty
+        case .chatGPT:
+            ChatGPTAuthManager.hasStoredSession
+        }
     }
 
     static var chatGPTModel: String {
@@ -288,6 +320,7 @@ enum MuesliPreferences {
 enum MeetingSummaryBackend: String, CaseIterable, Identifiable {
     case openRouter = "openrouter"
     case chatGPT = "chatgpt"
+    case anthropic = "anthropic"
     case customLLM = "custom_llm"
 
     /// New installs start on the user's own server, so nothing points at a hosted provider until they pick one.
@@ -295,6 +328,7 @@ enum MeetingSummaryBackend: String, CaseIterable, Identifiable {
     static let defaultBackend = MeetingSummaryBackend.customLLM
     static let defaultOpenRouterModel = "stepfun/step-3.5-flash:free"
     static let defaultChatGPTModel = "gpt-5.5"
+    static let defaultAnthropicModel = "claude-sonnet-5-5"
 
     var id: String { rawValue }
 
@@ -304,6 +338,8 @@ enum MeetingSummaryBackend: String, CaseIterable, Identifiable {
             "OpenRouter"
         case .chatGPT:
             "ChatGPT"
+        case .anthropic:
+            "Anthropic"
         case .customLLM:
             "Custom"
         }
@@ -317,6 +353,33 @@ enum MeetingSummaryBackend: String, CaseIterable, Identifiable {
             "Meeting transcripts and your notes are sent to OpenRouter and the model provider you pick."
         case .chatGPT:
             "Meeting transcripts and your notes are sent to OpenAI through your ChatGPT account."
+        case .anthropic:
+            "Meeting transcripts and your notes are sent to Anthropic."
+        case .customLLM:
+            nil
+        }
+    }
+
+    /// What has to be set up before this provider can answer, for "Quill stays off until ...".
+    var setupRequirement: String {
+        switch self {
+        case .openRouter: "an OpenRouter API key is set"
+        case .chatGPT: "you sign in with ChatGPT"
+        case .anthropic: "an Anthropic API key is set"
+        case .customLLM: "a server URL and model are set"
+        }
+    }
+
+    /// What Quill sends where, for the line under the provider picker. A hosted provider receives the text Quill
+    /// is asked to rewrite; Custom has its own line beside the server URL.
+    var quillDestinationNote: String? {
+        switch self {
+        case .openRouter:
+            "Quill sends the text it rewrites to OpenRouter and the model provider you pick."
+        case .chatGPT:
+            "Quill sends the text it rewrites to OpenAI through your ChatGPT account."
+        case .anthropic:
+            "Quill sends the text it rewrites to Anthropic."
         case .customLLM:
             nil
         }
@@ -328,6 +391,8 @@ enum MeetingSummaryBackend: String, CaseIterable, Identifiable {
             Self.defaultOpenRouterModel
         case .chatGPT:
             Self.defaultChatGPTModel
+        case .anthropic:
+            Self.defaultAnthropicModel
         case .customLLM:
             ""
         }
@@ -341,6 +406,13 @@ struct SummaryModelPreset: Identifiable, Hashable {
     static let chatGPTModels: [SummaryModelPreset] = [
         SummaryModelPreset(id: "gpt-5.5", label: "GPT-5.5 (default)"),
         SummaryModelPreset(id: "gpt-5.4-mini", label: "GPT-5.4 Mini"),
+    ]
+
+    static let anthropicModels: [SummaryModelPreset] = [
+        SummaryModelPreset(id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5 (default)"),
+        SummaryModelPreset(id: "claude-haiku-5-5", label: "Claude Haiku 5.5 (fastest)"),
+        SummaryModelPreset(id: "claude-opus-5-5", label: "Claude Opus 5.5"),
+        SummaryModelPreset(id: "claude-fable-5-1", label: "Claude Fable 5.1"),
     ]
 
     static let openRouterModels: [SummaryModelPreset] = [
@@ -371,6 +443,8 @@ struct SummaryModelPreset: Identifiable, Hashable {
             openRouterModels
         case .chatGPT:
             chatGPTModels
+        case .anthropic:
+            anthropicModels
         case .customLLM:
             // A custom server's model names are the user's own; they never go to telemetry.
             [SummaryModelPreset]()

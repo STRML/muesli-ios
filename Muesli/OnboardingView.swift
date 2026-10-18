@@ -29,6 +29,7 @@ struct OnboardingView: View {
     ) == nil ? true : UserDefaults.standard.bool(forKey: MuesliPreferences.meetingSummariesEnabledKey)
     @State private var summaryBackend = MuesliPreferences.meetingSummaryBackend
     @State private var openRouterAPIKey = MeetingSummaryClient.storedOpenRouterAPIKey()
+    @State private var anthropicAPIKey = MeetingSummaryClient.storedAnthropicAPIKey()
     @State private var customLLMAPIKey = MeetingSummaryClient.storedCustomLLMAPIKey()
     @AppStorage(MuesliPreferences.customLLMBaseURLKey) private var customLLMBaseURL = ""
     @AppStorage(MuesliPreferences.customLLMModelKey) private var customLLMModel = ""
@@ -860,6 +861,8 @@ struct OnboardingView: View {
                         customLLMSummarySetup
                     case .openRouter:
                         openRouterSummarySetup
+                    case .anthropic:
+                        anthropicSummarySetup
                     }
 
                     if let summaryStatusText {
@@ -961,9 +964,41 @@ struct OnboardingView: View {
         }
     }
 
+    private var anthropicSummarySetup: some View {
+        VStack(alignment: .leading, spacing: MuesliTheme.spacing12) {
+            Text("Uses your own Anthropic API key. Quill uses the same provider.")
+                .font(MuesliTheme.caption())
+                .foregroundStyle(MuesliTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            SettingsTextFieldRow(
+                icon: "key",
+                title: "Anthropic API Key",
+                placeholder: "sk-ant-...",
+                text: $anthropicAPIKey,
+                isSecure: true
+            )
+            .disabled(!meetingSummariesEnabled)
+
+            SettingsModelPickerRow(
+                icon: "cpu",
+                title: "Anthropic Model",
+                selection: Binding(
+                    get: { MuesliPreferences.anthropicModel },
+                    set: { UserDefaults.standard.set($0, forKey: MuesliPreferences.anthropicModelKey) }
+                ),
+                presets: SummaryModelPreset.anthropicModels
+            )
+            .disabled(!meetingSummariesEnabled)
+        }
+        .onChange(of: anthropicAPIKey) { _, apiKey in
+            saveAnthropicAPIKey(apiKey)
+        }
+    }
+
     private var customLLMSummarySetup: some View {
         VStack(alignment: .leading, spacing: MuesliTheme.spacing12) {
-            Text("Any OpenAI-compatible server, for example your own over Tailscale. Notes and titles are sent only to this address.")
+            Text("Any OpenAI-compatible server, for example your own over Tailscale. Notes, titles and Quill rewrites are sent only to this address.")
                 .font(MuesliTheme.caption())
                 .foregroundStyle(MuesliTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1240,6 +1275,7 @@ struct OnboardingView: View {
 
     private func refreshSummaryStatus() {
         openRouterAPIKey = MeetingSummaryClient.storedOpenRouterAPIKey()
+        anthropicAPIKey = MeetingSummaryClient.storedAnthropicAPIKey()
         customLLMAPIKey = MeetingSummaryClient.storedCustomLLMAPIKey()
         chatGPTSignedIn = ChatGPTAuthManager.shared.isAuthenticated
     }
@@ -1323,6 +1359,17 @@ struct OnboardingView: View {
             summaryStatusText = apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 ? "Custom server key cleared."
                 : "Custom server key saved in Keychain."
+        } catch {
+            summaryStatusText = error.localizedDescription
+        }
+    }
+
+    private func saveAnthropicAPIKey(_ apiKey: String) {
+        do {
+            try MeetingSummaryClient.saveAnthropicAPIKey(apiKey)
+            summaryStatusText = apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? "Anthropic key cleared."
+                : "Anthropic key saved in Keychain."
         } catch {
             summaryStatusText = error.localizedDescription
         }
@@ -1507,7 +1554,7 @@ struct KeyboardSetupVerificationView: View {
                     Text("Verify the keyboard")
                         .font(MuesliTheme.headline())
                         .foregroundStyle(MuesliTheme.textPrimary)
-                    Text("Add Muesli Keyboard in Settings and turn on Full Access. The keyboard can't dictate without it: iOS only lets a keyboard reach its app when Full Access is on. The keyboard itself never goes online. Quill, when you use it, sends the text you're fixing (your selection, or the paragraph before the cursor) to your own LLM endpoint. Then return, select Muesli with the globe key, and tap its Verify button below.")
+                    Text("Add Muesli Keyboard in Settings and turn on Full Access. The keyboard can't dictate without it: iOS only lets a keyboard reach its app when Full Access is on. The keyboard itself never goes online. Quill, when you use it, sends the text you're fixing (your selection, or the paragraph before the cursor) to the AI provider you choose in Settings (your own server, OpenRouter, ChatGPT or Anthropic). Then return, select Muesli with the globe key, and tap its Verify button below.")
                         .font(MuesliTheme.caption())
                         .foregroundStyle(MuesliTheme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)

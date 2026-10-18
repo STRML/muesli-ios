@@ -100,7 +100,7 @@ extension SettingsView {
                 SettingsNavigationRow(
                     icon: "pencil.and.outline",
                     title: "Quill",
-                    detail: "Tap Quill on the keyboard and say what to change. Uses your Custom LLM server."
+                    detail: "Tap Quill on the keyboard and say what to change. Uses the provider you pick under AI Services."
                 ) { openSettingsSection(.aiServices) }
             }
         }
