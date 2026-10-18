@@ -34,6 +34,7 @@ struct SettingsView: View {
     @AppStorage(MuesliPreferences.meetingTemplateKey) var meetingTemplate = MeetingTemplatePreset.general.rawValue
     @AppStorage(MuesliPreferences.iCloudSyncEnabledKey) var iCloudSyncEnabled = false
     @State var keyboardSetupStatus = KeyboardSetupStatus.unknown
+    @State var systemDictationEnabled = false
     @State var openRouterAPIKey = ""
     @State var summaryStatusText: String?
     @State var chatGPTSignedIn = false

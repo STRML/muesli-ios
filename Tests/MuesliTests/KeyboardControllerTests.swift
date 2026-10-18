@@ -466,6 +466,32 @@ final class KeyboardControllerTests: XCTestCase {
         XCTAssertTrue(insertedText.isEmpty)
     }
 
+    func testIOSDictationStartingEndsTheRecordingAndInsertsNothing() throws {
+        try store.claimRequest(.init(id: requestID))
+        try store.saveKeyboardRuntimeStatus(recordingStatus(level: 0.4))
+        try store.saveKeyboardHandoffState(handoff(.recordingStarted))
+        controller.prepareInitialPresentationState()
+        try streamPartials(["do not keep this"])
+        defer { controller.stopObservingSharedState() }
+        controller.systemDictationDidStart()
+        XCTAssertEqual(try store.pendingCommand()?.action, .cancel)
+        XCTAssertTrue(insertedText.isEmpty)
+    }
+
+    func testIOSDictationStartingWhileIdleChangesNothing() throws {
+        controller.prepareInitialPresentationState()
+        controller.systemDictationDidStart()
+        XCTAssertNil(try store.pendingCommand())
+    }
+
+    func testTheKeyboardReportsWhetherIOSDictationIsOn() throws {
+        controller.systemDictationEnabled = true
+        controller.publishVisibilityHeartbeat()
+        XCTAssertEqual(try store.keyboardExtensionStatus()?.systemDictationEnabled, true)
+        controller.stopObservingSharedState()
+        XCTAssertEqual(try store.keyboardExtensionStatus()?.systemDictationEnabled, true)
+    }
+
     // Keyboard hidden at completion: the app copies instead (copyRequired). The preview clears, nothing is inserted.
     func testClipboardFallbackClearsThePreviewWithoutInserting() throws {
         try store.claimRequest(.init(id: requestID))

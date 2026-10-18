@@ -714,6 +714,15 @@ final class KeyboardController {
         statusText = "Deleted"
     }
 
+    /// iOS's own dictation started under this keyboard. Two dictations cannot share the mic, so Muesli's ends.
+    func systemDictationDidStart() {
+        guard [.requested, .recording].contains(dictationPhase) else { return }
+        cancelActiveDictation()
+    }
+
+    /// Whether iOS's own dictation is on, as read by the view controller when the keyboard appears.
+    var systemDictationEnabled: Bool?
+
     func cancelActiveDictation() {
         refreshLatestDictation()
         guard canCancelActiveDictation else {
@@ -852,7 +861,7 @@ final class KeyboardController {
         refreshSetupVerificationChallenge()
         // Heartbeats must not replace recording or setup messages on failure.
         try? store.saveKeyboardExtensionStatus(.init(
-            lastSeenAt: .now, hasOpenAccess: access, isVisible: true
+            lastSeenAt: .now, hasOpenAccess: access, isVisible: true, systemDictationEnabled: systemDictationEnabled
         ))
     }
 
@@ -863,7 +872,8 @@ final class KeyboardController {
             try store.saveKeyboardExtensionStatus(.init(
                 lastSeenAt: .now,
                 hasOpenAccess: hasOpenAccess,
-                isVisible: true
+                isVisible: true,
+                systemDictationEnabled: systemDictationEnabled
             ))
         } catch {
             statusText = sharedStoreFailureMessage()
@@ -897,7 +907,8 @@ final class KeyboardController {
             try? store.saveKeyboardExtensionStatus(.init(
                 lastSeenAt: .now,
                 hasOpenAccess: status.hasOpenAccess,
-                isVisible: false
+                isVisible: false,
+                systemDictationEnabled: status.systemDictationEnabled
             ))
         }
     }

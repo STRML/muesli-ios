@@ -844,17 +844,22 @@ struct KeyboardExtensionStatus: Codable, Sendable, Equatable {
     let lastSeenAt: Date
     let hasOpenAccess: Bool
     let isVisible: Bool
+    /// iOS's own dictation is on (Settings > General > Keyboard). Only the keyboard can read it without declaring
+    /// the active-keyboards API in the app; nil until the keyboard has run once.
+    let systemDictationEnabled: Bool?
 
-    init(lastSeenAt: Date, hasOpenAccess: Bool, isVisible: Bool = true) {
+    init(lastSeenAt: Date, hasOpenAccess: Bool, isVisible: Bool = true, systemDictationEnabled: Bool? = nil) {
         self.lastSeenAt = lastSeenAt
         self.hasOpenAccess = hasOpenAccess
         self.isVisible = isVisible
+        self.systemDictationEnabled = systemDictationEnabled
     }
 
     private enum CodingKeys: String, CodingKey {
         case lastSeenAt
         case hasOpenAccess
         case isVisible
+        case systemDictationEnabled
     }
 
     init(from decoder: any Decoder) throws {
@@ -864,6 +869,7 @@ struct KeyboardExtensionStatus: Codable, Sendable, Equatable {
         // Status records written before Action Button support only represented
         // a successful keyboard launch, so preserve that historical meaning.
         isVisible = try container.decodeIfPresent(Bool.self, forKey: .isVisible) ?? true
+        systemDictationEnabled = try container.decodeIfPresent(Bool.self, forKey: .systemDictationEnabled)
     }
 }
 
