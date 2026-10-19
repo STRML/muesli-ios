@@ -40,4 +40,28 @@ final class AutocorrectFootprintTests: XCTestCase {
         try? text.write(toFile: NSTemporaryDirectory() + "autocorrect-footprint.txt", atomically: true, encoding: .utf8)
         XCTAssertLessThan(afterPool - afterGuesses, 20_000, text)
     }
+
+    // What the appear-time warm-up costs: wall time on its queue, and the footprint it adds beyond a bare checker.
+    func testCostOfTheAppearTimeWarmUp() async throws {
+        let warmup = TypingCheckerWarmup(makeWarmer: { UITextCheckerWarmer() }, scheduler: DispatchWarmupScheduler())
+        let start = footprintKB()
+        let began = ProcessInfo.processInfo.systemUptime
+        var appeared = began
+        warmup.start(languages: ["en-US"], available: UITextChecker.availableLanguages)
+        appeared = ProcessInfo.processInfo.systemUptime
+        while warmup.state == .warming, ProcessInfo.processInfo.systemUptime - began < 30 {
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
+        let done = ProcessInfo.processInfo.systemUptime
+        let after = footprintKB()
+        let lookups = TypingCheckerWarmup.probeLetters.count + TypingCheckerWarmup.probeTypos.count
+        let text = String(
+            format: "warm-up state %@, start() returned in %.3f ms, finished after %.1f ms (%d lookups), footprint KB %d -> %d (+%d)",
+            "\(warmup.state)", (appeared - began) * 1000, (done - began) * 1000, lookups, start, after, after - start
+        )
+        print("WARMUP COST \(text)")
+        try? text.write(toFile: NSTemporaryDirectory() + "warmup-cost.txt", atomically: true, encoding: .utf8)
+        XCTAssertEqual(warmup.state, .warm, text)
+        XCTAssertLessThan((appeared - began) * 1000, 5, "start() must not do the lookups on the caller")
+    }
 }

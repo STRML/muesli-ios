@@ -65,6 +65,10 @@ final class KeyboardTypingModel {
     @ObservationIgnored private var hasRequestedLexicon = false
     @ObservationIgnored private let languageSource = TypingLanguageSource()
     @ObservationIgnored private let autocorrectSwitch = AutocorrectSwitch()
+    @ObservationIgnored let checkerWarmup = TypingCheckerWarmup(
+        makeWarmer: { UITextCheckerWarmer() },
+        scheduler: DispatchWarmupScheduler()
+    )
 
     init(learnedWords: TypingLearnedWordsStoring = TypingLearnedWordsDefaults()) {
         let languages = languageSource
@@ -135,8 +139,19 @@ final class KeyboardTypingModel {
         engine.documentDidChange()
     }
 
+    /// The keyboard is on screen: load the checker's language data off the main thread, ahead of the first word.
+    func keyboardDidAppear() {
+        checkerWarmup.start(languages: languageSource.candidates, available: UITextChecker.availableLanguages)
+    }
+
+    /// The keyboard is going away: stop a warm-up in flight. A warm checker stays warm.
+    func keyboardWillDisappear() {
+        checkerWarmup.cancel()
+    }
+
     /// Drop the checker and lexicon when the keyboard goes away or memory is tight.
     func releaseMemory() {
+        checkerWarmup.releaseMemory()
         builder.documentDidChange()
         builder.setLexicon([])
         autocorrector.setLexicon([])

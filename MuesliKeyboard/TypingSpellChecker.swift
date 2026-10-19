@@ -28,3 +28,30 @@ final class UITextCheckerAdapter: TypingSpellChecking {
         return checker.guesses(forWordRange: range, in: word, language: language) ?? []
     }
 }
+
+/// The two `UITextChecker` selectors the warm-up sends. UIKit marks the class main-actor although it holds no UI
+/// state, and the warm-up must not run on the main actor, so it messages the same selectors through this protocol.
+@objc private protocol BackgroundTextChecking {
+    @objc(completionsForPartialWordRange:inString:language:)
+    func completions(forPartialWordRange range: NSRange, in string: String, language: String?) -> [String]?
+    @objc(guessesForWordRange:inString:language:)
+    func guesses(forWordRange range: NSRange, in string: String, language: String?) -> [String]?
+}
+
+/// A checker for the background warm-up. Its own `UITextChecker`, made and used only on the warm-up queue, so no
+/// lookup here can race the main-actor checker the keyboard types with. The language data it loads is shared by
+/// the whole process.
+nonisolated final class UITextCheckerWarmer: TypingCheckerWarming {
+    private nonisolated(unsafe) let checker: BackgroundTextChecking =
+        unsafeBitCast((UITextChecker.self as NSObject.Type).init(), to: BackgroundTextChecking.self)
+
+    func completions(forPartial partial: String, language: String) -> [String] {
+        let range = NSRange(location: 0, length: (partial as NSString).length)
+        return checker.completions(forPartialWordRange: range, in: partial, language: language) ?? []
+    }
+
+    func guesses(forWord word: String, language: String) -> [String] {
+        let range = NSRange(location: 0, length: (word as NSString).length)
+        return checker.guesses(forWordRange: range, in: word, language: language) ?? []
+    }
+}
