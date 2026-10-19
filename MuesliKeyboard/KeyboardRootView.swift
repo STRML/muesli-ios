@@ -493,67 +493,22 @@ extension View {
     }
 }
 
-private struct KeyboardIconKey: View {
-    let systemImage: String
-    let accessibilityLabel: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            KeyboardIconLabel(systemImage: systemImage)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(accessibilityLabel)
-    }
-}
-
-private struct KeyboardIconLabel: View {
-    let systemImage: String
-
-    var body: some View {
-        Image(systemName: systemImage)
-            .font(.system(size: 17, weight: .semibold))
-            .foregroundStyle(MuesliTheme.textPrimary)
-            .frame(width: 34, height: 34)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(MuesliTheme.surfacePrimary.opacity(0.76))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(MuesliTheme.surfaceBorder, lineWidth: 1)
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-}
-
 private struct KeyboardTextKey: View {
-    let title: String?
-    let systemImage: String?
-    let accessibilityLabel: String?
+    let title: String
     let action: () -> Void
 
     init(_ title: String, action: @escaping () -> Void) {
         self.title = title
-        self.systemImage = nil
-        self.accessibilityLabel = title
-        self.action = action
-    }
-
-    init(systemImage: String, accessibilityLabel: String, action: @escaping () -> Void) {
-        self.title = nil
-        self.systemImage = systemImage
-        self.accessibilityLabel = accessibilityLabel
         self.action = action
     }
 
     var body: some View {
         Button(action: action) {
-            KeyboardTextKeyLabel(title: title, systemImage: systemImage)
+            KeyboardTextKeyLabel(title: title, systemImage: nil)
         }
         .buttonStyle(.plain)
         .muesliKeyboardKeySurface()
-        .accessibilityLabel(accessibilityLabel ?? title ?? systemImage ?? "")
+        .accessibilityLabel(title)
     }
 }
 
@@ -608,8 +563,8 @@ private extension View {
         modifier(MuesliKeyboardDeckSurfaceModifier())
     }
 
-    func muesliKeyboardKeySurface(tint: Color? = nil) -> some View {
-        modifier(MuesliKeyboardKeySurfaceModifier(tint: tint))
+    func muesliKeyboardKeySurface() -> some View {
+        modifier(MuesliKeyboardKeySurfaceModifier())
     }
 }
 
@@ -637,18 +592,15 @@ private struct MuesliKeyboardDeckSurfaceModifier: ViewModifier {
 }
 
 private struct MuesliKeyboardKeySurfaceModifier: ViewModifier {
-    let tint: Color?
-
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
-        let keyTint = tint ?? Color.white
 
         content
             .background {
                 shape.fill(.ultraThinMaterial)
-                shape.fill(keyTint.opacity(tint == nil ? 0.035 : 0.10))
+                shape.fill(Color.white.opacity(0.035))
             }
-            .overlay(shape.strokeBorder(keyTint.opacity(tint == nil ? 0.10 : 0.22), lineWidth: 1))
+            .overlay(shape.strokeBorder(Color.white.opacity(0.10), lineWidth: 1))
             .shadow(color: Color(hex: 0x02060C).opacity(0.28), radius: 4, x: 0, y: 2)
             .contentShape(shape)
     }

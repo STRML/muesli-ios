@@ -221,8 +221,6 @@ final class KeyboardController {
             : "Proves Keyboard • Full Access still off"
     }
 
-    var showsLiveTranscript: Bool { livePreview != nil }
-
     /// The streaming words shown while recording, dimmed while the final pass runs. Display only: live typing into
     /// the field is `liveTyper`'s job, and only a delivered result is ever handed to `textInserter`. While the words
     /// are being typed into the field the field is the preview, and the strip stays out of the way.
@@ -253,8 +251,6 @@ final class KeyboardController {
             "Stop"
         case .transcribing:
             "Transcribing"
-        case .inserted:
-            "Inserted"
         case .record:
             "Record"
         }
@@ -276,15 +272,9 @@ final class KeyboardController {
             "stop.fill"
         case .transcribing:
             "waveform"
-        case .inserted:
-            "checkmark"
         case .record:
             "mic.fill"
         }
-    }
-
-    var stylesPrimaryButtonAsStop: Bool {
-        primaryButtonRole == .stop
     }
 
     var primaryButtonRole: KeyboardPrimaryButtonRole {
@@ -326,10 +316,6 @@ final class KeyboardController {
             dictationPhase == .transcribing
             || latestHandoffState.map({ [.stopRequested, .cancelRequested].contains($0.phase) }) == true
         )
-    }
-
-    var canInsertLatest: Bool {
-        hasLatestDictation && activeRequestID == nil
     }
 
     var canUndoRewrite: Bool { lastRewrite != nil }
@@ -787,11 +773,6 @@ final class KeyboardController {
         latestHandoffState = .init(requestID: requestID, phase: .cancelled, message: "Cancelled", ownerBootID: owner, endReason: AbandonReason.ownerLost.rawValue)
         releaseLocalRequest(requestID)
         readinessModel.setRequest(.notInProgress)
-    }
-
-    private func hasPendingCancelCommand() -> Bool {
-        guard let command = try? store.pendingCommand(), command.action == .cancel else { return false }
-        return cancelledRequestIDs.contains(command.requestID)
     }
 
     func prepareInitialPresentationState() {
@@ -1842,7 +1823,6 @@ enum KeyboardPrimaryButtonRole {
     case openMuesliRequested
     case stop
     case transcribing
-    case inserted
     case record
 }
 
