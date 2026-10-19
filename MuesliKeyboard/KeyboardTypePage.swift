@@ -2,7 +2,7 @@ import SwiftUI
 
 /// The typing page: the strip on top (suggestions, or the dictation status while one runs, with Cancel while one
 /// runs and Quill at its ends) and four rows of keys. Holding the Record key for three seconds opens the Dictate
-/// page, the way back to the old keyboard. Everything it shows about dictation is read from the controller.
+/// page. Everything it shows about dictation is read from the controller.
 struct KeyboardTypePage: View {
     /// The keys' tap areas run to the screen edge; their painted faces are inset by `KeyboardTypeKey.faceInset`.
     static let sideBleed: CGFloat = 5
@@ -369,7 +369,7 @@ private struct KeyboardTypeKey: View {
             }
             .accessibilityLabel(key.label)
         case .character(let text):
-            button(fill: isSpecialCharacter ? TypingKeyPalette.specialFill : TypingKeyPalette.letterFill) {
+            button(fill: key.isSpecial ? TypingKeyPalette.specialFill : TypingKeyPalette.letterFill) {
                 typing.perform(.character(text))
             } label: {
                 Text(key.label).font(.system(size: 22))
@@ -377,8 +377,6 @@ private struct KeyboardTypeKey: View {
             .accessibilityLabel(text)
         }
     }
-
-    private var isSpecialCharacter: Bool { key.id.hasPrefix("extra-") }
 
     private func button<Label: View>(
         fill: Color,

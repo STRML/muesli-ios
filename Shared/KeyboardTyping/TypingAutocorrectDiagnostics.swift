@@ -43,14 +43,6 @@ struct TypingAutocorrectDiagnostic: Equatable, Sendable {
     var completionsEmpty: Bool?
     var traits: TypingTraits
 
-    static func boundaryName(_ boundary: TypingBoundary) -> String {
-        switch boundary {
-        case .space: "space"
-        case .punctuation: "punctuation"
-        case .returnKey: "return"
-        }
-    }
-
     static func variantName(_ variant: TypingKeyboardVariant) -> String {
         switch variant {
         case .standard: "standard"

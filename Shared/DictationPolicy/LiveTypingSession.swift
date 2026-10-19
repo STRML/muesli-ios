@@ -47,6 +47,11 @@ enum LiveTypingKept: String, Equatable, Sendable {
     case cursorMoved, fieldChanged, textChanged
 }
 
+/// Why the final text was not inserted. The raw values go to the diagnostics log.
+enum LiveTypingWithheld: String, Equatable, Sendable {
+    case detached, cancelled, finished, committed, rewrite
+}
+
 enum LiveTypingPhase: Equatable, Sendable {
     case awaitingFirstPartial
     /// The first words are marked; waiting to see them in the context.
@@ -67,7 +72,7 @@ struct LiveTypingFinal: Equatable, Sendable {
         /// Insert this text at the cursor, the way a dictation is inserted without live typing.
         case insertPlain(String)
         /// Leave the field as it is: the words are already there, and inserting again would duplicate them.
-        case withheld(String)
+        case withheld(LiveTypingWithheld)
     }
 
     var commands: [LiveTypingCommand]
@@ -438,11 +443,11 @@ struct LiveTypingSession: Sendable {
             return finishPlain(text)
         case .kept:
             phase = .finished
-            return LiveTypingFinal(commands: [], outcome: .withheld("detached"))
+            return LiveTypingFinal(commands: [], outcome: .withheld(.detached))
         case .cancelled:
-            return LiveTypingFinal(commands: [], outcome: .withheld("cancelled"))
+            return LiveTypingFinal(commands: [], outcome: .withheld(.cancelled))
         case .finished:
-            return LiveTypingFinal(commands: [], outcome: .withheld("finished"))
+            return LiveTypingFinal(commands: [], outcome: .withheld(.finished))
         case .live, .probingAppearance, .probingReplace:
             return finishLive(text, snapshot: snapshot)
         }
@@ -453,7 +458,7 @@ struct LiveTypingSession: Sendable {
         guard !committed.isEmpty else { return LiveTypingFinal(commands: [], outcome: .insertPlain(text)) }
         // A host may have capitalized or re-quoted the committed sentences, so the prefix is compared folded.
         guard LiveTypingText.folded(String(text.prefix(committed.count))) == LiveTypingText.folded(committed) else {
-            return LiveTypingFinal(commands: [], outcome: .withheld("committed"))
+            return LiveTypingFinal(commands: [], outcome: .withheld(.committed))
         }
         let rest = String(text.dropFirst(committed.count))
         return LiveTypingFinal(commands: [], outcome: rest.isEmpty ? .replacedInPlace : .insertPlain(rest))
@@ -471,7 +476,7 @@ struct LiveTypingSession: Sendable {
             phase = .finished
             return LiveTypingFinal(
                 commands: [.unmark, .log(event: "live_typing.detached", reason: detachReason(snapshot).rawValue)],
-                outcome: .withheld("detached")
+                outcome: .withheld(.detached)
             )
         }
         defer { phase = .finished }
@@ -490,7 +495,7 @@ struct LiveTypingSession: Sendable {
         guard count <= LiveTypingText.maxRewriteDelete,
               LiveTypingText.contextEnds(with: mirroredText, in: snapshot.before)
         else {
-            return LiveTypingFinal(commands: [.unmark], outcome: .withheld("rewrite"))
+            return LiveTypingFinal(commands: [.unmark], outcome: .withheld(.rewrite))
         }
         return LiveTypingFinal(commands: [.unmark, .deleteBackward(count), .insert(text)], outcome: .replacedInPlace)
     }

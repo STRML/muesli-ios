@@ -196,32 +196,28 @@ final class TypingAutocorrector: TypingWordCompletionHandling {
 
     /// What ended the word, reduced to what autocorrect cares about.
     private struct Boundary {
+        let source: TypingBoundary
         let text: String
         let expandsShortcuts: Bool
         /// Before a "." or ":" the word may be the start of a host name or a URL scheme.
         let isStrict: Bool
+
         /// For diagnostics: "space", "punctuation" or "return".
-        let name: String
+        var name: String { source.name }
 
         private static let sentenceMarks: Set<String> = [".", ",", "!", "?", ";", ":"]
 
         init?(_ boundary: TypingBoundary) {
+            source = boundary
             switch boundary {
             case .space:
-                self.init(text: " ", expandsShortcuts: true, isStrict: false, name: "space")
+                (text, expandsShortcuts, isStrict) = (" ", true, false)
             case .returnKey:
-                self.init(text: "\n", expandsShortcuts: false, isStrict: false, name: "return")
+                (text, expandsShortcuts, isStrict) = ("\n", false, false)
             case .punctuation(let mark):
                 guard Self.sentenceMarks.contains(mark) else { return nil }
-                self.init(text: mark, expandsShortcuts: false, isStrict: mark == "." || mark == ":", name: "punctuation")
+                (text, expandsShortcuts, isStrict) = (mark, false, mark == "." || mark == ":")
             }
-        }
-
-        private init(text: String, expandsShortcuts: Bool, isStrict: Bool, name: String) {
-            self.name = name
-            self.text = text
-            self.expandsShortcuts = expandsShortcuts
-            self.isStrict = isStrict
         }
     }
 }

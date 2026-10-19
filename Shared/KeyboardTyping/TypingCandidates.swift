@@ -12,9 +12,9 @@ struct TypingCandidate: Sendable, Equatable {
 }
 
 /// Finds the candidates for a word the checker flagged: the checker's own guesses, each checked to be a word, with
-/// how used it is. Our own generation of candidates (every word one cheap slip away that the checker accepts, found
-/// with `rangeOfMisspelledWord` as the oracle) was built and measured against the real checker on 29,000 typos: it
-/// raised the corrected rate by 0.1 point and cost about ten milliseconds a word, so it was taken out.
+/// how used it is. It generates no candidates of its own: trying every word one cheap slip away, with
+/// `rangeOfMisspelledWord` as the oracle, raised the corrected rate by 0.1 point on 29,000 typos against the real
+/// checker and cost about ten milliseconds a word.
 @MainActor
 struct TypingCandidatePool {
     struct Options: Sendable, Equatable {

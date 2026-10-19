@@ -195,10 +195,8 @@ final class KeyboardLiveTyper {
     /// The final text. Returns what the keyboard still has to do with it.
     func final(_ text: String, requestID: UUID) -> LiveTypingFinal.Outcome {
         guard session?.requestID == requestID else { return .insertPlain(text) }
-        cancelTimers()
-        throttle.reset()
-        let snapshot = host?.snapshot() ?? LiveTypingSnapshot()
-        guard let result = session?.final(text, snapshot: snapshot) else { return .insertPlain(text) }
+        stopStreaming()
+        guard let result = session?.final(text, snapshot: hostSnapshot) else { return .insertPlain(text) }
         perform(result.commands)
         return result.outcome
     }
@@ -217,31 +215,26 @@ final class KeyboardLiveTyper {
     /// Something is about to edit the field, or the keyboard is going away.
     func yield(_ reason: LiveTypingOff) {
         guard session != nil else { return }
-        cancelTimers()
-        throttle.reset()
+        stopStreaming()
         perform(session?.yield(reason) ?? [])
     }
 
     /// The user cancelled this dictation.
     func cancel(requestID: UUID) {
         guard session?.requestID == requestID else { return }
-        cancelTimers()
-        throttle.reset()
-        let snapshot = host?.snapshot() ?? LiveTypingSnapshot()
-        perform(session?.cancel(snapshot: snapshot) ?? [])
+        stopStreaming()
+        perform(session?.cancel(snapshot: hostSnapshot) ?? [])
     }
 
     /// The dictation ended with no text for the keyboard to insert: the words stay as plain text.
     func endWithoutResult(requestID: UUID) {
         guard session?.requestID == requestID else { return }
-        cancelTimers()
-        throttle.reset()
+        stopStreaming()
         perform(session?.endWithoutResult() ?? [])
     }
 
     private func endSessionForNewRequest() {
-        cancelTimers()
-        throttle.reset()
+        stopStreaming()
         if session != nil { perform(session?.endWithoutResult() ?? []) }
         session = nil
     }
@@ -252,13 +245,17 @@ final class KeyboardLiveTyper {
         lastUpdatedAt = nil
     }
 
-    private func cancelTimers() {
+    /// Cancels every timer and forgets the throttled text, so nothing more is written for the session.
+    private func stopStreaming() {
         for cancel in [cancelFlush, cancelProbePoll, cancelProbeTimeout, cancelRecheck] { cancel?() }
         cancelFlush = nil
         cancelProbePoll = nil
         cancelProbeTimeout = nil
         cancelRecheck = nil
+        throttle.reset()
     }
+
+    private var hostSnapshot: LiveTypingSnapshot { host?.snapshot() ?? LiveTypingSnapshot() }
 
     // MARK: Performing commands
 

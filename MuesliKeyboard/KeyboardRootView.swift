@@ -56,7 +56,7 @@ struct KeyboardRootView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
     }
 
-    /// The original dictation panel: Start, Model and Quill, status, live preview and helper keys. It fills the
+    /// The Dictate page: Start, Model and Quill, status, live preview and helper keys. It fills the
     /// shared height, so the helper keys take whatever the taller Type page leaves them.
     private var dictatePage: some View {
         VStack(spacing: 5) {
@@ -387,14 +387,14 @@ struct KeyboardRootView: View {
 
                 // Minimal has no typing keyboard to go back to; the space key takes the width.
                 if controller.layout.offersTypePage {
-                    KeyboardTextKey("ABC") { controller.showTypePage() }
+                    KeyboardTextKey("ABC", fontSize: 16) { controller.showTypePage() }
                         .frame(maxWidth: 66)
                         .accessibilityHint("Back to the typing keyboard")
                 }
 
-                KeyboardTextKey("space") { controller.insertSpace() }
+                KeyboardTextKey("space", fontSize: 15) { controller.insertSpace() }
 
-                KeyboardTextKey("return") { controller.insertReturn() }
+                KeyboardTextKey("return", fontSize: 15) { controller.insertReturn() }
                     .frame(maxWidth: 96)
 
                 KeyboardTextKey(":") { controller.insertTextKey(":") }
@@ -495,16 +495,18 @@ extension View {
 
 private struct KeyboardTextKey: View {
     let title: String
+    let fontSize: CGFloat
     let action: () -> Void
 
-    init(_ title: String, action: @escaping () -> Void) {
+    init(_ title: String, fontSize: CGFloat = 22, action: @escaping () -> Void) {
         self.title = title
+        self.fontSize = fontSize
         self.action = action
     }
 
     var body: some View {
         Button(action: action) {
-            KeyboardTextKeyLabel(title: title, systemImage: nil)
+            KeyboardTextKeyLabel(title: title, systemImage: nil, fontSize: fontSize)
         }
         .buttonStyle(.plain)
         .muesliKeyboardKeySurface()
@@ -528,6 +530,7 @@ private struct KeyboardRepeatingTextKey: View {
 private struct KeyboardTextKeyLabel: View {
     var title: String?
     var systemImage: String?
+    var fontSize: CGFloat = 22
 
     var body: some View {
         Group {
@@ -536,7 +539,7 @@ private struct KeyboardTextKeyLabel: View {
                     .font(.system(size: 23, weight: .semibold))
             } else {
                 Text(title ?? "")
-                    .font(.system(size: textSize, weight: .medium))
+                    .font(.system(size: fontSize, weight: .medium))
                     .minimumScaleFactor(0.8)
             }
         }
@@ -544,17 +547,6 @@ private struct KeyboardTextKeyLabel: View {
         .frame(maxWidth: .infinity)
         .frame(minHeight: 38, maxHeight: .infinity)
         .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
-
-    private var textSize: CGFloat {
-        switch title {
-        case "space", "return":
-            15
-        case "ABC":
-            16
-        default:
-            22
-        }
     }
 }
 

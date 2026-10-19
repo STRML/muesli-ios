@@ -89,9 +89,9 @@ enum TypingRecordKey {
     }
 }
 
-/// The way back to the old keyboard page while the Type page is being built out: holding the Record key for
-/// three seconds. This is the tracker for one press. The view feeds it touch events and a timer; it decides
-/// whether the hold counts, and whether the release afterwards is a tap.
+/// The way from the Type page to the Dictate page: holding the Record key for three seconds. This is the
+/// tracker for one press. The view feeds it touch events and a timer; it decides whether the hold counts, and
+/// whether the release afterwards is a tap.
 struct TypingRecordHold: Sendable, Equatable {
     /// How long the key must be held.
     static let duration: TimeInterval = 3.0

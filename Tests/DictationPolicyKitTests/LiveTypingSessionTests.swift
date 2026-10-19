@@ -356,7 +356,7 @@ final class LiveTypingSessionTests: XCTestCase {
         XCTAssertEqual(h.host.markedLength, 0)
         let before = h.host.document
         let result = h.session.final("Hello world.", snapshot: h.host.snapshot())
-        XCTAssertEqual(result.outcome, .withheld("detached"))
+        XCTAssertEqual(result.outcome, .withheld(.detached))
         XCTAssertTrue(result.commands.isEmpty)
         XCTAssertEqual(h.host.document, before, "a second copy of the words")
         XCTAssertTrue(h.logs.contains("live_typing.detached cursorMoved"), "\(h.logs)")
@@ -376,7 +376,7 @@ final class LiveTypingSessionTests: XCTestCase {
         h.host.userSwitchesField()
         h.settle()
         XCTAssertEqual(h.session.phase, .kept(.fieldChanged))
-        XCTAssertEqual(h.session.final("Hi.", snapshot: h.host.snapshot()).outcome, .withheld("detached"))
+        XCTAssertEqual(h.session.final("Hi.", snapshot: h.host.snapshot()).outcome, .withheld(.detached))
     }
 
     func testAHostThatWritesItsOwnTextBackFallsBackToThePlainFinal() {
@@ -404,7 +404,7 @@ final class LiveTypingSessionTests: XCTestCase {
         h.reachLive(with: "hello world")
         h.host.userMovesCursor(toOffsetFromEnd: 6)
         let result = h.session.final("Hello world.", snapshot: h.host.snapshot())
-        XCTAssertEqual(result.outcome, .withheld("detached"))
+        XCTAssertEqual(result.outcome, .withheld(.detached))
     }
 
     func testTheHostChangingTheWordsDetaches() {
@@ -527,7 +527,7 @@ final class LiveTypingSessionTests: XCTestCase {
         h.host.userMovesCursor(toOffsetFromEnd: 5)
         let before = h.host.document
         let result = h.session.final("Revised: " + long, snapshot: h.host.snapshot())
-        XCTAssertEqual(result.outcome, .withheld("detached"))
+        XCTAssertEqual(result.outcome, .withheld(.detached))
         h.host.perform(result.commands)
         XCTAssertEqual(h.host.document, before)
     }
@@ -745,7 +745,7 @@ final class LiveTypingSessionTests: XCTestCase {
             h.partial(long + "tail words")
         }
         let result = h.session.final("Revised: " + long + "tail words", snapshot: h.host.snapshot())
-        XCTAssertEqual(result.outcome, .withheld("rewrite"))
+        XCTAssertEqual(result.outcome, .withheld(.rewrite))
     }
 
     func testCancelAlsoRemovesCommittedChunksWhenTheFieldStillEndsWithThem() {
@@ -788,6 +788,6 @@ final class LiveTypingSessionTests: XCTestCase {
         h.partial(long)
         h.host.perform(h.session.yield(.yielded))
         let result = h.session.final("Totally different text.", snapshot: h.host.snapshot())
-        XCTAssertEqual(result.outcome, .withheld("committed"))
+        XCTAssertEqual(result.outcome, .withheld(.committed))
     }
 }
