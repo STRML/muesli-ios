@@ -106,7 +106,7 @@ enum MuesliPreferences {
     static var keyboardLayout: KeyboardLayout { keyboardLayout(in: .standard) }
 
     static func keyboardLayout(in defaults: UserDefaults) -> KeyboardLayout {
-        defaults.string(forKey: keyboardLayoutKey).flatMap(KeyboardLayout.init(storedValue:)) ?? .fallback
+        defaults.string(forKey: keyboardLayoutKey).flatMap(KeyboardLayout.init(rawValue:)) ?? .fallback
     }
 
     static var keyboardSessionModeEnabled: Bool {

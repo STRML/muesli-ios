@@ -2,9 +2,9 @@ import Foundation
 
 /// When the app may load the selected transcription model ahead of need.
 ///
-/// Loading a Core ML model onto the Neural Engine is the most expensive thing the app does at startup, and it used
-/// to run on every launch and every foreground. A load that fails was also retried on the next foreground with no
-/// delay, and a load that compiled for minutes was no reason to stop. This policy replaces that with three rules:
+/// Loading a Core ML model onto the Neural Engine is the most expensive thing the app does at startup, so the app
+/// loads it ahead of need only when that can pay off. A failed load is not retried at once, and a load that
+/// compiled for minutes is no reason to stop. Four rules:
 ///
 /// - **Opening the app warms the model only until it has loaded once under this build and OS.** After that a
 ///   launch or foreground does not load it. The load happens at the moment it is needed (see ``Trigger``). An

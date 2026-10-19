@@ -28,13 +28,19 @@ struct TypingKey: Sendable, Equatable, Identifiable {
     let weight: Double
     /// Painted in the accent colour (an action return key).
     let isProminent: Bool
+    /// A character key painted like a function key, not a letter (the "@" and "." of an email or URL field).
+    let isSpecial: Bool
 
-    init(id: String, action: TypingKeyAction, label: String, weight: Double = 1, isProminent: Bool = false) {
+    init(
+        id: String, action: TypingKeyAction, label: String, weight: Double = 1,
+        isProminent: Bool = false, isSpecial: Bool = false
+    ) {
         self.id = id
         self.action = action
         self.label = label
         self.weight = weight
         self.isProminent = isProminent
+        self.isSpecial = isSpecial
     }
 }
 
@@ -116,7 +122,9 @@ enum TypingLayout {
             id: "return", action: .returnKey, label: traits.returnKey.title,
             weight: 1.9, isProminent: traits.returnKey.isProminent
         )
-        let extraKeys = extras.map { TypingKey(id: "extra-\($0)", action: .character($0), label: $0, weight: 0.8) }
+        let extraKeys = extras.map {
+            TypingKey(id: "extra-\($0)", action: .character($0), label: $0, weight: 0.8, isSpecial: true)
+        }
         let fixed = row.map(\.weight).reduce(0, +) + extraKeys.map(\.weight).reduce(0, +) + returnKey.weight
         let space = TypingKey(id: "space", action: .space, label: "space", weight: rowWeight - fixed)
         return row + [space] + extraKeys + [returnKey]

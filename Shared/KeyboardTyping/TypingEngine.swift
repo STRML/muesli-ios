@@ -16,9 +16,18 @@ enum TypingBoundary: Sendable, Equatable {
     case space
     case punctuation(String)
     case returnKey
+
+    /// The kind of boundary for the diagnostics log: never the mark itself.
+    var name: String {
+        switch self {
+        case .space: "space"
+        case .punctuation: "punctuation"
+        case .returnKey: "return"
+        }
+    }
 }
 
-/// A word just ended. This is the phase 2 autocorrect hook: the word, what ended it, and the document it is in.
+/// A word just ended: the word, what ended it, and the document it is in. Autocorrect decides on it.
 struct TypingWordCompletedEvent: Sendable, Equatable {
     let word: String
     let boundary: TypingBoundary
@@ -57,7 +66,7 @@ struct TypingState: Sendable, Equatable {
 
 /// Turns key taps into edits on the host document and keeps the shift state, page and suggestion strip current.
 /// It reads the document only through `TypingDocument`, never reads a secure field, and reports each finished
-/// word to `completionHandler` so autocorrect can be added without changing the key handling.
+/// word to `completionHandler`, which is where autocorrect runs.
 @MainActor
 final class TypingEngine {
     private let document: TypingDocument
@@ -382,7 +391,7 @@ final class TypingEngine {
         let typed = TypingWordExtractor.withoutLeadingJoiners(typedWord)
         guard let diagnostics, !typed.isEmpty, completionHandler?.isCorrecting == true else { return }
         diagnostics.note(TypingAutocorrectDiagnostic(
-            reason: .proxyMismatch, boundary: TypingAutocorrectDiagnostic.boundaryName(boundary),
+            reason: .proxyMismatch, boundary: boundary.name,
             wordLength: typed.count, completionsEmpty: nil, traits: state.traits
         ))
     }

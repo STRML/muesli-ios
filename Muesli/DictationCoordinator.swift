@@ -4032,7 +4032,7 @@ final class DictationCoordinator {
     }
 
     func setKeyboardLayout(_ layout: KeyboardLayout) {
-        UserDefaults.standard.set(layout.storedValue, forKey: MuesliPreferences.keyboardLayoutKey)
+        UserDefaults.standard.set(layout.rawValue, forKey: MuesliPreferences.keyboardLayoutKey)
         publishKeyboardTypingSettings()
     }
 

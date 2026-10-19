@@ -132,10 +132,7 @@ final class TypingSuggestionBuilder: TypingSuggestionSource {
         guard !word.isEmpty, !word.contains("'"), !word.contains("\u{2019}"),
               !lexicon.contains(where: { $0.userInput.lowercased() == lowered })
         else { return [] }
-        let available = checker?.availableLanguages ?? resolvedChecker().availableLanguages
-        guard let language = TypingLanguageResolver.resolve(candidates: languageCandidates(), available: available) else {
-            return []
-        }
+        guard let language = resolvedLanguage() else { return [] }
         var candidates: [String] = []
         if TypingLanguageResolver.baseCode(of: language) == "en", let contraction = TypingContractions.correction(for: word) {
             candidates.append(contraction)
@@ -162,10 +159,7 @@ final class TypingSuggestionBuilder: TypingSuggestionSource {
     }
 
     private func checkerSuggestions(for partial: String) -> [TypingSuggestion] {
-        let available = checker?.availableLanguages ?? resolvedChecker().availableLanguages
-        guard let language = TypingLanguageResolver.resolve(candidates: languageCandidates(), available: available) else {
-            return []
-        }
+        guard let language = resolvedLanguage() else { return [] }
         let checker = resolvedChecker()
         let completions = checker.completions(forPartial: partial, language: language)
             .map { TypingSuggestion(text: matchCase($0, to: partial), kind: .completion) }
@@ -175,6 +169,13 @@ final class TypingSuggestionBuilder: TypingSuggestionSource {
         // Best guess and best completion first: "offi" should offer "office", not only five near-misses.
         return [TypingSuggestion(text: partial, kind: .verbatim)]
             + guesses.prefix(1) + completions.prefix(1) + guesses.dropFirst() + completions.dropFirst()
+    }
+
+    /// The checker's dictionary for the first language the keyboard can use, or nil when it has none. Asks an
+    /// existing checker first, so a keyboard that never shows a word never makes one.
+    private func resolvedLanguage() -> String? {
+        let available = checker?.availableLanguages ?? resolvedChecker().availableLanguages
+        return TypingLanguageResolver.resolve(candidates: languageCandidates(), available: available)
     }
 
     private func resolvedChecker() -> TypingSpellChecking {

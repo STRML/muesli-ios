@@ -1,6 +1,6 @@
 import Foundation
 
-/// A replacement that the next backspace takes back (phase 2: autocorrect). Right after the replacement the
+/// A replacement that the next backspace takes back (an autocorrect, or an alternative tapped in the strip). Right after the replacement the
 /// document ends with `insertedText` (the new word and the boundary that followed it); undoing deletes that and
 /// types `replacedText` again, which is exactly what the user had typed: the original word and the same space,
 /// punctuation or line break after it.

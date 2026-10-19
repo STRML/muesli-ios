@@ -13,7 +13,7 @@ struct SettingsView: View {
     @AppStorage(MuesliPreferences.liveActivitiesForMeetingsKey) var liveActivitiesForMeetings = true
     @AppStorage(MuesliPreferences.liveActivitiesForKeyboardMicKey) var liveActivitiesForKeyboardMic = KeyboardMicCardPolicy.keyboardMicSwitchDefault
     @AppStorage(MuesliPreferences.keyboardSessionModeKey) var keyboardSessionMode = true
-    @AppStorage(MuesliPreferences.keyboardLayoutKey) var keyboardLayout = KeyboardLayout.fallback.storedValue
+    @AppStorage(MuesliPreferences.keyboardLayoutKey) var keyboardLayout = KeyboardLayout.fallback.rawValue
     @AppStorage(MuesliPreferences.keyboardAutocorrectKey) var keyboardAutocorrect = true
     @AppStorage(MuesliPreferences.keyboardLiveTypingKey) var keyboardLiveTyping = true
     @AppStorage(MuesliPreferences.keyboardDictatePanelWhileRecordingKey) var keyboardDictatePanelWhileRecording = false

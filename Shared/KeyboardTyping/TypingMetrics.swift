@@ -22,8 +22,9 @@ enum TypingMetrics {
 }
 
 /// The two pages the keyboard switches between. The choice itself lives on the controller so a keyboard that is
-/// reopened, and its launch snapshot, come up on the page it was left on.
-enum TypingSurface: Sendable, Equatable {
+/// reopened, and its launch snapshot, come up on the page it was left on. The raw values are what the keyboard
+/// writes to its own defaults, so cases keep their names: a later build may read what an older one wrote.
+enum TypingSurface: String, Sendable, Equatable {
     case type
     case dictate
 
@@ -88,9 +89,9 @@ enum TypingRecordKey {
     }
 }
 
-/// The way back to the old keyboard page while the Type page is being built out: holding the Record key for
-/// three seconds. This is the tracker for one press. The view feeds it touch events and a timer; it decides
-/// whether the hold counts, and whether the release afterwards is a tap.
+/// The way from the Type page to the Dictate page: holding the Record key for three seconds. This is the
+/// tracker for one press. The view feeds it touch events and a timer; it decides whether the hold counts, and
+/// whether the release afterwards is a tap.
 struct TypingRecordHold: Sendable, Equatable {
     /// How long the key must be held.
     static let duration: TimeInterval = 3.0

@@ -56,7 +56,7 @@ struct KeyboardRootView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
     }
 
-    /// The original dictation panel: Start, Model and Quill, status, live preview and helper keys. It fills the
+    /// The Dictate page: Start, Model and Quill, status, live preview and helper keys. It fills the
     /// shared height, so the helper keys take whatever the taller Type page leaves them.
     private var dictatePage: some View {
         VStack(spacing: 5) {
@@ -387,14 +387,14 @@ struct KeyboardRootView: View {
 
                 // Minimal has no typing keyboard to go back to; the space key takes the width.
                 if controller.layout.offersTypePage {
-                    KeyboardTextKey("ABC") { controller.showTypePage() }
+                    KeyboardTextKey("ABC", fontSize: 16) { controller.showTypePage() }
                         .frame(maxWidth: 66)
                         .accessibilityHint("Back to the typing keyboard")
                 }
 
-                KeyboardTextKey("space") { controller.insertSpace() }
+                KeyboardTextKey("space", fontSize: 15) { controller.insertSpace() }
 
-                KeyboardTextKey("return") { controller.insertReturn() }
+                KeyboardTextKey("return", fontSize: 15) { controller.insertReturn() }
                     .frame(maxWidth: 96)
 
                 KeyboardTextKey(":") { controller.insertTextKey(":") }
@@ -493,67 +493,24 @@ extension View {
     }
 }
 
-private struct KeyboardIconKey: View {
-    let systemImage: String
-    let accessibilityLabel: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            KeyboardIconLabel(systemImage: systemImage)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(accessibilityLabel)
-    }
-}
-
-private struct KeyboardIconLabel: View {
-    let systemImage: String
-
-    var body: some View {
-        Image(systemName: systemImage)
-            .font(.system(size: 17, weight: .semibold))
-            .foregroundStyle(MuesliTheme.textPrimary)
-            .frame(width: 34, height: 34)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(MuesliTheme.surfacePrimary.opacity(0.76))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(MuesliTheme.surfaceBorder, lineWidth: 1)
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-}
-
 private struct KeyboardTextKey: View {
-    let title: String?
-    let systemImage: String?
-    let accessibilityLabel: String?
+    let title: String
+    let fontSize: CGFloat
     let action: () -> Void
 
-    init(_ title: String, action: @escaping () -> Void) {
+    init(_ title: String, fontSize: CGFloat = 22, action: @escaping () -> Void) {
         self.title = title
-        self.systemImage = nil
-        self.accessibilityLabel = title
-        self.action = action
-    }
-
-    init(systemImage: String, accessibilityLabel: String, action: @escaping () -> Void) {
-        self.title = nil
-        self.systemImage = systemImage
-        self.accessibilityLabel = accessibilityLabel
+        self.fontSize = fontSize
         self.action = action
     }
 
     var body: some View {
         Button(action: action) {
-            KeyboardTextKeyLabel(title: title, systemImage: systemImage)
+            KeyboardTextKeyLabel(title: title, systemImage: nil, fontSize: fontSize)
         }
         .buttonStyle(.plain)
         .muesliKeyboardKeySurface()
-        .accessibilityLabel(accessibilityLabel ?? title ?? systemImage ?? "")
+        .accessibilityLabel(title)
     }
 }
 
@@ -573,6 +530,7 @@ private struct KeyboardRepeatingTextKey: View {
 private struct KeyboardTextKeyLabel: View {
     var title: String?
     var systemImage: String?
+    var fontSize: CGFloat = 22
 
     var body: some View {
         Group {
@@ -581,7 +539,7 @@ private struct KeyboardTextKeyLabel: View {
                     .font(.system(size: 23, weight: .semibold))
             } else {
                 Text(title ?? "")
-                    .font(.system(size: textSize, weight: .medium))
+                    .font(.system(size: fontSize, weight: .medium))
                     .minimumScaleFactor(0.8)
             }
         }
@@ -590,17 +548,6 @@ private struct KeyboardTextKeyLabel: View {
         .frame(minHeight: 38, maxHeight: .infinity)
         .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
-
-    private var textSize: CGFloat {
-        switch title {
-        case "space", "return":
-            15
-        case "ABC":
-            16
-        default:
-            22
-        }
-    }
 }
 
 private extension View {
@@ -608,8 +555,8 @@ private extension View {
         modifier(MuesliKeyboardDeckSurfaceModifier())
     }
 
-    func muesliKeyboardKeySurface(tint: Color? = nil) -> some View {
-        modifier(MuesliKeyboardKeySurfaceModifier(tint: tint))
+    func muesliKeyboardKeySurface() -> some View {
+        modifier(MuesliKeyboardKeySurfaceModifier())
     }
 }
 
@@ -637,18 +584,15 @@ private struct MuesliKeyboardDeckSurfaceModifier: ViewModifier {
 }
 
 private struct MuesliKeyboardKeySurfaceModifier: ViewModifier {
-    let tint: Color?
-
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
-        let keyTint = tint ?? Color.white
 
         content
             .background {
                 shape.fill(.ultraThinMaterial)
-                shape.fill(keyTint.opacity(tint == nil ? 0.035 : 0.10))
+                shape.fill(Color.white.opacity(0.035))
             }
-            .overlay(shape.strokeBorder(keyTint.opacity(tint == nil ? 0.10 : 0.22), lineWidth: 1))
+            .overlay(shape.strokeBorder(Color.white.opacity(0.10), lineWidth: 1))
             .shadow(color: Color(hex: 0x02060C).opacity(0.28), radius: 4, x: 0, y: 2)
             .contentShape(shape)
     }

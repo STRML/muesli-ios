@@ -43,7 +43,11 @@ final class KeyboardController {
     /// Tracked separately from `latestHandoffState`, which `refreshLatestDictation`
     /// overwrites before `apply(handoffState:)` runs -- comparing against it
     /// there always says "unchanged".
-    private var lastRecordedHandoff: (requestID: UUID, phase: KeyboardHandoffPhase)?
+    private var lastRecordedHandoff: HandoffMark?
+    private struct HandoffMark: Equatable {
+        let requestID: UUID
+        let phase: KeyboardHandoffPhase
+    }
     private var lastLevelFreshness: Bool?
     private var pendingModelRawValue: String?
     private var hasOpenAccessForSetup = false
@@ -104,7 +108,7 @@ final class KeyboardController {
         didSet {
             // Minimal has no Type page to choose, so it must not overwrite the page Full remembered.
             guard selectedSurface != oldValue, layout.offersTypePage else { return }
-            surfaceDefaults?.set(selectedSurface.storedValue, forKey: Self.selectedSurfaceDefaultsKey)
+            surfaceDefaults?.set(selectedSurface.rawValue, forKey: Self.selectedSurfaceDefaultsKey)
         }
     }
     static let selectedSurfaceDefaultsKey = "keyboard.selectedSurface"
@@ -160,18 +164,22 @@ final class KeyboardController {
     }
 
     private var prepareURL: URL? {
-        var components = URLComponents()
-        components.scheme = MuesliAppConstants.urlScheme
-        components.host = MuesliAppConstants.prepareHost
-        components.queryItems = [URLQueryItem(name: MuesliAppConstants.tripQueryItem, value: prepareTripID.uuidString)]
-        return components.url
+        Self.appURL(
+            host: MuesliAppConstants.prepareHost,
+            queryItems: [URLQueryItem(name: MuesliAppConstants.tripQueryItem, value: prepareTripID.uuidString)]
+        )
     }
 
     /// Opens the app and nothing else, for the way out of a state that has stalled.
     var openAppURL: URL? {
+        Self.appURL(host: MuesliAppConstants.openHost)
+    }
+
+    private static func appURL(host: String, queryItems: [URLQueryItem]? = nil) -> URL? {
         var components = URLComponents()
         components.scheme = MuesliAppConstants.urlScheme
-        components.host = MuesliAppConstants.openHost
+        components.host = host
+        components.queryItems = queryItems
         return components.url
     }
 
@@ -221,8 +229,6 @@ final class KeyboardController {
             : "Proves Keyboard • Full Access still off"
     }
 
-    var showsLiveTranscript: Bool { livePreview != nil }
-
     /// The streaming words shown while recording, dimmed while the final pass runs. Display only: live typing into
     /// the field is `liveTyper`'s job, and only a delivered result is ever handed to `textInserter`. While the words
     /// are being typed into the field the field is the preview, and the strip stays out of the way.
@@ -253,8 +259,6 @@ final class KeyboardController {
             "Stop"
         case .transcribing:
             "Transcribing"
-        case .inserted:
-            "Inserted"
         case .record:
             "Record"
         }
@@ -276,15 +280,9 @@ final class KeyboardController {
             "stop.fill"
         case .transcribing:
             "waveform"
-        case .inserted:
-            "checkmark"
         case .record:
             "mic.fill"
         }
-    }
-
-    var stylesPrimaryButtonAsStop: Bool {
-        primaryButtonRole == .stop
     }
 
     var primaryButtonRole: KeyboardPrimaryButtonRole {
@@ -295,7 +293,7 @@ final class KeyboardController {
             return .openMuesliRecovery
         }
 
-        if latestHandoffState.map({ [.stopRequested, .cancelRequested].contains($0.phase) }) == true {
+        if isStopOrCancelRequested {
             return .waitingForMuesli
         }
 
@@ -324,12 +322,8 @@ final class KeyboardController {
         guard !isConnectionLost else { return false }
         return isBlockedByAppVoiceNote || recoveryRequestID == nil && (
             dictationPhase == .transcribing
-            || latestHandoffState.map({ [.stopRequested, .cancelRequested].contains($0.phase) }) == true
+            || isStopOrCancelRequested
         )
-    }
-
-    var canInsertLatest: Bool {
-        hasLatestDictation && activeRequestID == nil
     }
 
     var canUndoRewrite: Bool { lastRewrite != nil }
@@ -360,8 +354,17 @@ final class KeyboardController {
     }
 
     var canCancelActiveDictation: Bool {
-        [.requested, .recording, .transcribing].contains(dictationPhase)
-            && !(activeRequestID.map { pendingCancellationIDs.contains($0) } ?? false)
+        showsActiveWaveform && !(activeRequestID.map { pendingCancellationIDs.contains($0) } ?? false)
+    }
+
+    /// What the status line says when nothing is happening.
+    private var idleStatusText: String { hasLatestDictation ? "Latest ready" : "Ready" }
+
+    /// The active request's first eight characters for the diagnostics log, or "none".
+    private var activeShortID: String { activeRequestID?.shortLogID ?? "none" }
+
+    private var isStopOrCancelRequested: Bool {
+        latestHandoffState.map { [.stopRequested, .cancelRequested].contains($0.phase) } == true
     }
 
     private var isStopPending: Bool {
@@ -425,10 +428,7 @@ final class KeyboardController {
     }
 
     var settingsURL: URL? {
-        var components = URLComponents()
-        components.scheme = MuesliAppConstants.urlScheme
-        components.host = MuesliAppConstants.settingsHost
-        return components.url
+        Self.appURL(host: MuesliAppConstants.settingsHost)
     }
 
     private var isIdleForPrimaryButton: Bool {
@@ -629,7 +629,7 @@ final class KeyboardController {
     private func stopActiveDictation() {
         guard let activeRequestID else {
             dictationPhase = .idle
-            statusText = hasLatestDictation ? "Latest ready" : "Ready"
+            statusText = idleStatusText
             prepareLaunchRequestIfNeeded()
             return
         }
@@ -637,7 +637,7 @@ final class KeyboardController {
 
         MuesliHaptics.dictationStop()
         KeyboardDiagnosticsLog.record("intent.stop", [
-            "request": String(activeRequestID.uuidString.prefix(8).lowercased()),
+            "request": activeRequestID.shortLogID,
             "localPhase": dictationPhase.rawValue
         ])
         do {
@@ -737,7 +737,7 @@ final class KeyboardController {
         guard let activeRequestID else {
             dictationPhase = .idle
             liveTranscript = ""
-            statusText = hasLatestDictation ? "Latest ready" : "Ready"
+            statusText = idleStatusText
             prepareLaunchRequestIfNeeded()
             return
         }
@@ -787,11 +787,6 @@ final class KeyboardController {
         latestHandoffState = .init(requestID: requestID, phase: .cancelled, message: "Cancelled", ownerBootID: owner, endReason: AbandonReason.ownerLost.rawValue)
         releaseLocalRequest(requestID)
         readinessModel.setRequest(.notInProgress)
-    }
-
-    private func hasPendingCancelCommand() -> Bool {
-        guard let command = try? store.pendingCommand(), command.action == .cancel else { return false }
-        return cancelledRequestIDs.contains(command.requestID)
     }
 
     func prepareInitialPresentationState() {
@@ -899,7 +894,7 @@ final class KeyboardController {
 
         KeyboardDiagnosticsLog.record("keyboard.disappeared", [
             "localPhase": dictationPhase.rawValue,
-            "active": activeRequestID?.uuidString.prefix(8).lowercased() ?? "none"
+            "active": activeShortID
         ])
         eventObservationTask?.cancel()
         eventObservationTask = nil
@@ -1115,7 +1110,7 @@ final class KeyboardController {
                 liveTranscript = ""
                 dictationPhase = .idle
                 inputLevel = 0
-                statusText = hasLatestDictation ? "Latest ready" : "Ready"
+                statusText = idleStatusText
             }
             return
         }
@@ -1145,7 +1140,7 @@ final class KeyboardController {
             activeRequestID = nil
             liveTranscript = ""
             inputLevel = 0
-            statusText = hasLatestDictation ? "Latest ready" : "Ready"
+            statusText = idleStatusText
         case .startRequested:
             dictationPhase = .requested
             statusText = handoffState.message ?? "Starting"
@@ -1206,7 +1201,7 @@ final class KeyboardController {
             liveTranscript = ""
             inputLevel = 0
             statusText = endedByAbandon
-                ? (hasLatestDictation ? "Latest ready" : "Ready")
+                ? idleStatusText
                 : (handoffState.message ?? "Voice note failed")
         case .cancelled:
             cancelledRequestIDs.insert(requestID)
@@ -1215,18 +1210,19 @@ final class KeyboardController {
             recoveryRequestID = nil
             liveTranscript = ""
             inputLevel = 0
-            statusText = hasLatestDictation ? "Latest ready" : "Ready"
+            statusText = idleStatusText
         }
     }
 
     /// The handoff record is written by both processes with no ordering guarantee, so record what arrived and what
-    /// we were already showing. A phase that moves backwards is visible here and nowhere else. The keyboard is
-    /// rebuilt constantly and each new instance used to log the row it found again, so the store remembers the
-    /// last one logged.
+    /// we were already showing. A phase that moves backwards is visible here and nowhere else. iOS rebuilds the
+    /// keyboard constantly, so the store remembers the last row logged and a new instance does not log the one it
+    /// finds again.
     private func recordObservedHandoff(_ handoffState: KeyboardHandoffState, requestID: UUID) {
-        guard lastRecordedHandoff?.phase != handoffState.phase || lastRecordedHandoff?.requestID != requestID else { return }
-        lastRecordedHandoff = (requestID, handoffState.phase)
-        let shortID = requestID.uuidString.prefix(8).lowercased()
+        let mark = HandoffMark(requestID: requestID, phase: handoffState.phase)
+        guard lastRecordedHandoff != mark else { return }
+        lastRecordedHandoff = mark
+        let shortID = requestID.shortLogID
         guard (try? store.noteLogged(topic: "handoff.observed", value: "\(shortID).\(handoffState.phase.rawValue)")) ?? true else {
             return
         }
@@ -1234,7 +1230,7 @@ final class KeyboardController {
             "phase": handoffState.phase.rawValue,
             "request": shortID,
             "localPhase": dictationPhase.rawValue,
-            "active": activeRequestID?.uuidString.prefix(8).lowercased() ?? "none",
+            "active": activeShortID,
             "inserted": insertedRequestIDs.contains(requestID) ? "yes" : "no"
         ]
         if handoffState.phase == .failed, let message = handoffState.message {
@@ -1245,22 +1241,12 @@ final class KeyboardController {
 
     private func apply(runtimeStatus: KeyboardRuntimeStatus?) {
         let now = Date()
-        // The waveform draws live microphone input. It needs two facts and no
-        // bookkeeping: the app is recording, and a level arrived recently.
-        //
-        // This used to also require the level to name the request this keyboard
-        // had adopted. That match was added when the waveform was first switched
-        // on, not in response to any bug, and it caused one: iOS destroys and
-        // rebuilds the keyboard constantly, and a rebuilt one has adopted
-        // nothing, so levels milliseconds old were thrown away and every bar
-        // collapsed to zero while the pill still said "Listening".
-        //
-        // It is not what stops the keyboard rendering an in-app voice note's
-        // audio either. A recording the keyboard does not own blocks it
-        // outright and hides the waveform card -- see applyAppVoiceNoteOwnership.
-        //
-        // The freshness rule stays: when levels stop arriving the bars settle
-        // rather than freezing on the last sample.
+        // The waveform draws live microphone input and needs two facts: the app is recording, and a level
+        // arrived in the last two seconds. The level does not have to name the request this keyboard adopted:
+        // iOS rebuilds the keyboard constantly and a rebuilt one has adopted nothing, so every bar would
+        // collapse to zero while the pill still said "Listening". A recording the keyboard does not own is
+        // blocked in applyAppVoiceNoteOwnership, which hides the waveform card. When levels stop arriving the
+        // bars settle to zero instead of freezing on the last sample.
         let hasFreshRecordingLevel = runtimeStatus.map {
             $0.phase == .recording && now.timeIntervalSince($0.updatedAt) < 2
         } ?? false
@@ -1359,13 +1345,12 @@ final class KeyboardController {
         case .finished:
             recoveryRequestID = nil
             dictationPhase = .finished
-            break
         case .idle:
             recoveryRequestID = nil
             dictationPhase = .idle
             activeRequestID = nil
             liveTranscript = ""
-            statusText = hasLatestDictation ? "Latest ready" : "Ready"
+            statusText = idleStatusText
         }
     }
 
@@ -1415,7 +1400,7 @@ final class KeyboardController {
               !isCancelPending,
               !cancelledRequestIDs.contains(transcript.requestID),
               !insertedRequestIDs.contains(transcript.requestID),
-              [.requested, .recording, .transcribing].contains(dictationPhase)
+              showsActiveWaveform
         else { return }
         liveTyper.receive(
             partial: transcript.text,
@@ -1476,7 +1461,7 @@ final class KeyboardController {
 
     private func logAbandoned(_ requestID: UUID, reason: AbandonReason, phase: KeyboardHandoffPhase, owner: UUID?) {
         var detail = [
-            "request": String(requestID.uuidString.prefix(8).lowercased()),
+            "request": requestID.shortLogID,
             "reason": reason.rawValue,
             "phase": phase.rawValue,
         ]
@@ -1493,7 +1478,7 @@ final class KeyboardController {
         liveTranscript = ""
         inputLevel = 0
         dictationPhase = .idle
-        statusText = hasLatestDictation ? "Latest ready" : "Ready"
+        statusText = idleStatusText
         prepareLaunchRequestIfNeeded()
     }
 
@@ -1584,23 +1569,23 @@ final class KeyboardController {
         guard textInserter != nil, !pendingCancellationIDs.contains(result.requestID) else { return }
         // Only an explicit resultReady handoff queues automatic insertion.
         // Capture source does not determine whether the keyboard may deliver it.
-        let shortID = result.requestID.uuidString.prefix(8).lowercased()
+        let shortID = result.requestID.shortLogID
 
         guard !insertedRequestIDs.contains(result.requestID) else {
             try? store.acknowledgeKeyboardDelivery(for: result.requestID)
             reconcileInsertedRequest(result.requestID)
             KeyboardDiagnosticsLog.record("insert.skipped", [
                 "reason": "alreadyInserted",
-                "request": String(shortID),
+                "request": shortID,
                 "localPhase": dictationPhase.rawValue,
-                "active": activeRequestID?.uuidString.prefix(8).lowercased() ?? "none"
+                "active": activeShortID
             ])
             return
         }
         guard !cancelledRequestIDs.contains(result.requestID) else {
             KeyboardDiagnosticsLog.record("insert.skipped", [
                 "reason": "cancelled",
-                "request": String(shortID),
+                "request": shortID,
                 "localPhase": dictationPhase.rawValue
             ])
             return
@@ -1608,7 +1593,7 @@ final class KeyboardController {
 
         // Character count only -- never the text itself.
         KeyboardDiagnosticsLog.record("insert.performed", [
-            "request": String(shortID),
+            "request": shortID,
             "characters": String(result.text.count)
         ])
         deliveryNote = nil
@@ -1653,7 +1638,7 @@ final class KeyboardController {
             // the only way to detect a missed intent is to re-post and wait.
             KeyboardDiagnosticsLog.record("ack.retry", [
                 "action": action.rawValue,
-                "request": String(requestID.uuidString.prefix(8).lowercased()),
+                "request": requestID.shortLogID,
                 "waited": "750ms"
             ])
             eventBus.post(.commandChanged)
@@ -1667,23 +1652,16 @@ final class KeyboardController {
             // this intent. Usually it is not running.
             KeyboardDiagnosticsLog.record("ack.timedOut", [
                 "action": action.rawValue,
-                "request": String(requestID.uuidString.prefix(8).lowercased()),
+                "request": requestID.shortLogID,
                 "waited": "2000ms",
                 "escalation": "recoveryRequested"
             ])
 
-            let urlAction: String
             let message: String
             switch action {
-            case .start:
-                urlAction = MuesliAppConstants.startAction
-                message = "Open Muesli to start"
-            case .stop:
-                urlAction = MuesliAppConstants.stopAction
-                message = "Open Muesli to finish"
-            case .cancel:
-                urlAction = MuesliAppConstants.cancelAction
-                message = "Open Muesli to cancel"
+            case .start: message = "Open Muesli to start"
+            case .stop: message = "Open Muesli to finish"
+            case .cancel: message = "Open Muesli to cancel"
             }
             let recovery = KeyboardHandoffState(
                 requestID: requestID,
@@ -1699,7 +1677,7 @@ final class KeyboardController {
             self.recoveryRequestID = requestID
             self.activeRequestID = nil
             self.dictationPhase = .failed
-            self.launchURL = self.makeLaunchURL(for: requestID, action: urlAction)
+            self.launchURL = self.makeLaunchURL(for: requestID, action: self.urlAction(for: action))
             self.statusText = message
         }
     }
@@ -1728,15 +1706,13 @@ final class KeyboardController {
     }
 
     private func makeLaunchURL(for requestID: UUID, action: String) -> URL? {
-        var components = URLComponents()
-        components.scheme = MuesliAppConstants.urlScheme
-        components.host = MuesliAppConstants.dictateHost
-        components.queryItems = [
-            URLQueryItem(name: MuesliAppConstants.requestQueryItem, value: requestID.uuidString),
-            URLQueryItem(name: MuesliAppConstants.actionQueryItem, value: action)
-        ]
-
-        return components.url
+        Self.appURL(
+            host: MuesliAppConstants.dictateHost,
+            queryItems: [
+                URLQueryItem(name: MuesliAppConstants.requestQueryItem, value: requestID.uuidString),
+                URLQueryItem(name: MuesliAppConstants.actionQueryItem, value: action)
+            ]
+        )
     }
 
     /// Puts back the text the last rewrite replaced, if the field still ends with the rewrite.
@@ -1794,7 +1770,7 @@ final class KeyboardController {
             insertDictatedText(text)
         case .withheld(let reason):
             deliveryNote = Self.keptWordsMessage
-            KeyboardDiagnosticsLog.record("live_typing.final_withheld", ["reason": reason])
+            KeyboardDiagnosticsLog.record("live_typing.final_withheld", ["reason": reason.rawValue])
         }
     }
 
@@ -1812,7 +1788,7 @@ final class KeyboardController {
     /// (`appliesLayout`), before its first frame, so a change in Settings never re-lays out a keyboard under
     /// the user's thumbs; it shows the next time the keyboard opens.
     func loadTypingSettings(appliesLayout: Bool = false) {
-        let settings = ((try? store.keyboardTypingSettings()) ?? nil) ?? .default
+        let settings = (try? store.keyboardTypingSettings()) ?? .default
         typing.autocorrectEnabled = settings.autocorrect
         liveTyper.isEnabled = settings.liveTyping
         showsDictatePanelWhileRecording = settings.showsDictatePanelWhileRecording
@@ -1842,8 +1818,12 @@ enum KeyboardPrimaryButtonRole {
     case openMuesliRequested
     case stop
     case transcribing
-    case inserted
     case record
+}
+
+private extension UUID {
+    /// The first eight characters, lowercased: enough to tell requests apart in the diagnostics log.
+    var shortLogID: String { String(uuidString.prefix(8).lowercased()) }
 }
 
 /// What a voice rewrite replaced: enough to put the original back.
