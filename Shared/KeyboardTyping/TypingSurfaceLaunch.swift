@@ -1,23 +1,6 @@
 import Foundation
 
 extension TypingSurface {
-    /// What the keyboard writes to its own defaults. Stable: a later build may read what an older one wrote.
-    var storedValue: String {
-        switch self {
-        case .type: "type"
-        case .dictate: "dictate"
-        }
-    }
-
-    /// Nil for a value this build does not know (corrupted, or written by a newer build).
-    init?(storedValue: String) {
-        switch storedValue {
-        case "type": self = .type
-        case "dictate": self = .dictate
-        default: return nil
-        }
-    }
-
     /// The page chosen when the keyboard opens: the remembered one (Type when there is none or it is unreadable),
     /// then the same rule as every later render, so setup verification still forces Dictate.
     static func atLaunch(
@@ -28,7 +11,7 @@ extension TypingSurface {
     ) -> TypingSurface {
         resolve(
             layout: layout,
-            selected: stored.flatMap(TypingSurface.init(storedValue:)) ?? .type,
+            selected: stored.flatMap(TypingSurface.init(rawValue:)) ?? .type,
             hasPendingSetupVerification: hasPendingSetupVerification,
             phase: phase,
             holdsTypePage: false

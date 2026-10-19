@@ -17,10 +17,10 @@ final class KeyboardLayoutTests: XCTestCase {
     // L2
     func testStoredValuesRoundTrip() {
         for layout in KeyboardLayout.allCases {
-            XCTAssertEqual(KeyboardLayout(storedValue: layout.storedValue), layout)
+            XCTAssertEqual(KeyboardLayout(rawValue: layout.rawValue), layout)
         }
-        XCTAssertEqual(KeyboardLayout.full.storedValue, "full")
-        XCTAssertEqual(KeyboardLayout.minimal.storedValue, "minimal")
+        XCTAssertEqual(KeyboardLayout.full.rawValue, "full")
+        XCTAssertEqual(KeyboardLayout.minimal.rawValue, "minimal")
     }
 
     // L3: a build from before the setting stored no layout. Reading that keeps the other two choices.

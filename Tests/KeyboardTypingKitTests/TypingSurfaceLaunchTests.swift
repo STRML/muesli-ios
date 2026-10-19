@@ -94,9 +94,11 @@ final class TypingSurfaceLaunchTests: XCTestCase {
 
     func testStoredValuesRoundTrip() {
         for surface in [TypingSurface.type, .dictate] {
-            XCTAssertEqual(TypingSurface(storedValue: surface.storedValue), surface)
+            XCTAssertEqual(TypingSurface(rawValue: surface.rawValue), surface)
         }
-        XCTAssertNil(TypingSurface(storedValue: "nope"))
+        XCTAssertEqual(TypingSurface.type.rawValue, "type")
+        XCTAssertEqual(TypingSurface.dictate.rawValue, "dictate")
+        XCTAssertNil(TypingSurface(rawValue: "nope"))
     }
 }
 

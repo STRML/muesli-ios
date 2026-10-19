@@ -114,9 +114,9 @@ extension SettingsView {
 
     var keyboardLayoutBinding: Binding<KeyboardLayout> {
         Binding(
-            get: { KeyboardLayout(storedValue: keyboardLayout) ?? .fallback },
+            get: { KeyboardLayout(rawValue: keyboardLayout) ?? .fallback },
             set: { layout in
-                keyboardLayout = layout.storedValue
+                keyboardLayout = layout.rawValue
                 coordinator.setKeyboardLayout(layout)
             }
         )

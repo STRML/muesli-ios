@@ -38,7 +38,7 @@ struct KeyboardTypingSettings: Codable, Sendable, Equatable {
         liveTyping = try container.decodeIfPresent(Bool.self, forKey: .liveTyping) ?? true
         // Only the layout read may fail quietly: a wrong type there must not cost the user their other two choices.
         layout = (try? container.decodeIfPresent(String.self, forKey: .layout))
-            .flatMap(KeyboardLayout.init(storedValue:)) ?? .fallback
+            .flatMap(KeyboardLayout.init(rawValue:)) ?? .fallback
         showsDictatePanelWhileRecording = (try? container.decodeIfPresent(Bool.self, forKey: .showsDictatePanelWhileRecording))
             .flatMap { $0 } ?? false
     }
@@ -47,7 +47,7 @@ struct KeyboardTypingSettings: Codable, Sendable, Equatable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(autocorrect, forKey: .autocorrect)
         try container.encode(liveTyping, forKey: .liveTyping)
-        try container.encode(layout.storedValue, forKey: .layout)
+        try container.encode(layout.rawValue, forKey: .layout)
         try container.encode(showsDictatePanelWhileRecording, forKey: .showsDictatePanelWhileRecording)
     }
 }

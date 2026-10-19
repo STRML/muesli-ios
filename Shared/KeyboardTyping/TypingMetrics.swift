@@ -22,8 +22,9 @@ enum TypingMetrics {
 }
 
 /// The two pages the keyboard switches between. The choice itself lives on the controller so a keyboard that is
-/// reopened, and its launch snapshot, come up on the page it was left on.
-enum TypingSurface: Sendable, Equatable {
+/// reopened, and its launch snapshot, come up on the page it was left on. The raw values are what the keyboard
+/// writes to its own defaults, so cases keep their names: a later build may read what an older one wrote.
+enum TypingSurface: String, Sendable, Equatable {
     case type
     case dictate
 

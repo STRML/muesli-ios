@@ -104,7 +104,7 @@ final class KeyboardController {
         didSet {
             // Minimal has no Type page to choose, so it must not overwrite the page Full remembered.
             guard selectedSurface != oldValue, layout.offersTypePage else { return }
-            surfaceDefaults?.set(selectedSurface.storedValue, forKey: Self.selectedSurfaceDefaultsKey)
+            surfaceDefaults?.set(selectedSurface.rawValue, forKey: Self.selectedSurfaceDefaultsKey)
         }
     }
     static let selectedSurfaceDefaultsKey = "keyboard.selectedSurface"
