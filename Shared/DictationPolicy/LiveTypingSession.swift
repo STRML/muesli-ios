@@ -203,6 +203,11 @@ struct LiveTypingSession: Sendable {
             last = index
             next = index + 1
         }
+        // The deleted word comes right after the last word the user kept, unless the engine put new words between
+        // them: look a little further for it before assuming it is next.
+        let slot = last + 1
+        let window = slot...min(slot + Self.deletedWordWindow, max(slot, words.count - 1))
+        if slot < words.count, let found = window.first(where: { words[$0] == edit.deleted }) { return found + 1 }
         return last + 2
     }
 
