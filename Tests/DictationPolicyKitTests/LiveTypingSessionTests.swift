@@ -790,4 +790,104 @@ final class LiveTypingSessionTests: XCTestCase {
         let result = h.session.final("Totally different text.", snapshot: h.host.snapshot())
         XCTAssertEqual(result.outcome, .withheld(.committed))
     }
+
+    // MARK: Backspace against revised partials, generated
+
+    private struct SplitMix64: RandomNumberGenerator {
+        var state: UInt64
+
+        mutating func next() -> UInt64 {
+            state &+= 0x9E37_79B9_7F4A_7C15
+            var z = state
+            z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+            z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+            return z ^ (z >> 31)
+        }
+    }
+
+    /// Forty distinct words, so a word the user deleted can only come back by being matched wrongly, never by
+    /// being dictated again.
+    private static let fuzzVocabulary = [
+        "alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india", "juliet",
+        "kilo", "lima", "mike", "november", "oscar", "papa", "quebec", "romeo", "sierra", "tango",
+        "uniform", "victor", "whiskey", "xray", "yankee", "zulu", "amber", "birch", "cedar", "dune",
+        "ember", "fjord", "grove", "harbor", "island", "jungle", "kernel", "lagoon", "meadow", "nectar",
+    ]
+
+    /// One generated dictation: the user dictates 3 to 6 words, deletes the last, and the engine then revises
+    /// what it said before and keeps going. Returns what went wrong, or nil.
+    ///
+    /// A "matched" revision keeps every word the user left, in order, and may add a word anywhere before the
+    /// deleted slot (and change their case). An "unmatched" one also replaces or drops one of them, so the words before the
+    /// deleted slot cannot all be found. Either way the deleted word must not come back and no word after the
+    /// deleted slot may be lost.
+    private func backspaceFuzzFailure(seed: UInt64, unmatched: Bool) -> String? {
+        var rng = SplitMix64(state: seed)
+        var pool = Self.fuzzVocabulary.shuffled(using: &rng)
+        func fresh() -> String { pool.removeLast() }
+        let count = Int.random(in: 3...6, using: &rng)
+        let stream = (0..<count).map { _ in fresh() }
+        let deleted = stream[count - 1]
+        let prefix = Array(stream.dropLast())
+
+        let h = Harness()
+        h.partial(stream.joined(separator: " "))
+        h.settle()
+        guard h.session.phase == .live, backspace(h) else { return "seed \(seed): could not delete the last word" }
+
+        var shown: [(word: String, isUsers: Bool)] = prefix.map { (Bool.random(using: &rng) ? $0.capitalized : $0, true) }
+        if Bool.random(using: &rng) {
+            shown.insert((fresh(), false), at: Int.random(in: 0...prefix.count, using: &rng))
+        }
+        if unmatched {
+            // Only a word the user left can go missing from the revision.
+            let index = Int.random(in: 0..<prefix.count, using: &rng)
+            let at = shown.indices.filter { shown[$0].isUsers }[index]
+            if Bool.random(using: &rng) { shown[at] = (fresh(), false) } else { shown.remove(at: at) }
+        }
+        let shownWords = shown.map(\.word)
+        let expectedPrefix = unmatched ? shownWords.map { LiveTypingText.folded($0) } : prefix
+
+        var tail: [String] = []
+        var lastPartial = ""
+        for _ in 0..<Int.random(in: 1...3, using: &rng) {
+            tail.append(fresh())
+            lastPartial = (shownWords + [deleted] + tail).joined(separator: " ")
+            h.partial(lastPartial)
+            h.settle()
+            let words = LiveTypingText.foldedWords(h.host.document)
+            let expected = ["hello"] + expectedPrefix + tail
+            guard words == expected, h.session.phase == .live else {
+                return "seed \(seed): after \"\(lastPartial)\" the field read \(words), expected \(expected), phase \(h.session.phase)"
+            }
+        }
+
+        let final = lastPartial.prefix(1).uppercased() + lastPartial.dropFirst() + "."
+        let result = h.session.final(final, snapshot: h.host.snapshot())
+        h.host.perform(result.commands)
+        let words = LiveTypingText.foldedWords(h.host.document)
+        let expected = ["hello"] + expectedPrefix + tail
+        guard result.outcome == .replacedInPlace, words == expected else {
+            return "seed \(seed): final \"\(final)\" left \(words) with \(result.outcome), expected \(expected)"
+        }
+        return nil
+    }
+
+    func testARevisionThatAddsAWordRightBeforeTheDeletedOneDoesNotBringItBack() {
+        let h = Harness()
+        h.reachLive(with: "we can leave")
+        XCTAssertTrue(backspace(h))
+        h.partial("we can really leave now")
+        XCTAssertEqual(h.host.document, "Hello we can now", "the deleted word came back")
+    }
+
+    func testGeneratedRevisionsThatKeepTheUsersWordsNeverBringBackTheDeletedWord() {
+        let failures = (0..<500).compactMap { backspaceFuzzFailure(seed: UInt64($0), unmatched: false) }
+        XCTAssertEqual(failures.count, 0, "\(failures.count) of 500 failed, first: \(failures.prefix(5))")
+    }
+
+    func testGeneratedRevisionsThatLoseAWordBeforeTheDeletedOneNeverBringItBackOrLoseANewWord() {
+        let failures = (0..<500).compactMap { backspaceFuzzFailure(seed: UInt64($0), unmatched: true) }
+        XCTAssertEqual(failures.count, 0, "\(failures.count) of 500 failed, first: \(failures.prefix(5))")
+    }
 }
